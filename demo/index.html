@@ -92,6 +92,16 @@ label.f{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:0
 .switch.on::after{left:19px}
 
 /* ---------- setup ---------- */
+.sizes{max-width:880px;margin:24px auto 0;display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.size-opt{border:1.5px solid var(--line);background:#fff;border-radius:var(--r);padding:24px;text-align:left;box-shadow:var(--shadow);transition:.15s;display:flex;flex-direction:column;gap:8px}
+.size-opt:hover{border-color:var(--green);background:var(--green-l)}
+.size-opt .ic{font-size:34px}
+.size-opt b{font-size:18px}
+.size-opt span{color:var(--muted);font-size:13px}
+.size-opt .who{margin-top:auto;padding-top:8px}
+.size-h{max-width:880px;margin:8px auto 0;text-align:center}
+.size-h h2{font-size:22px}
+.size-h p{color:var(--muted);margin:6px 0 0}
 .setup{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,520px);gap:20px;align-items:start}
 .sec{padding:18px 20px;border-bottom:1px solid var(--line)}
 .sec:last-child{border-bottom:0}
@@ -229,7 +239,7 @@ label.f{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:0
   .page{padding:16px}
   .top-in{padding:10px 16px;flex-wrap:wrap}
   .tpls{grid-template-columns:repeat(3,1fr)}
-  .grid2,.grid3{grid-template-columns:1fr}
+  .grid2,.grid3,.sizes{grid-template-columns:1fr}
   .ppl-h{display:none}
   .prow{grid-template-columns:1fr auto;gap:6px}
   .prow>*:nth-child(n+4):not(:last-child){grid-column:1/-1}
@@ -422,7 +432,7 @@ function sequence(persona, strategy, ctx, seed){
 const KEY = 'chongmubot-demo-v1';
 function defaults(){
   return {
-    screen:'start', started:false,
+    screen:'start', started:false, size:null, // size: 모임 규모 'small'(소모임·도총) | 'large'(대모임·채총)
     channel:'가평-mt-2026',
     invited:['me','jy','ms','hw','jm','sj','yj','th','sy','hn'],
     template:'mt', schema:makeSchema('mt'), customDesc:'',
@@ -433,6 +443,7 @@ function defaults(){
 }
 let S;
 try { S = Object.assign(defaults(), JSON.parse(localStorage.getItem(KEY) || 'null') || {}); } catch(e){ S = defaults(); }
+if (S.started && !S.size) S.size = 'small'; // 규모 선택 도입 전 저장된 데모는 소모임으로
 const UI = {pvTab:'sheet', open:null, filter:'all', drawerTab:'issues', parsed:null, editing:false};
 function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e){} }
 
@@ -552,11 +563,57 @@ function renderStart(){
 
 /* ---------- 1) 총무 설정창 ---------- */
 function renderSetup(){
+  if (!S.size) return renderSizePick();
+  if (S.size === 'large') return renderLargeSetup();
+  renderSmallSetup();
+}
+
+/* ---------- 1-0) 모임 규모 선택 ---------- */
+const SIZES = {
+  small:{ic:'🏕️', label:'소모임', desc:'동아리 MT, 팀 회식, 친구 여행처럼 수십 명 이하가 회비를 모으고 함께 쓰는 모임', who:'도총 담당'},
+  large:{ic:'🏢', label:'대모임', desc:'기업 워크숍·연수처럼 인원이 많고, 회비 규칙과 마감 후 변동을 차액으로 정산하는 모임', who:'채총 담당'}
+};
+function renderSizePick(){
+  $('#app').innerHTML = `
+  <header class="top"><div class="top-in">
+    <button class="btn ghost sm" data-act="goStart">← 시작화면</button>
+    <div class="brand"><span class="logo">🐸</span>총무봇 만들기</div>
+  </div></header>
+  <main class="page">
+    <div class="size-h"><h2>어떤 모임의 총무봇을 만들까요?</h2><p>모임 규모에 따라 설정 항목과 대시보드가 달라집니다.</p></div>
+    <div class="sizes">${Object.entries(SIZES).map(([k, z]) => `
+      <button class="size-opt" data-act="pickSize" data-val="${k}">
+        <span class="ic" aria-hidden="true">${z.ic}</span><b>${z.label}</b><span>${z.desc}</span>
+        <span class="who"><span class="tag">${z.who}</span></span>
+      </button>`).join('')}
+    </div>
+  </main>`;
+}
+
+/* =========================================================
+   1-L) 대모임 설정 — 채총 담당 영역 (이 블록 안에서만 작업)
+   ========================================================= */
+function renderLargeSetup(){
+  $('#app').innerHTML = `
+  <header class="top"><div class="top-in">
+    <button class="btn ghost sm" data-act="${S.started ? 'goDash' : 'changeSize'}">← ${S.started ? '대시보드' : '모임 규모'}</button>
+    <div class="brand"><span class="logo">🐸</span>대모임 총무봇 ${S.started ? '설정' : '만들기'}</div>
+  </div></header>
+  <main class="page"><div class="card" style="max-width:880px;margin:24px auto 0">
+    <section class="sec">
+      <div class="sec-h"><span class="n">🏢</span><div><h3>대모임 설정</h3><p>준비 중입니다 (채총 작업 영역).</p></div></div>
+    </section>
+  </div></main>`;
+}
+/* ===================== 대모임 블록 끝 ===================== */
+
+/* ---------- 1-S) 소모임 설정 (도총) ---------- */
+function renderSmallSetup(){
   const s = S, e = s.event, sec = freqSec(s.freq);
   $('#app').innerHTML = `
   <header class="top"><div class="top-in">
-    <button class="btn ghost sm" data-act="${S.started ? 'goDash' : 'goStart'}">← ${S.started ? '대시보드' : '시작화면'}</button>
-    <div class="brand"><span class="logo">🐸</span>총무봇 ${S.started ? '설정' : '만들기'}</div>
+    <button class="btn ghost sm" data-act="${S.started ? 'goDash' : 'changeSize'}">← ${S.started ? '대시보드' : '모임 규모'}</button>
+    <div class="brand"><span class="logo">🐸</span>소모임 총무봇 ${S.started ? '설정' : '만들기'}</div>
     <div class="grow"></div>
     <span class="hitl">HITL 1</span>
     <button class="btn yellow" data-act="confirmStart">${S.started ? '변경 저장' : '확인하고 시작하기'}</button>
@@ -1048,6 +1105,8 @@ document.addEventListener('click', e => {
   switch (a){
     case 'goStart': S.screen = 'start'; closeDrawer(); break;
     case 'goSetup': S.screen = 'setup'; closeDrawer(); window.scrollTo(0, 0); break;
+    case 'pickSize': S.size = d.val; window.scrollTo(0, 0); break;
+    case 'changeSize': S.size = null; window.scrollTo(0, 0); break;
     case 'goDash':
       if (!S.started){ S.started = true; seedRun(); toast('데모 모임(가평 MT)을 불러왔어요'); }
       S.screen = 'dash'; window.scrollTo(0, 0); break;
