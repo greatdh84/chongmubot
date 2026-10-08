@@ -632,7 +632,9 @@ const LARGE = {
 };
 /* ===================== 대모임 블록 끝 ===================== */
 
-/* ---------- 1-S) 소모임 설정 (도총) ---------- */
+/* =========================================================
+   소모임 — 도총 영역 (소모임 설정 화면과 미리보기)
+   ========================================================= */
 function renderSmallSetup(){
   const s = S, e = s.event, sec = freqSec(s.freq);
   $('#app').innerHTML = `
@@ -777,6 +779,8 @@ function renderPreview(){
 function bubble(text, mood, burst, time){
   return `<div class="bub ${burst ? 'burst' : ''}"><div class="bav">🐸</div><div><div class="meta"><b>총무봇</b><span class="app">APP</span><span>${time || nowHM()}</span>${mood ? `<span class="tag">${mood}</span>` : ''}</div><div class="txt">${esc(text)}</div></div></div>`;
 }
+
+/* ===================== 소모임 블록 끝 ===================== */
 
 /* ---------- 2) 대시보드 ---------- */
 function renderDash(){
