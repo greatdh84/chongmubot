@@ -1,0 +1,5 @@
+# 파일별 담당자 (PR 리뷰 자동 요청)
+# 채총 GitHub 아이디가 정해지면 large.* 줄의 담당자를 바꿉니다
+*                    @greatdh84
+/demo/js/large.js    @greatdh84
+/demo/css/large.css  @greatdh84
