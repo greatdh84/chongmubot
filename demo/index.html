@@ -248,6 +248,12 @@ label.f{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:0
   .schema-row .opts{grid-column:2/-1}
 }
 </style>
+<style>
+/* =========================================================
+   대모임 전용 스타일 — 채총 영역
+   클래스 이름은 .lg- 로 시작합니다. (공용 클래스 .card .sec .btn .opt .inp 등은 그대로 써도 됩니다)
+   ========================================================= */
+</style>
 </head>
 <body>
 <div id="app"></div>
@@ -538,6 +544,7 @@ function nextMessage(p){
    렌더
    ========================================================= */
 function render(){
+  if (!S.large) S.large = LARGE.defaults();
   document.title = S.screen === 'dash' ? `${S.event.name} · 총무봇` : '도총 & 채총 총무봇';
   if (S.screen === 'setup') renderSetup();
   else if (S.screen === 'dash' && S.started) renderDash();
@@ -564,7 +571,7 @@ function renderStart(){
 /* ---------- 1) 총무 설정창 ---------- */
 function renderSetup(){
   if (!S.size) return renderSizePick();
-  if (S.size === 'large') return renderLargeSetup();
+  if (S.size === 'large') return LARGE.render($('#app'));
   renderSmallSetup();
 }
 
@@ -591,20 +598,38 @@ function renderSizePick(){
 }
 
 /* =========================================================
-   1-L) 대모임 설정 — 채총 담당 영역 (이 블록 안에서만 작업)
+   대모임 — 채총 영역 (이 블록과 대모임 전용 <style> 안에서만 작업)
+
+   ① 상태:  S.large 안에만 저장. 처음 값은 defaults()에서 정함
+            입력칸은 data-bind="large.항목" 으로 연결하면 자동 저장
+   ② 동작:  버튼에 data-act="large:이름" → 아래 act.이름(d, el) 실행 후 화면 갱신
+            (d = 버튼의 data-* 값. false를 돌려주면 화면 갱신 안 함)
+   ③ 화면:  render(el) 에서 el.innerHTML 로 그림
    ========================================================= */
-function renderLargeSetup(){
-  $('#app').innerHTML = `
-  <header class="top"><div class="top-in">
-    <button class="btn ghost sm" data-act="${S.started ? 'goDash' : 'changeSize'}">← ${S.started ? '대시보드' : '모임 규모'}</button>
-    <div class="brand"><span class="logo">🐸</span>대모임 총무봇 ${S.started ? '설정' : '만들기'}</div>
-  </div></header>
-  <main class="page"><div class="card" style="max-width:880px;margin:24px auto 0">
-    <section class="sec">
-      <div class="sec-h"><span class="n">🏢</span><div><h3>대모임 설정</h3><p>준비 중입니다 (채총 작업 영역).</p></div></div>
-    </section>
-  </div></main>`;
-}
+const LARGE = {
+  defaults(){
+    return {
+      // 예) busFee:20000, walkFee:15000,
+    };
+  },
+
+  render(el){
+    el.innerHTML = `
+    <header class="top"><div class="top-in">
+      <button class="btn ghost sm" data-act="${S.started ? 'goDash' : 'changeSize'}">← ${S.started ? '대시보드' : '모임 규모'}</button>
+      <div class="brand"><span class="logo">🐸</span>대모임 총무봇 ${S.started ? '설정' : '만들기'}</div>
+    </div></header>
+    <main class="page"><div class="card" style="max-width:880px;margin:24px auto 0">
+      <section class="sec">
+        <div class="sec-h"><span class="n">🏢</span><div><h3>대모임 설정</h3><p>준비 중입니다 (채총 작업 영역).</p></div></div>
+      </section>
+    </div></main>`;
+  },
+
+  act: {
+    // 예) addRule(d){ S.large.rules.push({...}); },
+  }
+};
 /* ===================== 대모임 블록 끝 ===================== */
 
 /* ---------- 1-S) 소모임 설정 (도총) ---------- */
@@ -1102,6 +1127,7 @@ document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   const a = el.dataset.act, d = el.dataset;
   if (a === 'closeModalBg'){ if (e.target === el) closeModal(); return; }
+  if (a.startsWith('large:')){ const f = LARGE.act[a.slice(6)]; if (f && f(d, el) === false) return; render(); return; }
   switch (a){
     case 'goStart': S.screen = 'start'; closeDrawer(); break;
     case 'goSetup': S.screen = 'setup'; closeDrawer(); window.scrollTo(0, 0); break;
