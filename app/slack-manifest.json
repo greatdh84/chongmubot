@@ -1,0 +1,6 @@
+{
+  "display_information": { "name": "총무봇", "description": "모임 회비 수납·독촉·정산 도우미" },
+  "features": { "bot_user": { "display_name": "chongmubot", "always_online": true } },
+  "oauth_config": { "scopes": { "bot": ["users:read", "channels:manage", "channels:read"] } },
+  "settings": { "org_deploy_enabled": false, "socket_mode_enabled": false, "token_rotation_enabled": false }
+}
