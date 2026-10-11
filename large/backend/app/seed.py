@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
+import sqlite3
 import io
 import random
 from datetime import date, datetime, timedelta
@@ -30,7 +32,7 @@ from sqlalchemy import select
 
 from . import clock, db as dbmod
 from .config import BACKEND_DIR, settings
-from .models import Admin, Event, Participant, RefundRule, Team, TeamManager
+from .models import Admin, DbMeta, Event, Participant, RefundRule, Team, TeamManager
 from .security import hash_password
 from .services import emails, payments, responses, roster
 
@@ -47,6 +49,26 @@ GIVEN = [
 ]
 TEAM_SIZE = 12
 SAMPLES_DIR = BACKEND_DIR / "var" / "samples"
+DEMO_PURPOSE = "demo-seed"
+
+
+def check_resettable(path: Path) -> str | None:
+    """초기화해도 되는 DB 인지. 안 되면 이유를 돌려준다(운영 데이터 보호)."""
+    if not path.exists():
+        return None
+    con = sqlite3.connect(path)
+    try:
+        tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "events" not in tables:
+            return None  # 빈 DB
+        if "db_meta" not in tables:
+            return "시드로 만든 시연용 DB 표시(db_meta)가 없습니다"
+        row = con.execute("SELECT value FROM db_meta WHERE key='purpose'").fetchone()
+        if not row or row[0] != DEMO_PURPOSE:
+            return "시연용 DB 표시가 아닙니다"
+        return None
+    finally:
+        con.close()
 
 
 def kst(d: date, days: float = 0, hour: int = 10, minute: int = 0) -> datetime:
@@ -85,6 +107,11 @@ def snapshot_choices(rng: random.Random) -> dict[tuple[int, int], str | None]:
     forced = {(2, 7): "bus", (3, 3): "bus", (4, 9): "undecided", (5, 4): "bus", (7, 5): "bus", (7, 8): "car", (8, 10): "bus",
               (9, 3): "car", (11, 2): "absent", (12, 4): "bus", (13, 6): "bus", (15, 6): "bus", (17, 9): "bus"}
     out.update(forced)
+    # 발표 주 장면 팀(T10): 정산까지 바로 보이도록 미응답·미정 없이
+    for mi in range(TEAM_SIZE):
+        if out[(10, mi)] in (None, "undecided"):
+            out[(10, mi)] = "bus"
+    out[(10, 5)] = "bus"
     return out
 
 
@@ -225,8 +252,20 @@ def seed(base: date, rng_seed: int = 20261015) -> dict:
 
         clock.freeze(kst(base, -0.1))
         review = review_event(db, ev, trigger="seed")
+
+        # 발표 등장인물(같은 시드면 항상 같은 사람)
+        cast = [
+            {"role": "participant", "participant_id": member(10, 5).id, "name": member(10, 5).name, "team": "T10", "label": "주 장면: 모호한 변경 요청(버스→?)"},
+            {"role": "manager", "participant_id": member(10, 0).id, "name": member(10, 0).name, "team": "T10", "label": "주 장면 팀 담당자: 정산 명세 확인"},
+            {"role": "manager", "participant_id": member(16, 0).id, "name": member(16, 0).name, "team": "T16", "label": "보조: 입금자 불명 'ㅎㅂ' 확인 요청"},
+            {"role": "manager", "participant_id": member(19, 0).id, "name": member(19, 0).name, "team": "T19", "label": "보조: 같은 금액 후보 팀(금액만으로 확정 안 함)"},
+            {"role": "manager", "participant_id": member(13, 0).id, "name": member(13, 0).name, "team": "T13", "label": "보조: 개인·팀 중복 입금 확인"},
+        ]
+        db.merge(DbMeta(key="purpose", value=DEMO_PURPOSE))
+        db.merge(DbMeta(key="seed", value=json.dumps({"base_date": base.isoformat(), "rng_seed": rng_seed}, ensure_ascii=False)))
+        db.merge(DbMeta(key="cast", value=json.dumps(cast, ensure_ascii=False)))
         db.commit()
-        return {"event_id": ev.id, "participants": len(rows), "teams": 25, "transactions": len(tx), "review": review["summary"]}
+        return {"event_id": ev.id, "participants": len(rows), "teams": 25, "transactions": len(tx), "review": review["summary"], "cast": cast}
     finally:
         clock.freeze(None)
         db.close()
@@ -239,15 +278,26 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=20261015)
     args = ap.parse_args()
     if not settings.is_demo:
-        raise SystemExit("시드 데이터는 APP_MODE=demo 에서만 만들 수 있습니다")
+        raise SystemExit("시드·초기화는 APP_MODE=demo 에서만 할 수 있습니다(운영 모드 거부)")
     url = settings.database_url
-    if args.reset and url.startswith("sqlite:///"):
-        path = Path(url.removeprefix("sqlite:///"))
+    if not url.startswith("sqlite:///") or ":memory:" in url:
+        raise SystemExit("시드·초기화는 로컬 SQLite 파일 DB 에서만 합니다")
+    path = Path(url.removeprefix("sqlite:///"))
+    reason = check_resettable(path)
+    if reason:
+        raise SystemExit(f"초기화 거부: {path} — {reason}. 운영 데이터일 수 있어 지우지 않습니다.")
+    if path.exists() and not args.reset:
+        raise SystemExit(f"{path} 에 이미 데이터가 있습니다. 시연 데이터로 다시 만들려면 --reset")
+    if args.reset:
         for suffix in ("", "-wal", "-shm", "-journal"):
             Path(str(path) + suffix).unlink(missing_ok=True)
     base = date.fromisoformat(args.base_date) if args.base_date else clock.kst(clock.now()).date()
     result = seed(base, args.seed)
+    cast = result.pop("cast")
     print(f"시드 완료: {result}")
+    print("발표 등장인물:")
+    for c in cast:
+        print(f"  - {c['team']} {c['name']} ({'참가자' if c['role'] == 'participant' else '담당자'}) — {c['label']}")
     print(f"샘플 CSV: {SAMPLES_DIR}")
     print(f"총무 로그인: {settings.admin_email} / (ADMIN_PASSWORD, 시연 기본값은 README 참고)")
 

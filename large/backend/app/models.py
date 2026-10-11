@@ -339,7 +339,10 @@ class EmailJob(Base):
     to_email: Mapped[str] = mapped_column(String(200))
     subject: Mapped[str] = mapped_column(String(300), default="")
     dedupe_key: Mapped[str] = mapped_column(String(200), unique=True)
-    status: Mapped[str] = mapped_column(String(20), default="queued")  # queued | retry_wait | sent | skipped | failed
+    status: Mapped[str] = mapped_column(String(20), default="queued")  # queued | retry_wait | sending | sent | skipped | failed
+    # 발송 선점: 수동 실행·스케줄러·다른 프로세스가 같은 작업을 동시에 보내지 않도록 queued→sending 을 원자적으로 바꾼 쪽만 보낸다
+    claimed_at: Mapped[Optional[datetime]] = mapped_column(default=None)
+    claimed_by: Mapped[str] = mapped_column(String(100), default="", server_default="")
     attempts: Mapped[int] = mapped_column(default=0)
     max_attempts: Mapped[int] = mapped_column(default=3)
     scheduled_at: Mapped[datetime] = mapped_column(default=_now)
@@ -395,6 +398,14 @@ class Payout(Base):
     memo: Mapped[str] = mapped_column(String(300), default="")
     recorded_by: Mapped[int] = mapped_column(ForeignKey("admins.id"))
     recorded_at: Mapped[datetime] = mapped_column(default=_now)
+
+
+class DbMeta(Base):
+    """DB 자체에 대한 표시. 시드로 만든 시연용 DB 는 purpose='demo-seed' — 초기화 명령은 이 표시가 있는 DB 만 지운다."""
+
+    __tablename__ = "db_meta"
+    key: Mapped[str] = mapped_column(String(50), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
 
 
 class AuditLog(Base):

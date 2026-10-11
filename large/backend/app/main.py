@@ -23,6 +23,7 @@ from .errors import AppError
 from .models import Admin
 from .routers import admin, auth, manager, participant
 from .security import RedactSecretsFilter, hash_password
+from .services.scheduler import scheduler
 
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 DIST = BACKEND_DIR.parent / "frontend" / "dist"
@@ -38,9 +39,20 @@ def ensure_admin() -> None:
 
 
 def startup() -> None:
-    """DB 테이블 준비 + 총무 계정 보장. 단독 실행·공용 서버 모두 시작 시 한 번 부른다."""
+    """DB 테이블 준비 + 총무 계정 보장 + (설정 시) 이메일 스케줄러 시작. 단독 실행·공용 서버 모두 시작 시 한 번 부른다."""
     init_db()
     ensure_admin()
+    if settings.email_scheduler:
+        from .services.scheduler import scheduler
+
+        scheduler.start()
+
+
+def shutdown() -> None:
+    """서버 종료 시 스케줄러 스레드 정리."""
+    from .services.scheduler import scheduler
+
+    scheduler.stop()
 
 
 def is_large_api(path: str) -> bool:
@@ -88,6 +100,7 @@ def configure_large(app: FastAPI) -> None:
             "email_mode": settings.email_mode,
             "llm_mode": settings.llm_mode,
             "demo_tools": settings.is_demo,
+            "scheduler": {"enabled": scheduler.running and not scheduler.paused, "interval_seconds": scheduler.interval},
         }
 
     app.include_router(auth.router)
@@ -134,6 +147,7 @@ def create_app() -> FastAPI:
     async def lifespan(_: FastAPI):
         startup()
         yield
+        shutdown()
 
     app = FastAPI(
         title="총무 Agent LARGE API",

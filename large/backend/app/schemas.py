@@ -94,6 +94,10 @@ class EmailEnqueue(BaseModel):
     kind: Literal["invite", "attend_reminder", "payment_reminder"]
 
 
+class SchedulerToggle(BaseModel):
+    enabled: bool
+
+
 class CorrectionIn(BaseModel):
     text: str = Field(min_length=1, max_length=500)
 

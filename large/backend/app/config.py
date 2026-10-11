@@ -44,6 +44,8 @@ class Settings:
     quiet_start_hour: int = 21  # 21시 ~ 다음날 8시는 발송 금지
     quiet_end_hour: int = 8
     daily_limit: int = 2  # 수신자별 하루 최대 안내/독촉 메일 수(인증코드 제외)
+    email_scheduler: bool = True  # 발송 큐 자동 실행(서버 안 백그라운드 스레드)
+    email_scheduler_interval: int = 60  # 초
     invite_ttl_days: int = 30
     session_ttl_hours: int = 12
     smtp_host: str = ""
@@ -102,6 +104,10 @@ def load_settings() -> Settings:
         smtp_from=_env("SMTP_FROM"),
         gemini_api_key=_env("GEMINI_API_KEY"),
     )
+    email_mode = s.email_mode
+    # 기본: 모의 메일이면 켜고, 실제 SMTP 면 EMAIL_SCHEDULER=on 으로 명시할 때만 켠다(실수로 실제 메일이 나가지 않게)
+    s.email_scheduler = _env("EMAIL_SCHEDULER", "on" if email_mode == "mock" else "off").lower() in ("on", "1", "true", "yes")
+    s.email_scheduler_interval = max(10, int(_env("EMAIL_SCHEDULER_INTERVAL", "60")))
     if _env("GEMINI_MODEL"):
         s.gemini_models = [_env("GEMINI_MODEL")] + [m for m in s.gemini_models if m != _env("GEMINI_MODEL")]
     s.validate()

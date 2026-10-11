@@ -20,6 +20,7 @@ def fresh_db(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "app_mode", "demo")
     monkeypatch.setattr(settings, "email_mode", "mock")
     monkeypatch.setattr(settings, "llm_mode", "mock")
+    monkeypatch.setattr(settings, "email_scheduler", False)  # 테스트 중 백그라운드 발송 금지(필요한 테스트만 직접 실행)
     dbmod.configure(f"sqlite:///{tmp_path / 'test.db'}")
     dbmod.init_db()
     clock.freeze(NOW)

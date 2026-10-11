@@ -16,7 +16,7 @@ from ..models import (
     CHOICE_LABELS, Admin, AgentRun, Allocation, AuditLog, BankTransaction, ChangeLog, ConfirmTask, EmailJob, Event,
     Participant, RefundRule, Response, Settlement, Team, TeamManager,
 )
-from ..schemas import AdminResponseSet, AllocationIn, Decision, EmailEnqueue, EventUpdate, ManagerAssign, PayoutIn, RefundRuleIn, TaskResolve
+from ..schemas import AdminResponseSet, AllocationIn, Decision, EmailEnqueue, EventUpdate, ManagerAssign, PayoutIn, RefundRuleIn, SchedulerToggle, TaskResolve
 from ..services import emails, invites, payments, responses as resp_svc, roster, settlement as stl
 from ..services.common import active_manager, audit, get_participant_in_event, get_team_in_event
 from .util import change_out, event_out, task_out
@@ -441,6 +441,26 @@ def dispatch(ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
     result = emails.dispatch_due(db, ev)
     db.commit()
     return result
+
+
+@router.get("/events/{event_id}/emails/scheduler")
+def scheduler_status(ev: Event = Depends(admin_event)):
+    from ..services.scheduler import scheduler
+
+    return scheduler.status()
+
+
+@router.post("/events/{event_id}/emails/scheduler")
+def scheduler_toggle(body: SchedulerToggle, ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
+    """이 서버 프로세스의 스케줄러를 일시정지·재개. 시작 자체는 EMAIL_SCHEDULER 설정으로 정한다."""
+    from ..services.scheduler import scheduler
+
+    if body.enabled and not scheduler.running:
+        raise conflict("SCHEDULER_NOT_STARTED", "스케줄러가 꺼진 설정으로 시작됐습니다. EMAIL_SCHEDULER=on 으로 서버를 다시 시작하세요")
+    scheduler.paused = not body.enabled
+    audit(db, ev.id, _actor(admin), "email_scheduler_" + ("resumed" if body.enabled else "paused"))
+    db.commit()
+    return scheduler.status()
 
 
 @router.get("/events/{event_id}/emails")

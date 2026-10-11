@@ -1,6 +1,8 @@
 """시연 전용 API: 개발용 수신함, 역할 전환. APP_MODE=production 에서는 라우터 자체를 등록하지 않는다."""
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -9,7 +11,7 @@ from .. import clock
 from ..config import API_PREFIX, settings
 from ..db import get_db
 from ..errors import invalid, not_found
-from ..models import Admin, ChangeLog, DevMail, Participant, Team, TeamManager
+from ..models import Admin, ChangeLog, DbMeta, DevMail, Participant, Team, TeamManager
 from ..schemas import DevSwitch
 from ..security import create_session
 from ..services.common import audit, is_active_manager
@@ -42,7 +44,9 @@ def people(db: Session = Depends(get_db)):
         {"participant_id": p.id, "name": p.name, "team": teams[p.team_id].code, "email": p.email, "has_change": p.id in with_changes}
         for p in db.scalars(select(Participant).order_by(Participant.employee_no).limit(24))
     ]
-    return {"managers": managers, "participants": sample}
+    meta = db.get(DbMeta, "cast")
+    cast = json.loads(meta.value) if meta else []
+    return {"cast": cast, "managers": managers, "participants": sample}
 
 
 @router.post("/switch")

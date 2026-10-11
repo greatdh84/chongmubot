@@ -7,9 +7,14 @@
 """
 from __future__ import annotations
 
+import os
+import socket
+import threading
+import time
 from datetime import datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -200,11 +205,11 @@ def _dispatch_one(db: Session, job: EmailJob, now: datetime, code: str | None = 
     if job.kind not in QUIET_EXEMPT:
         later = clock.next_allowed_send_time(now, settings.quiet_start_hour, settings.quiet_end_hour)
         if later is not None:
-            job.scheduled_at, job.note = later, "전송 금지 시간 → 연기"
+            job.status, job.scheduled_at, job.note = "queued", later, "전송 금지 시간 → 연기"
             return "deferred"
         if _sent_today(db, job.to_email, now) >= settings.daily_limit:
             tomorrow = clock.kst(now).replace(hour=settings.quiet_end_hour, minute=0, second=0, microsecond=0) + timedelta(days=1)
-            job.scheduled_at, job.note = clock.to_utc_naive(tomorrow), "하루 최대 발송 횟수 초과 → 다음날로 연기"
+            job.status, job.scheduled_at, job.note = "queued", clock.to_utc_naive(tomorrow), "하루 최대 발송 횟수 초과 → 다음날로 연기"
             return "deferred"
     reason = _recheck(db, job)
     if reason:
@@ -228,19 +233,86 @@ def _dispatch_one(db: Session, job: EmailJob, now: datetime, code: str | None = 
     return "sent"
 
 
-def dispatch_due(db: Session, event: Event, now: datetime | None = None, limit: int = 500) -> dict:
-    now = now or clock.now()
-    jobs = list(
-        db.scalars(
-            select(EmailJob)
-            .where(EmailJob.event_id == event.id, EmailJob.status.in_(("queued", "retry_wait")), EmailJob.scheduled_at <= now)
-            .order_by(EmailJob.id)
-            .limit(limit)
-        )
+def _process_claimed(db: Session, job_id: int, now: datetime) -> str:
+    """선점한 작업 처리. 다른 연결이 동시에 쓰면 SQLite 가 'locked' 를 낼 수 있어 짧게 재시도한다(선점은 유지)."""
+    for attempt in range(5):
+        try:
+            job = db.get(EmailJob, job_id)
+            db.refresh(job)
+            outcome = _dispatch_one(db, job, now)
+            db.commit()
+            return outcome
+        except OperationalError as e:
+            db.rollback()
+            if "locked" not in str(e.orig) or attempt == 4:
+                raise
+            time.sleep(0.05 * (attempt + 1))
+    raise RuntimeError("unreachable")
+
+
+# 같은 프로세스 안에서 수동 실행('지금 발송 실행')과 스케줄러가 겹치지 않게 하는 잠금.
+# 다른 프로세스와의 겹침은 아래 DB 선점(_claim)이 막는다.
+_dispatch_lock = threading.Lock()
+WORKER_ID = f"{socket.gethostname()}:{os.getpid()}"
+STALE_CLAIM = timedelta(minutes=10)
+
+
+def _claim(db: Session, job_id: int, now: datetime, worker: str) -> bool:
+    """queued/retry_wait → sending 을 한 문장으로 바꾼다. 바뀐 행이 1개일 때만 이 실행이 보낼 권리를 가진다."""
+    res = db.execute(
+        update(EmailJob)
+        .where(EmailJob.id == job_id, EmailJob.status.in_(("queued", "retry_wait")), EmailJob.scheduled_at <= now)
+        .values(status="sending", claimed_at=now, claimed_by=worker[:100])
     )
-    counts: dict[str, int] = {}
-    for job in jobs:
-        outcome = _dispatch_one(db, job, now)
-        counts[outcome] = counts.get(outcome, 0) + 1
-    audit(db, event.id, "system", "emails_dispatched", detail=counts)
-    return {"processed": len(jobs), **counts, "email_mode": settings.email_mode}
+    db.commit()
+    return res.rowcount == 1
+
+
+def _reclaim_stale(db: Session, event: Event, now: datetime) -> int:
+    """발송 도중 프로세스가 죽어 sending 으로 남은 작업은 이미 나갔을 수도 있다.
+    중복 발송을 피하려고 자동 재발송하지 않고 failed + 메모로 남겨 총무가 확인 후 다시 보내게 한다."""
+    res = db.execute(
+        update(EmailJob)
+        .where(EmailJob.event_id == event.id, EmailJob.status == "sending", EmailJob.claimed_at < now - STALE_CLAIM)
+        .values(status="failed", note="발송 중 중단됨 — 이미 발송됐을 수 있음. 확인 후 필요하면 다시 보내세요")
+    )
+    db.commit()
+    return res.rowcount or 0
+
+
+def dispatch_due(db: Session, event: Event, now: datetime | None = None, limit: int = 500, source: str = "manual") -> dict:
+    """발송할 때가 된 작업을 하나씩 선점해 처리한다. 작업마다 커밋하므로 중간에 멈춰도 이미 보낸 기록은 남는다."""
+    with _dispatch_lock:
+        now = now or clock.now()
+        worker = f"{WORKER_ID}:{source}"
+        reclaimed = _reclaim_stale(db, event, now)
+        ids = list(
+            db.scalars(
+                select(EmailJob.id)
+                .where(EmailJob.event_id == event.id, EmailJob.status.in_(("queued", "retry_wait")), EmailJob.scheduled_at <= now)
+                .order_by(EmailJob.id)
+                .limit(limit)
+            )
+        )
+        db.commit()
+        counts: dict[str, int] = {}
+        for jid in ids:
+            if not _claim(db, jid, now, worker):
+                counts["claimed_elsewhere"] = counts.get("claimed_elsewhere", 0) + 1
+                continue
+            try:
+                outcome = _process_claimed(db, jid, now)
+            except Exception as e:  # 렌더링 오류 등 예상 밖 실패: 이 작업만 재시도 대기로
+                db.rollback()
+                job = db.get(EmailJob, jid)
+                job.attempts += 1
+                job.status = "failed" if job.attempts >= job.max_attempts else "retry_wait"
+                job.scheduled_at = now + timedelta(minutes=5)
+                job.last_error = f"처리 오류: {type(e).__name__}"[:300]
+                db.commit()
+                outcome = "error"
+            counts[outcome] = counts.get(outcome, 0) + 1
+        if ids or reclaimed:
+            audit(db, event.id, f"system:{source}", "emails_dispatched", detail=counts | ({"reclaimed": reclaimed} if reclaimed else {}))
+            db.commit()
+        return {"processed": len(ids), **counts, "email_mode": settings.email_mode, "source": source}
