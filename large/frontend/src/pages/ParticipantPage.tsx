@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, CHOICE_LABEL, fmtTime, won, type Choice, type Me } from "../api";
-import { Chat, ChoicePill, Msg, Page, StatusPill } from "../components/common";
+import { Chat, ChoicePill, Msg, Page, StatusPill, useEventName } from "../components/common";
 import { useAction, useLoad } from "../hooks";
 
 const OPTIONS: Choice[] = ["bus", "car", "absent", "undecided"];
@@ -14,6 +14,7 @@ export default function ParticipantPage() {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [pvError, setPvError] = useState("");
   const { busy, message, run } = useAction();
+  useEventName(me?.event.name);
 
   useEffect(() => {
     setPreview(null);

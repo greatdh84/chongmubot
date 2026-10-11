@@ -4,7 +4,8 @@ import { api } from "../api";
 import { Msg, Page, useMeta } from "../components/common";
 import { useAction } from "../hooks";
 
-interface People { managers: { participant_id: number; name: string; team: string }[]; participants: { participant_id: number; name: string; team: string; email: string; has_change: boolean }[] }
+interface CastMember { role: "participant" | "manager"; participant_id: number; name: string; team: string; label: string }
+interface People { cast: CastMember[]; managers: { participant_id: number; name: string; team: string }[]; participants: { participant_id: number; name: string; team: string; email: string; has_change: boolean }[] }
 
 export default function Home() {
   const meta = useMeta();
@@ -50,6 +51,19 @@ function DemoSwitch() {
       <div className="row" style={{ marginBottom: 8 }}>
         <button className="primary" disabled={busy} onClick={() => go("admin", null, "/admin")}>총무로 보기</button>
       </div>
+      {people && people.cast.length > 0 && (
+        <div style={{ margin: "10px 0" }}>
+          <h3>발표 등장인물 (시드 고정)</h3>
+          <div style={{ display: "grid", gap: 6 }}>
+            {people.cast.map((c) => (
+              <button key={`${c.role}-${c.participant_id}`} className="choice" disabled={busy} onClick={() => go(c.role, c.participant_id, c.role === "participant" ? "/me" : "/manager")}>
+                <b>{c.team} {c.name}</b> <span className="pill">{c.role === "participant" ? "참가자" : "담당자"}</span>
+                <div className="fee">{c.label}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="row" style={{ marginBottom: 8 }}>
         <select value={mgr} onChange={(e) => setMgr(e.target.value)} aria-label="담당자 선택">
           {people?.managers.map((m) => <option key={m.participant_id} value={m.participant_id}>{m.team} · {m.name}</option>)}

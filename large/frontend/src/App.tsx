@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { api, type Meta } from "./api";
-import { MetaContext, ModeBanner } from "./components/common";
+import { AppHeader, EventNameContext, MetaContext } from "./components/common";
 import AdminLogin from "./pages/AdminLogin";
 import AdminPage from "./pages/admin/AdminPage";
 import DevInbox from "./pages/DevInbox";
@@ -13,13 +13,15 @@ import ParticipantPage from "./pages/ParticipantPage";
 
 export default function App() {
   const [meta, setMeta] = useState<Meta | null>(null);
+  const [eventName, setEventName] = useState<string | null>(null);
   useEffect(() => {
     api.get<Meta>("/api/large/meta").then(setMeta).catch(() => setMeta(null));
   }, []);
   return (
     <MetaContext.Provider value={meta}>
+      <EventNameContext.Provider value={{ name: eventName, setName: setEventName }}>
       <BrowserRouter basename="/large">
-        <ModeBanner />
+        <AppHeader />
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/invite" element={<InviteLanding />} />
@@ -32,6 +34,7 @@ export default function App() {
           <Route path="*" element={<main className="wrap"><p>페이지를 찾을 수 없습니다.</p></main>} />
         </Routes>
       </BrowserRouter>
+      </EventNameContext.Provider>
     </MetaContext.Provider>
   );
 }

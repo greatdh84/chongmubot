@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, type JSX } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, CHOICE_LABEL, fmtTime, won, type Change, type EventInfo } from "../../api";
-import { Msg, Page, StatusPill } from "../../components/common";
+import { Msg, Page, StatusPill, useEventName } from "../../components/common";
 import { useAction, useLoad } from "../../hooks";
 import { PaymentsTab, RosterTab, SettlementTab, TasksTab } from "./AdminMoney";
 
@@ -22,6 +22,7 @@ export default function AdminPage() {
   const nav = useNavigate();
   const { data: events, error } = useLoad(() => api.get<EventInfo[]>("/api/large/admin/events"));
   const [tab, setTab] = useState<Tab>("대시보드");
+  useEventName(events?.[0]?.name);
   if (error) return <Page narrow><div className="card"><p className="error">{error.message}</p><button onClick={() => nav("/admin/login")}>로그인</button></div></Page>;
   if (!events) return <Page><p className="muted">불러오는 중…</p></Page>;
   if (events.length === 0) return <Page narrow><div className="card">관리하는 행사가 없습니다. 시드 데이터를 만들거나 행사를 등록하세요.</div></Page>;
@@ -196,6 +197,29 @@ function ChangesTab({ base }: { base: string }) {
 interface EmailJob { id: number; kind: string; to_email: string; subject: string; status: string; attempts: number; scheduled_at: string; sent_at: string | null; last_error: string; note: string }
 const KIND: Record<string, string> = { invite: "초대", attend_reminder: "참석 독촉", payment_reminder: "입금 독촉", confirm_request: "확인 요청", manager_code: "인증코드" };
 
+interface SchedulerStatus { configured: boolean; running: boolean; paused: boolean; enabled: boolean; interval_seconds: number; runs: number; last_run_at: string | null; last_result: Record<string, { processed: number }>; last_error: string; email_mode: string; multi_process: string }
+
+function SchedulerCard({ base, onChange }: { base: string; onChange: () => void }) {
+  const { data: s, reload } = useLoad(() => api.get<SchedulerStatus>(`${base}/emails/scheduler`), [base]);
+  const { busy, message, run } = useAction();
+  if (!s) return null;
+  const toggle = (enabled: boolean) => run(() => api.post(`${base}/emails/scheduler`, { enabled }), enabled ? "스케줄러를 다시 켰습니다." : "스케줄러를 일시정지했습니다.").then(() => { reload(); onChange(); });
+  return (
+    <div className="notice" style={{ display: "grid", gap: 6 }}>
+      <div className="row">
+        <b>발송 스케줄러</b>
+        <span className={`pill ${s.enabled ? "ok" : "warn"}`}>{!s.running ? "꺼짐(설정)" : s.paused ? "일시정지" : `켜짐 · ${s.interval_seconds}초마다`}</span>
+        <span className="pill">메일 {s.email_mode === "mock" ? "모의(실제 발송 없음)" : "SMTP 실제 발송"}</span>
+        {s.running && (s.paused ? <button className="small primary" disabled={busy} onClick={() => toggle(true)}>재개</button> : <button className="small" disabled={busy} onClick={() => toggle(false)}>일시정지</button>)}
+        <button className="small ghost" onClick={reload}>새로고침</button>
+      </div>
+      <span className="muted">마지막 실행 {fmtTime(s.last_run_at)} · {s.runs}회 · 최근 처리 {Object.values(s.last_result).reduce((n, r) => n + r.processed, 0)}건{s.last_error && ` · 오류: ${s.last_error}`}. 수동 실행과 겹쳐도 같은 메일은 한 번만 보냅니다(작업 선점). {s.multi_process}.</span>
+      {!s.running && <span className="muted">켜려면 서버 환경변수 EMAIL_SCHEDULER=on 으로 다시 시작하세요.</span>}
+      <Msg m={message} />
+    </div>
+  );
+}
+
 function EmailsTab({ base }: { base: string }) {
   const [status, setStatus] = useState("");
   const { data, reload } = useLoad(() => api.get<EmailJob[]>(`${base}/emails${status ? `?status=${status}` : ""}`), [base, status]);
@@ -204,13 +228,14 @@ function EmailsTab({ base }: { base: string }) {
   return (
     <div className="card">
       <h2>이메일 발송 작업</h2>
+      <SchedulerCard base={base} onChange={reload} />
       <p className="muted">발송 직전에 응답·잔액·확인 대기 상태를 다시 검사합니다. 전송 금지 시간(21~8시)·수신자별 하루 한도·중복 방지·실패 재시도(최대 3회)를 적용합니다. 메일에는 금액 명세 대신 웹 확인 링크만 넣습니다.</p>
       <div className="row">
         <button disabled={busy} onClick={() => enqueue("invite")}>초대 메일 생성</button>
         <button disabled={busy} onClick={() => enqueue("attend_reminder")}>참석 독촉(미응답 개인)</button>
         <button disabled={busy} onClick={() => enqueue("payment_reminder")}>입금 독촉(미납 팀 담당자)</button>
         <button className="primary" disabled={busy} onClick={() => run(() => api.post<Record<string, number | string>>(`${base}/emails/dispatch`), (r) => `처리 ${r.processed}건 · ${JSON.stringify(r)}`).then(reload)}>지금 발송 실행</button>
-        <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="상태"><option value="">전체</option>{["queued", "retry_wait", "sent", "skipped", "failed"].map((s) => <option key={s} value={s}>{s}</option>)}</select>
+        <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="상태"><option value="">전체</option>{["queued", "retry_wait", "sending", "sent", "skipped", "failed"].map((s) => <option key={s} value={s}>{s}</option>)}</select>
       </div>
       <Msg m={message} />
       <div className="table-wrap"><table>
@@ -221,6 +246,33 @@ function EmailsTab({ base }: { base: string }) {
         </tbody>
       </table></div>
     </div>
+  );
+}
+
+/** 소통 Agent 실행: '누가 무엇을 골랐는지(판단)'와 '코드가 실행한 도구·결과'를 순서대로 */
+function RunTimeline({ run }: { run: Run }) {
+  const decisions = (run.result.decisions as { by: string; action: Record<string, unknown>; after_steps?: number }[] | undefined) ?? [];
+  const steps = run.steps as { tool: string; ok: boolean; dry_run?: boolean; result?: unknown; error?: { code: string; message: string } }[];
+  const items: JSX.Element[] = [];
+  let si = 0;
+  const pushSteps = (until: number) => {
+    for (; si < Math.min(until, steps.length); si++) {
+      const s = steps[si];
+      items.push(<li key={`s${si}`}><span className="pill ok">코드 {s.dry_run ? "검증" : "실행"}</span> {s.tool} → {s.ok ? "성공" : `거절 ${s.error?.code}: ${s.error?.message}`}</li>);
+    }
+  };
+  decisions.forEach((d, i) => {
+    pushSteps(d.after_steps ?? si);
+    const who = d.by.startsWith("gemini") ? <span className="pill ai">AI 판단 {d.by.replace("gemini:", "Gemini ")}</span> : d.by === "code" ? <span className="pill ok">코드 판정</span> : d.by === "mock_fallback" ? <span className="pill bad">LLM 실패 → 규칙 대체</span> : <span className="pill">규칙 기반(모의)</span>;
+    items.push(<li key={`d${i}`}>{who} <code>{JSON.stringify(d.action)}</code></li>);
+  });
+  pushSteps(steps.length);
+  const fallback = (run.result.llm as { fallback?: string } | undefined)?.fallback;
+  return (
+    <>
+      {fallback && <div className="notice bad">LLM 실패로 규칙 기반 대체: {fallback}</div>}
+      <ol style={{ paddingLeft: 18, fontSize: 13 }}>{items}</ol>
+    </>
   );
 }
 
@@ -237,10 +289,10 @@ function RunsTab({ base }: { base: string }) {
       </div>
       {data?.map((r) => (
         <details key={r.id} style={{ borderBottom: "1px solid var(--line)", padding: "6px 0" }}>
-          <summary>#{r.id} <b>{r.agent === "communication" ? "소통" : "정산"}</b> · {r.trigger} · {fmtTime(r.created_at)} · {String(r.result.summary ?? r.result.outcome ?? "")} <span className="muted">({r.llm_mode})</span></summary>
+          <summary>#{r.id} <b>{r.agent === "communication" ? "소통" : "정산"}</b> · {r.trigger} · {fmtTime(r.created_at)} · {String(r.result.summary ?? r.result.outcome ?? "")} <span className="muted">({r.agent === "settlement" ? "규칙 기반 — LLM 미사용" : r.llm_mode})</span></summary>
           {r.evidence_message_id && <p className="muted">근거 메시지 #{r.evidence_message_id}</p>}
           {r.rules.length > 0 && <p>규칙: {r.rules.join(" / ")}</p>}
-          <pre className="mail">{JSON.stringify(r.steps, null, 1)}</pre>
+          {r.agent === "communication" ? <RunTimeline run={r} /> : <pre className="mail">{JSON.stringify(r.steps, null, 1)}</pre>}
         </details>
       ))}
     </div>

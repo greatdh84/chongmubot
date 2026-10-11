@@ -36,7 +36,7 @@ export const api = {
 export type Choice = "bus" | "car" | "absent" | "undecided";
 export const CHOICE_LABEL: Record<string, string> = { bus: "참석+버스", car: "참석+자차", absent: "불참", undecided: "미정", none: "미응답" };
 
-export interface Meta { system: "large"; app_mode: "demo" | "production"; email_mode: "mock" | "smtp"; llm_mode: "mock" | "gemini"; demo_tools: boolean }
+export interface Meta { system: "large"; app_mode: "demo" | "production"; email_mode: "mock" | "smtp"; llm_mode: "mock" | "gemini"; demo_tools: boolean; scheduler?: { enabled: boolean; interval_seconds: number } }
 
 export interface EventInfo {
   id: number; name: string; event_at: string; attend_deadline: string; payment_deadline: string;
@@ -59,7 +59,7 @@ export interface Me {
   is_manager: boolean;
 }
 
-export interface ChatMessage { id: number; sender: "user" | "agent" | "system"; text: string; created_at: string; tools: { tool: string; ok: boolean; dry_run: boolean }[]; rules: string[] }
+export interface ChatMessage { id: number; sender: "user" | "agent" | "system"; text: string; created_at: string; tools: { tool: string; ok: boolean; dry_run: boolean }[]; rules: string[]; llm?: { configured: string; used: string[]; model: string; fallback: string } | null }
 export interface ChatThread { id: number; role: string; state: "idle" | "awaiting_info" | "awaiting_confirmation"; pending: Record<string, unknown> | null; messages: ChatMessage[] }
 
 export interface Task {

@@ -1,0 +1,13 @@
+/* =========================================================
+   총무봇 공통 디자인 토큰 (임시) — SMALL(demo/index.html) :root 값을 그대로 옮김
+   SMALL 과 같은 이름을 쓰므로, 공통 디자인이 확정되면 이 파일만 교체하면 됩니다.
+   ========================================================= */
+:root {
+  color-scheme: light;
+  --bg: #f3f7ee; --card: #ffffff; --ink: #1f2a1c; --muted: #6b7a66; --line: #e1e9d9; --soft: #f7faf3;
+  --green: #3f9b3a; --green-d: #2c6e28; --green-l: #e5f3df; --yellow: #ffd257; --yellow-l: #fff6d6;
+  --red: #d9534f; --red-l: #fde9e7; --orange: #e98b2a; --orange-l: #fdf0e1; --blue: #3b7fc4; --blue-l: #e6f0fa;
+  --grey-l: #eef1ec; --shadow: 0 1px 2px rgba(30,50,20,.06), 0 4px 14px rgba(30,50,20,.06); --r: 14px;
+  --r-btn: 10px; --r-sm: 8px;
+  --font: Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+}

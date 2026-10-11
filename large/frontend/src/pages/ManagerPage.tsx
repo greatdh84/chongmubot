@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, fmtTime, won, type Change, type EventInfo, type SettlementCalc, type Task } from "../api";
-import { Chat, ChoicePill, Msg, Page, StatusPill } from "../components/common";
+import { Chat, ChoicePill, Msg, Page, StatusPill, useEventName } from "../components/common";
 import { useAction, useLoad } from "../hooks";
 
 interface Overview {
@@ -20,6 +20,7 @@ export default function ManagerPage() {
   const { data, error, reload } = useLoad(() => api.get<Overview>("/api/large/team"));
   const { busy, message, run } = useAction();
   const [correction, setCorrection] = useState("");
+  useEventName(data?.event.name);
   if (error) return <Page narrow><div className="card"><p className="error">{error.message}</p><Link to="/manager/login">이메일 인증하기</Link></div></Page>;
   if (!data) return <Page><p className="muted">불러오는 중…</p></Page>;
   const b = data.billing;
