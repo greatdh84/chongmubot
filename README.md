@@ -24,10 +24,10 @@ docs/   기획안, flowchart, 회의 메모
 서버가 꺼져 있으면 데모 멤버로 동작하고, 켜져 있으면 설정 화면의 "워크스페이스 멤버"가 실제 Slack 멤버로 바뀌며 시작 시 채널을 실제로 만들고 초대한 뒤 1단계 공지를 보내고, 대시보드의 "지금 DM 보내기"는 실제 DM으로 나갑니다. 문구는 Claude(`claude-haiku-5-5`)가 성격에 맞게 다시 씁니다.
 
 1. https://api.slack.com/apps → Create New App → From a manifest → 워크스페이스 선택 → [app/slack-manifest.json](app/slack-manifest.json) 붙여넣기
-2. OAuth & Permissions → Bot Token Scopes: `users:read`, `channels:manage`, `channels:read`, `chat:write`, `chat:write.customize`, `im:write` → Install to Workspace
-3. `.env` 에 `SLACK_BOT_TOKEN=xoxb-…`, `SLACK_OWNER_USER_ID=U…` (Slack 내 프로필 → ⋮ → 멤버 ID 복사), `LLM_API_KEY=sk-ant-…` (없으면 예시 문구 그대로 발송)
+2. OAuth & Permissions → Bot Token Scopes: `users:read`, `channels:manage`, `channels:read`, `chat:write`, `chat:write.customize`, `im:write`, `reactions:read`, `reactions:write` → Install to Workspace
+3. `.env` 에 `SLACK_BOT_TOKEN=xoxb-…`, `SLACK_OWNER_USER_ID=U…` (Slack 내 프로필 → ⋮ → 멤버 ID 복사), `LLM_API_KEY=sk-ant-…` (없으면 예시 문구 그대로 발송), `KAKAO_REST_API_KEY` · `KAKAO_JS_KEY` (회식 장소 검색·지도. developers.kakao.com → 앱 키, 카카오맵 사용 ON, JavaScript SDK 도메인에 `http://127.0.0.1:8787` · `http://localhost:8787` 등록)
 4. `python3 app/server.py` (설치할 패키지 없음, http://127.0.0.1:8787)
-5. `demo/index.html` 을 열면 자동 연결. 다른 주소는 "Slack 연결" 버튼이나 `?api=` 로 지정
+5. 브라우저로 http://127.0.0.1:8787 을 열면 데모가 서버와 함께 동작 (카카오 지도는 이 주소에서만 보임)
 
 채널 이름은 공백·마침표·대문자 없이 80자 이하여야 합니다.
 

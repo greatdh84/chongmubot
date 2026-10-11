@@ -4,17 +4,27 @@ demo/index.html 이 이 서버를 통해 실제 Slack 워크스페이스의 멤�
 채널을 만들어 초대합니다. 봇 토큰은 브라우저로 보내지 않고 이 서버만 가집니다.
 
 실행:  python3 app/server.py        (기본 http://127.0.0.1:8787)
+       브라우저에서 http://127.0.0.1:8787 을 열면 데모 화면 (카카오 지도는 이 주소에서만 동작)
 
 API
+  GET  /api/config                       카카오 지도 JavaScript 키 (브라우저 공개용 키)
   GET  /api/slack/members                 워크스페이스 이름 + 사람 멤버 목록
   POST /api/slack/channel  {name, users}  채널 생성 후 users 초대
   POST /api/slack/invite   {channel, users} 기존 채널에 추가 초대
   POST /api/slack/send     {channel|user, text, persona, situation, name}
                            Claude 가 성격에 맞게 문구를 다시 쓰고(키 없거나 실패 시 text 그대로) 채널/DM 발송
+  POST /api/places/recommend {area, food, budget, headcount, prefs, drink}
+                           카카오 로컬 검색 결과 중 Claude 가 조건에 맞는 후보를 골라 이유·예상 금액을 붙임
+  GET  /api/places/search?q=  카카오맵 가게 검색 (직접 추가용 자동완성)
+  GET  /api/places/nearby?x=&y=&r=  지도에서 클릭한 지점의 가장 가까운 음식점
+  POST /api/slack/poll     {channel, title, places, deadline}  이모지 투표 메시지 + 번호 이모지 미리 달기
+  GET  /api/slack/poll?channel=&ts=  번호 이모지별 투표자 (봇 반응 제외)
 """
 import json
+import mimetypes
 import os
 import ssl
+import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -40,6 +50,8 @@ TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
 OWNER = os.environ.get("SLACK_OWNER_USER_ID", "")  # 총무 본인의 Slack user ID (U로 시작)
 LLM_KEY = os.environ.get("LLM_API_KEY", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", "claude-haiku-5-5")
+KAKAO_KEY = os.environ.get("KAKAO_REST_API_KEY", "")
+KAKAO_JS_KEY = os.environ.get("KAKAO_JS_KEY", "")  # 지도 표시용, 등록한 도메인에서만 동작
 PORT = int(os.environ.get("PORT", "8787"))
 # 데모 페이지가 열리는 곳만 허용 (GitHub Pages, 로컬 서버, file:// 은 Origin 이 "null")
 ALLOWED_ORIGINS = {"https://greatdh84.github.io", "null"}
@@ -120,30 +132,124 @@ def rewrite(text, persona, situation, name):
     system = (f"너는 모임 회비·참석을 관리하는 Slack 총무봇이다. 성격: {label} — {style}\n"
               "예시 문구의 사실(이름, 모임명, 금액, 마감)과 단계별 강도를 그대로 지키면서 같은 성격으로 새로 써라. "
               "한두 문장, Slack 메시지 본문만 출력한다.")
-    body = json.dumps({
-        "model": LLM_MODEL, "max_tokens": 1024, "system": system,
-        "messages": [{"role": "user", "content": f"상황: {situation}\n대상: {name or '전체'}\n예시 문구: {text}"}],
-    }).encode()
-    req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, headers={
-        "x-api-key": LLM_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=30, context=SSL_CTX) as r:
-            out = json.load(r)
-        # 응답 앞에 thinking 블록이 올 수 있어 text 블록만 모음
-        return "".join(b.get("text", "") for b in out.get("content", []) if b.get("type") == "text").strip() or None
+        return claude(system, f"상황: {situation}\n대상: {name or '전체'}\n예시 문구: {text}") or None
     except Exception as e:
         print("LLM 실패, 원문 사용:", e)
         return None
+
+
+def claude(system, user, max_tokens=1024):
+    body = json.dumps({"model": LLM_MODEL, "max_tokens": max_tokens, "system": system,
+                       "messages": [{"role": "user", "content": user}]}).encode()
+    req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, headers={
+        "x-api-key": LLM_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+    with urllib.request.urlopen(req, timeout=60, context=SSL_CTX) as r:
+        out = json.load(r)
+    # 응답 앞에 thinking 블록이 올 수 있어 text 블록만 모음
+    return "".join(b.get("text", "") for b in out.get("content", []) if b.get("type") == "text").strip()
 
 
 def send(data):
     persona = data.get("persona", "active")
     label, icon, _ = PERSONAS.get(persona, PERSONAS["active"])
     text = data.get("text", "")
-    new = rewrite(text, persona, data.get("situation", ""), data.get("name", ""))
+    # raw: 확정 공지처럼 문구를 바꾸면 안 되는 메시지
+    new = None if data.get("raw") else rewrite(text, persona, data.get("situation", ""), data.get("name", ""))
+    text = (new or text) + (("\n" + data["extra"]) if data.get("extra") else "")
     channel = data.get("channel") or slack("conversations.open", users=data.get("user", ""))["channel"]["id"]
-    slack("chat.postMessage", channel=channel, text=new or text, username=f"총무봇 · {label}", icon_emoji=icon)
-    return {"text": new or text, "llm": bool(new)}
+    slack("chat.postMessage", channel=channel, text=text, username=f"총무봇 · {label}", icon_emoji=icon)
+    return {"text": text, "llm": bool(new)}
+
+
+# ---------- 회식 장소 추천 (카카오 로컬 + Claude) ----------
+def kakao_search(query, size=15, near=None):
+    """near=(x, y, radius) 이면 그 지점 근처 음식점을 가까운 순으로 (지도 클릭용)"""
+    if not KAKAO_KEY:
+        raise SlackError("no_kakao_key")
+    if near:
+        x, y, radius = near
+        url = "https://dapi.kakao.com/v2/local/search/category.json?" + urllib.parse.urlencode(
+            {"category_group_code": "FD6", "x": x, "y": y, "radius": radius, "sort": "distance", "size": size})
+    else:
+        url = "https://dapi.kakao.com/v2/local/search/keyword.json?" + urllib.parse.urlencode(
+            {"query": query, "category_group_code": "FD6", "size": size})  # FD6 = 음식점
+    req = urllib.request.Request(url, headers={"Authorization": f"KakaoAK {KAKAO_KEY}"})
+    try:
+        with urllib.request.urlopen(req, timeout=15, context=SSL_CTX) as r:
+            docs = json.load(r)["documents"]
+    except urllib.error.HTTPError as e:
+        msg = json.loads(e.read() or b"{}").get("message", "")
+        raise SlackError("kakao_disabled" if "disabled" in msg else f"kakao_error: {msg or e.code}")
+    return [{"name": d["place_name"], "category": d["category_name"].split(" > ")[-1],
+             "addr": d.get("road_address_name") or d.get("address_name", ""), "url": d["place_url"],
+             "lat": float(d["y"]), "lng": float(d["x"])} for d in docs]
+
+
+def recommend(data):
+    area, food = data.get("area", "").strip(), data.get("food", "").strip()
+    if not area:
+        raise SlackError("no_area")
+    found = kakao_search(f"{area} {food or '맛집'}")
+    if not found:
+        return {"places": [], "llm": False}
+    if not LLM_KEY:
+        return {"places": [{**p, "price": "", "memo": p["category"]} for p in found[:4]], "llm": False}
+    system = ("너는 회식 장소를 고르는 총무 도우미다. 주어진 실제 검색 결과 목록 안에서만 고른다. 목록에 없는 가게를 만들지 마라.\n"
+              "너는 이름·업종·주소만 안다. 좌석, 룸, 맛, 분위기, 가격 같은 확인 안 된 사실은 쓰지 말고, "
+              "고른 이유는 조건(음식 종류, 예산, 음주, 메뉴 선호, 위치)과 업종의 관계로만 쓴다.\n"
+              '출력은 JSON 배열만: [{"i": 목록 번호, "price": "1인 예상 금액(예: 3만원대)", "memo": "고른 이유 한 줄"}] 3~4개.')
+    user = (f"지역: {area}\n원하는 음식: {food or '상관없음'}\n1인 예산: {data.get('budget') or '미정'}\n"
+            f"인원: {data.get('headcount') or '미정'}명\n음주 희망 비율: {data.get('drink', '모름')}\n"
+            f"참가자 메뉴 선호: {', '.join(data.get('prefs') or []) or '없음'}\n\n검색 결과:\n"
+            + "\n".join(f"{i}. {p['name']} ({p['category']}) {p['addr']}" for i, p in enumerate(found)))
+    try:
+        raw = claude(system, user)
+        picks = json.loads(raw[raw.find("["): raw.rfind("]") + 1])
+        places = [{**found[int(x["i"])], "price": x.get("price", ""), "memo": x.get("memo", "")}
+                  for x in picks if 0 <= int(x["i"]) < len(found)]
+        return {"places": places[:4], "llm": True}
+    except Exception as e:
+        print("추천 LLM 실패, 검색 결과 사용:", e)
+        return {"places": [{**p, "price": "", "memo": p["category"]} for p in found[:4]], "llm": False}
+
+
+# ---------- 이모지 투표 ----------
+NUM_EMOJI = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "keycap_ten"]
+NUM_CHAR = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+BOT_USER = {}
+
+
+def bot_user():
+    if "id" not in BOT_USER:
+        BOT_USER["id"] = slack("auth.test")["user_id"]
+    return BOT_USER["id"]
+
+
+def poll_create(data):
+    places = data.get("places", [])[:10]
+    if len(places) < 2:
+        raise SlackError("need_two_places")
+    lines = [f"🍻 *{data.get('title') or '회식 장소 투표'}*", "가고 싶은 곳의 번호 이모지를 눌러 주세요. *여러 곳 선택 가능!*", ""]
+    for i, p in enumerate(places):
+        extra = " · ".join(x for x in [p.get("price"), p.get("memo")] if x)
+        lines.append(f"{NUM_CHAR[i]}  *{p['name']}*" + (f"  _{extra}_" if extra else ""))
+        if p.get("url"):
+            lines.append(f"      🗺 <{p['url']}|카카오맵에서 보기>")
+    if data.get("deadline"):
+        lines += ["", f"⏰ 투표 마감: {data['deadline']}"]
+    r = slack("chat.postMessage", channel=data["channel"], text="\n".join(lines),
+              username="총무봇 · 투표", icon_emoji=":ballot_box_with_ballot:", unfurl_links="false")
+    for i in range(len(places)):
+        slack("reactions.add", channel=data["channel"], timestamp=r["ts"], name=NUM_EMOJI[i])
+    return {"ts": r["ts"], "channel": data["channel"]}
+
+
+def poll_tally(channel, ts):
+    msg = slack("reactions.get", channel=channel, timestamp=ts, full="true")["message"]
+    me = bot_user()
+    votes = {r["name"]: [u for u in r.get("users", []) if u != me] for r in msg.get("reactions", [])}
+    return {"options": [votes.get(e, []) for e in NUM_EMOJI]}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -170,7 +276,19 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        self.handle_api(lambda: list_members() if self.path == "/api/slack/members" else None)
+        url = urllib.parse.urlparse(self.path)
+        if not url.path.startswith("/api/"):
+            return self.static(url.path)
+        q = dict(urllib.parse.parse_qsl(url.query))
+        routes = {
+            "/api/slack/members": list_members,
+            "/api/config": lambda: {"kakaoJsKey": KAKAO_JS_KEY},
+            "/api/slack/poll": lambda: poll_tally(q.get("channel", ""), q.get("ts", "")),
+            "/api/places/nearby": lambda: {"places": kakao_search("", size=1, near=(
+                q.get("x", ""), q.get("y", ""), max(5, min(500, int(float(q.get("r", "30")))))))},
+            "/api/places/search": lambda: {"places": kakao_search(q.get("q", ""), size=8) if q.get("q", "").strip() else []},
+        }
+        self.handle_api(routes.get(url.path, lambda: None))
 
     def do_POST(self):
         n = int(self.headers.get("Content-Length") or 0)
@@ -182,11 +300,28 @@ class Handler(BaseHTTPRequestHandler):
             "/api/slack/channel": lambda: create_channel(data.get("name", ""), data.get("users", [])),
             "/api/slack/invite": lambda: invite(data.get("channel", ""), data.get("users", [])),
             "/api/slack/send": lambda: send(data),
+            "/api/slack/poll": lambda: poll_create(data),
+            "/api/places/recommend": lambda: recommend(data),
         }
         self.handle_api(routes.get(self.path, lambda: None))
 
+    def static(self, path):
+        """demo/ 폴더만 내려줌 (/ → /demo/index.html)"""
+        if path in ("/", ""):
+            self.send_response(302); self.send_header("Location", "/demo/index.html"); self.end_headers(); return
+        f = (ROOT / urllib.parse.unquote(path).lstrip("/")).resolve()
+        if not str(f).startswith(str(ROOT / "demo")) or not f.is_file():
+            return self.reply(404, {"error": "not_found"})
+        body = f.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", (mimetypes.guess_type(f.name)[0] or "application/octet-stream") + ("; charset=utf-8" if f.suffix == ".html" else ""))
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
     def handle_api(self, fn):
-        if not TOKEN:
+        if not TOKEN and fn is not None and self.path != "/api/config":
             return self.reply(500, {"error": "no_token"})
         try:
             out = fn()
@@ -202,5 +337,5 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     if not TOKEN:
         print("⚠️  .env 에 SLACK_BOT_TOKEN 이 없습니다.")
-    print(f"총무봇 Slack 서버: http://127.0.0.1:{PORT}")
+    print(f"총무봇 서버: http://127.0.0.1:{PORT}  (브라우저로 열면 데모 화면)")
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
