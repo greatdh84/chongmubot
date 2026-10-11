@@ -3,7 +3,9 @@
 demo/index.html 이 이 서버를 통해 실제 Slack 워크스페이스의 멤버를 불러오고
 채널을 만들어 초대합니다. 봇 토큰은 브라우저로 보내지 않고 이 서버만 가집니다.
 
-실행:  python3 app/server.py        (기본 http://127.0.0.1:8787)
+실행:  app/.venv/bin/python app/server.py   (기본 http://127.0.0.1:8787)
+       가상환경 준비: python3 -m venv app/.venv && app/.venv/bin/pip install slack_bolt
+       slack_bolt 가 없거나 SLACK_APP_TOKEN 이 없으면 응답 받기(버튼·입력창)만 빠지고 나머지는 동작
        브라우저에서 http://127.0.0.1:8787 을 열면 데모 화면 (카카오 지도는 이 주소에서만 동작)
 
 API
@@ -19,10 +21,15 @@ API
   GET  /api/places/nearby?x=&y=&r=  지도에서 클릭한 지점의 가장 가까운 음식점
   POST /api/slack/poll     {channel, title, options, deadline}  이모지 투표 메시지 + 번호 이모지 미리 달기
   POST /api/slack/thread   {channel, ts, text}  메시지 아래 스레드 댓글 (투표 마감 안내)
+  POST /api/survey/start   {channel, title, text, questions}  [응답하기] 버튼이 달린 참석 조사 메시지
+  GET  /api/survey?channel=  참석 조사 질문과 사람별 응답
+  GET  /api/socket         응답 받기(Socket Mode) 연결 상태
   GET  /api/slack/poll?channel=&ts=  번호 이모지별 투표자 (봇 반응 제외)
 """
 import json
 import mimetypes
+import threading
+import time
 import os
 import ssl
 import urllib.error
@@ -47,8 +54,12 @@ def load_env():
 
 
 load_env()
+# python.org 설치본(macOS)은 인증서가 없어 HTTPS·웹소켓이 실패하므로 시스템 인증서를 기본으로 (slack_sdk 포함)
+if Path("/etc/ssl/cert.pem").exists():
+    os.environ.setdefault("SSL_CERT_FILE", "/etc/ssl/cert.pem")
 TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
 OWNER = os.environ.get("SLACK_OWNER_USER_ID", "")  # 총무 본인의 Slack user ID (U로 시작)
+APP_TOKEN = os.environ.get("SLACK_APP_TOKEN", "")  # xapp-… Socket Mode (버튼·입력창 응답 받기)
 LLM_KEY = os.environ.get("LLM_API_KEY", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", "claude-haiku-5-5")
 KAKAO_KEY = os.environ.get("KAKAO_REST_API_KEY", "")
@@ -261,6 +272,130 @@ def poll_tally(channel, ts):
     return {"options": [votes.get(e, []) for e in NUM_EMOJI]}
 
 
+# ---------- 참석 조사 응답 받기 (Socket Mode) ----------
+# 채널별 질문과 응답을 app/data/survey.json 에 저장. 브라우저 대시보드가 5초마다 읽어 감
+DATA = ROOT / "app" / "data"
+SURVEY_FILE = DATA / "survey.json"
+LOCK = threading.Lock()
+SOCKET = {"connected": False, "error": ""}
+
+
+def survey_load():
+    try:
+        return json.loads(SURVEY_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def survey_save(db):
+    DATA.mkdir(exist_ok=True)
+    SURVEY_FILE.write_text(json.dumps(db, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def survey_start(data):
+    ch, qs = data.get("channel", ""), data.get("questions", [])
+    if not ch or not qs:
+        raise SlackError("bad_request")
+    blocks = [
+        {"type": "section", "text": {"type": "mrkdwn", "text": data.get("text") or "참석 여부를 알려 주세요!"}},
+        {"type": "actions", "elements": [{"type": "button", "action_id": "survey_open", "style": "primary",
+                                          "text": {"type": "plain_text", "text": "📝 응답하기"}, "value": ch}]},
+    ]
+    r = slack("chat.postMessage", channel=ch, text=data.get("text") or "참석 조사", blocks=json.dumps(blocks, ensure_ascii=False),
+              username="총무봇 · 참석 조사", icon_emoji=":memo:")
+    with LOCK:
+        db = survey_load()
+        old = db.get(ch, {})
+        db[ch] = {"title": data.get("title", "참석 조사"), "questions": qs, "ts": r["ts"], "users": old.get("users", {})}
+        survey_save(db)
+    return {"ts": r["ts"], "socket": SOCKET["connected"]}
+
+
+def survey_get(ch):
+    return survey_load().get(ch, {"questions": [], "users": {}})
+
+
+def survey_modal(ch, uid):
+    """질문 형식별 입력 요소: ox → 예/아니요, select → 선택지, number → 숫자, text → 글자. 이전 응답이 있으면 채워 둠"""
+    sv = survey_get(ch)
+    prev = sv.get("users", {}).get(uid, {})
+    blocks = []
+    for i, q in enumerate(sv.get("questions", [])):
+        key, typ, cur = q["key"], q.get("type", "text"), prev.get(q["key"])
+        if typ in ("ox", "select"):
+            opts = ["O", "X"] if typ == "ox" else [o.strip() for o in q.get("options", "").split(",") if o.strip()]
+            labels = {"O": "예", "X": "아니요"} if typ == "ox" else {}
+            el = {"type": "radio_buttons", "action_id": "v",
+                  "options": [{"text": {"type": "plain_text", "text": labels.get(o, o)}, "value": o} for o in opts]}
+            if cur in opts:
+                el["initial_option"] = el["options"][opts.index(cur)]
+        elif typ == "number":
+            el = {"type": "number_input", "action_id": "v", "is_decimal_allowed": False}
+            if cur not in (None, ""):
+                el["initial_value"] = str(cur)
+        else:
+            el = {"type": "plain_text_input", "action_id": "v"}
+            if cur:
+                el["initial_value"] = str(cur)
+        blocks.append({"type": "input", "block_id": f"q{i}", "label": {"type": "plain_text", "text": key},
+                       "element": el, "optional": key != "참석"})
+    return {"type": "modal", "callback_id": "survey_submit", "private_metadata": ch,
+            "title": {"type": "plain_text", "text": (sv.get("title") or "참석 조사")[:24]},
+            "submit": {"type": "plain_text", "text": "보내기"}, "close": {"type": "plain_text", "text": "취소"},
+            "blocks": blocks}
+
+
+def start_socket():
+    if not APP_TOKEN:
+        SOCKET["error"] = "SLACK_APP_TOKEN 없음"
+        return
+    try:
+        from slack_bolt import App
+        from slack_bolt.adapter.socket_mode import SocketModeHandler
+    except ImportError:
+        SOCKET["error"] = "slack_bolt 미설치 (app/.venv/bin/python 으로 실행)"
+        return
+    app = App(token=TOKEN)
+
+    @app.action("survey_open")
+    def on_open(ack, body, client):
+        ack()
+        client.views_open(trigger_id=body["trigger_id"], view=survey_modal(body["actions"][0]["value"], body["user"]["id"]))
+
+    @app.view("survey_submit")
+    def on_submit(ack, body, client):
+        ack()
+        ch, uid = body["view"]["private_metadata"], body["user"]["id"]
+        values = body["view"]["state"]["values"]
+        with LOCK:
+            db = survey_load()
+            sv = db.setdefault(ch, {"questions": [], "users": {}})
+            ans = {}
+            for i, q in enumerate(sv.get("questions", [])):
+                v = values.get(f"q{i}", {}).get("v", {})
+                val = (v.get("selected_option") or {}).get("value") if v.get("type") == "radio_buttons" else v.get("value")
+                if val not in (None, ""):
+                    ans[q["key"]] = val
+            ans["_at"] = time.strftime("%m/%d %H:%M")
+            sv.setdefault("users", {})[uid] = ans
+            survey_save(db)
+        summary = " · ".join(f"{k} {v}" for k, v in ans.items() if not k.startswith("_"))
+        # 사람 ID로 바로 보내면 Slack 알림 방으로 가므로, 총무봇 DM 방을 열어서 보냄
+        dm = client.conversations_open(users=uid)["channel"]["id"]
+        client.chat_postMessage(channel=dm, text=f"응답 고마워요! 🙌\n{summary}\n바뀌면 [응답하기]를 다시 눌러 고칠 수 있어요.",
+                                username="총무봇 · 참석 조사", icon_emoji=":memo:")
+
+    def run():
+        try:
+            SocketModeHandler(app, APP_TOKEN).connect()
+            SOCKET.update(connected=True, error="")
+            print("Socket Mode 연결됨 (응답 받기 켜짐)")
+        except Exception as e:
+            SOCKET.update(connected=False, error=str(e))
+            print("Socket Mode 연결 실패:", e)
+    threading.Thread(target=run, daemon=True).start()
+
+
 class Handler(BaseHTTPRequestHandler):
     def cors(self):
         origin = self.headers.get("Origin", "")
@@ -292,6 +427,8 @@ class Handler(BaseHTTPRequestHandler):
         routes = {
             "/api/slack/members": list_members,
             "/api/config": lambda: {"kakaoJsKey": KAKAO_JS_KEY},
+            "/api/socket": lambda: dict(SOCKET),
+            "/api/survey": lambda: survey_get(q.get("channel", "")),
             "/api/slack/poll": lambda: poll_tally(q.get("channel", ""), q.get("ts", "")),
             "/api/places/nearby": lambda: {"places": kakao_search("", size=1, near=(
                 q.get("x", ""), q.get("y", ""), max(5, min(500, int(float(q.get("r", "30")))))))},
@@ -311,6 +448,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/slack/send": lambda: send(data),
             "/api/slack/poll": lambda: poll_create(data),
             "/api/slack/thread": lambda: thread_reply(data),
+            "/api/survey/start": lambda: survey_start(data),
             "/api/places/recommend": lambda: recommend(data),
         }
         self.handle_api(routes.get(self.path, lambda: None))
@@ -347,5 +485,8 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     if not TOKEN:
         print("⚠️  .env 에 SLACK_BOT_TOKEN 이 없습니다.")
+    start_socket()
+    if SOCKET["error"]:
+        print("응답 받기 꺼짐:", SOCKET["error"])
     print(f"총무봇 서버: http://127.0.0.1:{PORT}  (브라우저로 열면 데모 화면)")
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

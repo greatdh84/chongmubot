@@ -26,7 +26,9 @@ docs/   기획안, flowchart, 회의 메모
 1. https://api.slack.com/apps → Create New App → From a manifest → 워크스페이스 선택 → [app/slack-manifest.json](app/slack-manifest.json) 붙여넣기
 2. OAuth & Permissions → Bot Token Scopes: `users:read`, `channels:manage`, `channels:read`, `chat:write`, `chat:write.customize`, `im:write`, `reactions:read`, `reactions:write` → Install to Workspace
 3. `.env` 에 `SLACK_BOT_TOKEN=xoxb-…`, `SLACK_OWNER_USER_ID=U…` (Slack 내 프로필 → ⋮ → 멤버 ID 복사), `LLM_API_KEY=sk-ant-…` (없으면 예시 문구 그대로 발송), `KAKAO_REST_API_KEY` · `KAKAO_JS_KEY` (회식 장소 검색·지도. developers.kakao.com → 앱 키, 카카오맵 사용 ON, JavaScript SDK 도메인에 `http://127.0.0.1:8787` · `http://localhost:8787` 등록)
-4. `python3 app/server.py` (설치할 패키지 없음, http://127.0.0.1:8787)
+4. 처음 한 번: `python3 -m venv app/.venv && app/.venv/bin/pip install slack_bolt`
+   실행: `app/.venv/bin/python app/server.py` (http://127.0.0.1:8787)
+   - 참석 조사 [응답하기] 버튼을 쓰려면 Slack 앱에서 Socket Mode를 켜고 `.env` 에 `SLACK_APP_TOKEN=xapp-…` (scope `connections:write`)
 5. 브라우저로 http://127.0.0.1:8787 을 열면 데모가 서버와 함께 동작 (카카오 지도는 이 주소에서만 보임)
 
 채널 이름은 공백·마침표·대문자 없이 80자 이하여야 합니다.

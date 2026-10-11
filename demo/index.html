@@ -1137,9 +1137,7 @@ function renderDinnerDash(){
       <div class="polls">${pollCard('date')}${pollCard('place')}</div>
       ${ready ? `<div class="card next"><div><b>날짜와 장소가 모두 정해졌어요</b><div class="small muted">확정 공지를 보내고 참석 조사로 넘어가요.</div></div><span class="grow"></span>
         <span class="hitl">HITL 2</span><button class="btn yellow" data-act="startSurvey">확정 공지 + 참석 조사 시작</button></div>` : ''}`
-    : `<section class="card" style="margin-bottom:16px"><div class="card-h"><h3>📋 2단계 · 참석 조사</h3><span class="tag">준비 중</span></div>
-        <div class="card-b"><p style="margin:0">📅 ${esc(d ? d.label : '-')} · 📍 ${esc(pl ? pl.label : '-')}${pl && pl.url ? ` · <a href="${esc(pl.url)}" target="_blank" rel="noopener">카카오맵 ›</a>` : ''}</p>
-        <p class="small muted" style="margin:6px 0 0">참석·1차/2차·도착 시간·음주 여부를 묻는 참석 조사는 다음 작업에서 만들어요.</p></div></section>`}
+    : surveyCard(d, pl)}
     <div class="dash">
       <div class="col">
         <section class="card">
@@ -1180,6 +1178,10 @@ function dinnerPersonRow(p, ph){
     else if (S.paused || eff(p).stop) status = '<span class="tag">⏸ 독촉 멈춤</span>';
     else status = `<span class="small">다음 자동 독촉 <b data-due="${nextDue(p)}">…</b> · ${(p.vstage || 0) + 1}차</span>`;
   }
+  if (ph !== 'plan'){
+    const f = surveyQuestions().filter(q => q.key !== '참석').map(q => p.fields[q.key] ? `<span class="tag">${esc(q.key)} ${esc(p.fields[q.key])}</span>` : '').join('');
+    status = p.surveyAt ? `${chip(p.attend)}${f}<span class="small muted">${esc(p.surveyAt)}</span>` : '<span class="tag r">무응답</span>';
+  }
   const canSend = ph === 'plan' && miss.length && (p.vstage || 0) < 3;
   const m = canSend ? nextVoteMsg(p) : null;
   return `<div class="drow ${open ? 'open' : ''}">
@@ -1190,6 +1192,45 @@ function dinnerPersonRow(p, ph){
       : `<p class="small muted" style="margin:0">${ph === 'plan' ? (miss.length ? '독촉을 3번 보냈어요. 직접 연락해 주세요.' : '투표를 마쳐서 독촉 대상이 아니에요.') : '참석 조사 단계에서 응답을 받아요.'}</p>`}</div>` : ''}
   </div>`;
 }
+
+// 2단계 참석 조사: 이름·회비를 뺀 조사 항목을 Slack [응답하기] 입력창으로 받음
+const surveyQuestions = () => S.schema.filter(c => !['이름', '회비'].includes(c.key))
+  .map(c => ({key:c.key, type:c.type, options:c.key === '참석' ? '참석,부분,불참' : c.options || ''}));
+function surveyText(){
+  const d = decidedValue('date'), p = decidedValue('place');
+  return `📋 *${S.event.name} 참석 조사*\n📅 ${d ? d.label : '-'}  ·  📍 ${p ? p.label : '-'}\n아래 *[응답하기]* 를 눌러 ${surveyQuestions().map(q => q.key).join(', ')}을(를) 알려 주세요! 나중에 다시 눌러 고칠 수 있어요.`;
+}
+function surveyCard(d, pl){
+  const sv = S.survey || {}, ps = people(), done = ps.filter(p => p.surveyAt).length;
+  const head = `<p style="margin:0">📅 ${esc(d ? d.label : '-')} · 📍 ${esc(pl ? pl.label : '-')}${pl && pl.url ? ` · <a href="${esc(pl.url)}" target="_blank" rel="noopener">카카오맵 ›</a>` : ''}</p>`;
+  const sock = SLACK.status !== 'on' ? '<span class="tag">데모</span>' : UI.socket && UI.socket.connected ? '<span class="tag g">● 응답 받기 연결됨</span>' : `<span class="tag o" title="${esc((UI.socket || {}).error || '')}">응답 받기 꺼짐</span>`;
+  if (!sv.ts) return `<section class="card" style="margin-bottom:16px"><div class="card-h"><h3>📋 2단계 · 참석 조사</h3>${sock}<span class="grow"></span>
+      <span class="hitl">HITL</span><button class="btn yellow" data-act="surveySend">참석 조사 보내기</button></div>
+    <div class="card-b">${head}
+      <p class="small muted" style="margin:8px 0 6px">채널에 [📝 응답하기] 버튼이 달린 메시지가 올라가고, 누르면 아래 질문이 담긴 입력창이 떠요.</p>
+      <div class="row wrap">${surveyQuestions().map(q => `<span class="tag">${esc(q.key)} · ${TYPE_LB[q.type]}</span>`).join('')}</div></div></section>`;
+  return `<section class="card" style="margin-bottom:16px"><div class="card-h"><h3>📋 2단계 · 참석 조사</h3>${sock}<span class="grow"></span>
+      <b>${done} / ${ps.length}명 응답</b></div>
+    <div class="card-b">${head}<div class="bar" style="margin-top:8px"><i style="width:${ps.length ? done / ps.length * 100 : 0}%"></i></div>
+      <p class="small muted" style="margin:6px 0 0">응답이 들어오면 5초 안에 아래 목록과 시트에 반영돼요.${SLACK.status === 'on' && !(UI.socket || {}).connected ? ' ⚠️ 서버의 응답 받기가 꺼져 있어 버튼을 눌러도 입력창이 안 떠요.' : ''}</p></div></section>`;
+}
+// 응답 읽어 오기 (5초마다) → 참석·조사 항목에 반영
+async function surveyPull(){
+  if (!voteOn() || S.phase !== 'survey' || !S.survey || !S.survey.ts || SLACK.status !== 'on') return;
+  try {
+    const [sv, sock] = await Promise.all([slackApi(`/api/survey?channel=${encodeURIComponent(S.slackChannel)}`), slackApi('/api/socket')]);
+    let changed = JSON.stringify(sock) !== JSON.stringify(UI.socket); UI.socket = sock;
+    Object.entries(sv.users || {}).forEach(([uid, ans]) => {
+      const m = MEMBERS.find(x => x.slackId === uid), p = m && S.people[m.id];
+      if (!p || p.surveyAt === ans._at) return;
+      Object.entries(ans).forEach(([k, v]) => { if (k === '참석') p.attend = v; else if (!k.startsWith('_')) p.fields[k] = v; });
+      p.surveyAt = ans._at; changed = true;
+      log('기록', `${MEM[m.id].name}님 참석 조사 응답 → 시트 반영 (${ans['참석'] || '-'})`);
+    });
+    if (changed && (!document.activeElement || !document.activeElement.matches('#app input, #app select'))) render();
+  } catch(e){}
+}
+setInterval(surveyPull, 5000);
 
 // 1단계 대시보드: 날짜·장소 카드 (총무가 정했으면 값, 투표면 실시간 득표)
 function pollCard(kind){
@@ -1897,6 +1938,19 @@ document.addEventListener('click', e => {
       if (SLACK.status === 'on' && S.slackChannel) slackSend({channel:S.slackChannel}, {text:dinnerConfirmText(), label:'일정 확정 공지', mood:''}, S.persona, '일정 확정 공지', {raw:true});
       else log('소통', `#${S.channel} 일정 확정 공지 (데모)`);
       break;
+    case 'surveySend':
+      modal(`<div class="mh"><span class="hitl">HITL</span><h3 class="grow">참석 조사를 보낼까요?</h3><button class="btn sm ghost" data-act="closeModal">✕</button></div>
+        <div class="mb"><div class="slack">${bubble(surveyText().replace(/\*/g, '') + '\n[ 📝 응답하기 ]', '', false)}</div>
+          <p class="small muted">#${esc(S.channel)}에 올라가요. 입력창 질문: ${surveyQuestions().map(q => esc(q.key)).join(' · ')}</p></div>
+        <div class="mf"><button class="btn" data-act="closeModal">취소</button><button class="btn yellow" data-act="doSurveySend">보내기</button></div>`); return;
+    case 'doSurveySend':
+      closeModal();
+      if (SLACK.status === 'on' && S.slackChannel){
+        slackApi('/api/survey/start', {channel:S.slackChannel, title:`${S.event.name} 참석 조사`, text:surveyText(), questions:surveyQuestions()})
+          .then(r => { S.survey = {ts:r.ts}; log('소통', `#${S.channel} 참석 조사 메시지 발송 ([응답하기] 버튼)`); toast('참석 조사를 보냈어요'); render(); surveyPull(); })
+          .catch(e => toast(`참석 조사 실패: ${slackErr(e.message)}`));
+      } else { S.survey = {ts:'demo'}; log('소통', `#${S.channel} 참석 조사 메시지 (데모)`); toast('참석 조사를 보냈어요 (데모)'); render(); }
+      return;
     case 'voteRemind': { const p = S.people[d.id]; if (p) sendVoteReminder(p, true); return; }
     case 'inviteNone': S.invited = ['me']; break;
     case 'tpl':
