@@ -13,7 +13,7 @@ API
   GET  /api/slack/members                 워크스페이스 이름 + 사람 멤버 목록
   POST /api/slack/channel  {name, users}  채널 생성 후 users 초대
   POST /api/slack/invite   {channel, users} 기존 채널에 추가 초대
-  POST /api/slack/send     {channel|user, text, persona, situation, name}
+  POST /api/slack/send     {channel|user, text, persona, situation, name, survey_channel?}
                            Claude 가 성격에 맞게 문구를 다시 쓰고(키 없거나 실패 시 text 그대로) 채널/DM 발송
   POST /api/places/recommend {area, food, prefs, drink}
                            카카오 로컬 검색 결과 중 Claude 가 조건에 맞는 후보를 골라 이유·예상 금액을 붙임
@@ -24,6 +24,7 @@ API
   POST /api/survey/start   {channel, title, text, questions}  [응답하기] 버튼이 달린 참석 조사 메시지
   GET  /api/survey?channel=  참석 조사 질문과 사람별 응답
   GET  /api/socket         응답 받기(Socket Mode) 연결 상태
+  POST /api/slack/cancel   {channel, text}  모임 취소 안내, 참석 조사 기록 삭제 (채널은 그대로 둠)
   GET  /api/slack/poll?channel=&ts=  번호 이모지별 투표자 (봇 반응 제외)
 """
 import json
@@ -170,7 +171,14 @@ def send(data):
     new = None if data.get("raw") else rewrite(text, persona, data.get("situation", ""), data.get("name", ""))
     text = (new or text) + (("\n" + data["extra"]) if data.get("extra") else "")
     channel = data.get("channel") or slack("conversations.open", users=data.get("user", ""))["channel"]["id"]
-    slack("chat.postMessage", channel=channel, text=text, username=f"총무봇 · {label}", icon_emoji=icon)
+    extra = {}
+    if data.get("survey_channel"):  # 참석 조사 독촉: 메시지에 [응답하기] 버튼을 달아 바로 입력창을 열 수 있게
+        extra["blocks"] = json.dumps([
+            {"type": "section", "text": {"type": "mrkdwn", "text": text}},
+            {"type": "actions", "elements": [{"type": "button", "action_id": "survey_open", "style": "primary",
+                                              "text": {"type": "plain_text", "text": "📝 응답하기"}, "value": data["survey_channel"]}]},
+        ], ensure_ascii=False)
+    slack("chat.postMessage", channel=channel, text=text, username=f"총무봇 · {label}", icon_emoji=icon, **extra)
     return {"text": text, "llm": bool(new)}
 
 
@@ -396,6 +404,19 @@ def start_socket():
     threading.Thread(target=run, daemon=True).start()
 
 
+def cancel_meeting(data):
+    ch = data.get("channel", "")
+    if not ch:
+        raise SlackError("bad_request")
+    slack("chat.postMessage", channel=ch, text=data.get("text") or "이번 모임은 취소되었습니다.",
+          username="총무봇", icon_emoji=":frog:")
+    with LOCK:
+        db = survey_load()
+        if db.pop(ch, None) is not None:
+            survey_save(db)
+    return {"ok": True}
+
+
 class Handler(BaseHTTPRequestHandler):
     def cors(self):
         origin = self.headers.get("Origin", "")
@@ -449,6 +470,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/slack/poll": lambda: poll_create(data),
             "/api/slack/thread": lambda: thread_reply(data),
             "/api/survey/start": lambda: survey_start(data),
+            "/api/slack/cancel": lambda: cancel_meeting(data),
             "/api/places/recommend": lambda: recommend(data),
         }
         self.handle_api(routes.get(self.path, lambda: None))

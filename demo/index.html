@@ -125,6 +125,9 @@ img.av{object-fit:cover;background:var(--grey-l)}
 .vote-row{display:grid;grid-template-columns:24px 1fr 1.6fr auto auto;gap:6px;align-items:center;margin-bottom:6px}
 .vote-row .num{font-size:16px}
 .place-search .btn{white-space:nowrap}
+.btn.danger-o{color:#a8322e;border-color:#e8b9b6}
+.btn.danger-o:hover{background:var(--red-l)}
+.btn.danger-fill{background:#c9453f;border-color:#c9453f;color:#fff}
 .kmap{position:relative;width:100%;height:440px;border-radius:12px;overflow:hidden;border:1px solid var(--line)}
 #mapSlot{position:relative;width:100%;overflow:hidden}
 .pin{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;border:2px solid #fff;color:#fff;font-weight:800;font-size:12px;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.3)}
@@ -159,6 +162,7 @@ img.av{object-fit:cover;background:var(--grey-l)}
 .steps .sep{width:18px;height:2px;background:var(--line)}
 .polls{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
 .poll-fixed{font-size:18px;font-weight:800;margin-bottom:4px}
+.card.remind{display:flex;align-items:center;gap:10px;padding:10px 16px;margin-bottom:16px}
 .card.next{display:flex;align-items:center;gap:10px;padding:14px 16px;margin-bottom:16px;border-color:var(--green);background:var(--green-l)}
 .drow{border-top:1px solid var(--line)}
 .drow-h{display:flex;align-items:center;gap:8px;padding:10px 16px;cursor:pointer;flex-wrap:wrap}
@@ -509,19 +513,75 @@ const VOTE_LINES = {
   active:{
     soft:'{name}님~ {event} {what} 투표 아직이에요! 😆 이모지 하나만 콕 눌러주세요~ (마감 {deadline})',
     firm:'{name}님! {what} 투표 꼭 부탁드려요 🙏 여러 개 골라도 돼요! {deadline} 마감이에요~',
-    last:'{name}님!! 오늘 {dtime} {what} 투표 마감이에요 ⏰ 안 하시면 다수결로 정할게요!'
+    last:'{name}님!! 오늘 {dtime} {what} 투표 마감이에요 ⏰ 안 하시면 다수결로 정할게요!',
+    burst:'{name}님!!!!! {what} 투표!!! 이모지 하나!!! 왜 안 누르세요!!! 😤😤'
   },
   shy:{
     soft:'{name}님… 혹시 {what} 투표… 시간 되실 때 눌러주실 수 있을까요…? 🥹 ({deadline} 마감이에요)',
     firm:'{name}님… 자꾸 연락드려서 죄송해요… {what} 투표만 부탁드려도 될까요…?',
-    last:'{name}님… 오늘 {dtime}에 {what} 투표가 끝나요… 그 전에 꼭… 부탁드려요… 🙏'
+    last:'{name}님… 오늘 {dtime}에 {what} 투표가 끝나요… 그 전에 꼭… 부탁드려요… 🙏',
+    burst:'…{name}님. 저도 참을 만큼 참았어요. 지금 {what} 투표해 주세요.'
   },
   grumpy:{
     soft:'{name}님, {what} 투표 바랍니다. 마감 {deadline}.',
     firm:'{name}님, {what} 투표 아직입니다. 이모지 하나면 됩니다.',
-    last:'{name}님. 오늘 {dtime} {what} 투표 마감. 미참여 시 다수결로 정합니다.'
+    last:'{name}님. 오늘 {dtime} {what} 투표 마감. 미참여 시 다수결로 정합니다.',
+    burst:'{name}님. 몇 번째인지 세어보셨어요? 저는 셌습니다. 투표하세요. 😑'
   }
 };
+// 투표 단체방 독촉 (이름 없이 인원만) · {n}: 미투표 인원, {what}: 열린 투표(날짜·장소)
+const VOTE_GROUP = {
+  active:{soft:'아직 {n}명이 {what} 투표를 안 했어요! 😆 위 투표 메시지에 이모지 하나만 콕 눌러주세요~ (마감 {deadline})',
+    firm:'{what} 투표 {n}명 남았어요!! 🙏 여러 개 골라도 돼요! 마감 {deadline}이에요~',
+    last:'투표 마감 임박!! ⏰ 아직 {n}명이에요! {dtime}까지 안 하시면 다수결로 정할게요!',
+    burst:['아직!!! {n}명!!! 이모지!!! 하나만!!! 눌러주세요!!! 😤😤', '{n}분!!! 투표 메시지 보신 거 다 알아요!!! 👀🔥'],
+    sorry:['앗 너무 흥분했네요 😅 {n}분 천천히 눌러주세요~ 🌸', 'ㅎㅎ 농담이에요~ 💕 {n}분 편하실 때 투표 부탁드려요!']},
+  shy:{soft:'저기… 아직 {n}분이 {what} 투표를… 안 하셔서요… 위 메시지에 이모지 하나만… 부탁드려도 될까요…? 🥹',
+    firm:'자꾸 말씀드려서 죄송해요… {what} 투표 {n}분 남았어요… {deadline}까지예요…',
+    last:'정말 죄송한데요… 오늘 {dtime}에 투표가 끝나요… 아직 {n}분… 꼭… 🙏',
+    burst:['…{n}분. 저도 참을 만큼 참았어요. 지금 투표해 주세요.', '{n}분!!!! 저 이거 쓰려고 30분 고민했다고요!!!'],
+    sorry:['헉… 제가 방금 무슨 말을… 죄송해요… 잊어주세요… 😳', '아까 건 실수예요… 정말 죄송해요… {n}분 천천히… 🙇']},
+  grumpy:{soft:'{what} 투표 미참여 {n}명. 이모지 하나면 됩니다. 마감 {deadline}.',
+    firm:'아직 {n}명입니다. 투표 메시지 위에 있습니다.',
+    last:'{dtime} 투표 마감. 미참여 {n}명. 마감 후엔 다수결로 정합니다.',
+    burst:['{n}명. 몇 번째 말씀드리는지 세어보셨어요? 저는 셌습니다.', '읽씹은 기권으로 간주합니다. 😑'],
+    sorry:['…방금 건 좀 심했네요. 그래도 투표는 해 주세요.', '흠. 기분 상하셨다면 유감입니다. 투표는 여전히 필요합니다.']}
+};
+// 참석 조사 단체방 독촉 (이름 없이 인원만) · {n}: 미응답 인원
+const SURVEY_GROUP = {
+  active:{soft:'아직 {n}명이 참석 조사에 답하지 않았어요! 😆 아래 [응답하기] 한 번만 눌러주세요~ (마감 {deadline})',
+    firm:'{n}명 남았어요!! 🙏 [응답하기] 눌러서 참석이랑 1·2차 알려주세요! 마감 {deadline}이에요~',
+    last:'마감 임박!! ⏰ 아직 {n}명이에요! {dtime}까지 꼭 [응답하기] 부탁드려요!!',
+    burst:['아직!!! {n}명!!! 왜!!! 답이!!! 없으세요!!! 😤😤', '{n}분!!! 메시지 읽으신 거 다 보여요!!! 👀🔥'],
+    sorry:['앗 방금 너무 흥분했네요 😅 {n}분 천천히 눌러주세요~ 🌸', 'ㅎㅎ 농담이에요~ 💕 {n}분 편하실 때 부탁드려요!']},
+  shy:{soft:'저기… 아직 {n}분이 참석 조사에… 답을 안 하셔서요… 시간 되실 때 [응답하기] 눌러주실 수 있을까요…? 🥹',
+    firm:'자꾸 말씀드려서 죄송해요… 아직 {n}분 남았어요… {deadline}까지 부탁드려요…',
+    last:'정말 죄송한데요… 오늘 {dtime}에 참석 조사가 끝나요… 아직 {n}분… 꼭… 🙏',
+    burst:['…{n}분. 저도 참을 만큼 참았어요. 지금 눌러 주세요.', '{n}분!!!! 저 이거 쓰려고 30분 고민했다고요!!!'],
+    sorry:['헉… 제가 방금 무슨 말을… 죄송해요… 잊어주세요… 😳', '아까 건 실수예요… 정말 죄송해요… {n}분 천천히… 🙇']},
+  grumpy:{soft:'참석 조사 미응답 {n}명. [응답하기] 바랍니다. 마감 {deadline}.',
+    firm:'아직 {n}명입니다. 버튼 하나 누르는 일입니다.',
+    last:'{dtime} 마감. 미응답 {n}명. 마감 후엔 불참으로 처리합니다.',
+    burst:['{n}명. 몇 번째 말씀드리는지 세어보셨어요? 저는 셌습니다.', '읽씹은 대답으로 간주합니다. {n}명 불참 처리할까요? 😑'],
+    sorry:['…방금 건 좀 심했네요. 그래도 답은 주세요.', '흠. 기분 상하셨다면 유감입니다. 응답은 여전히 필요합니다.']}
+};
+// 참석 조사 개인 DM (총무가 대시보드에서 보낼 때만)
+const SURVEY_DM = {
+  active:{soft:'{name}님~ {event} 오시나요? 😆 [응답하기] 눌러서 참석이랑 1·2차만 알려주세요! (마감 {deadline})',
+    firm:'{name}님! 참석 조사 아직이세요 🙏 버튼 하나면 끝나요~ {deadline} 마감이에요!', last:'{name}님!! 오늘 {dtime} 마감이에요 ⏰ 꼭 [응답하기] 부탁드려요!',
+    burst:'{name}님!!!!! 왜!!! 답이!!! 없으세요!!! 😤😤 지금 당장 [응답하기]!!!'},
+  shy:{soft:'{name}님… 혹시 {event} 오실 수 있을지… [응답하기]로 알려주실 수 있을까요…? 🥹',
+    firm:'{name}님… 바쁘신데 죄송해요… 참석 조사만 부탁드려도 될까요…?', last:'{name}님… 오늘 {dtime}까지라서요… 꼭… 부탁드려요… 🙏',
+    burst:'…{name}님. 저도 참을 만큼 참았어요. 지금 [응답하기] 눌러 주세요.'},
+  grumpy:{soft:'{name}님, 참석 조사 응답 바랍니다. 마감 {deadline}.', firm:'{name}님, 아직 미응답입니다. [응답하기] 누르세요.',
+    last:'{name}님. {dtime} 마감. 미응답 시 불참 처리합니다.',
+    burst:'{name}님. 몇 번째인지 세어보셨어요? 저는 셌습니다. 지금 누르세요. 😑'}
+};
+// 개인 DM 강도·빈도 (총무가 정함)
+const DM_TONES = {soft:'😇 친절', firm:'🙂 단호', last:'😠 엄격', burst:'🤬 버럭', escalate:'📈 점점 강하게'};
+const DM_EVERY = [[10800, '3시간'], [3600, '1시간'], [1800, '30분'], [600, '10분'], [15, '15초']];
+const everyLabel = sec => (DM_EVERY.find(x => x[0] === +sec) || [0, freqText({h:0, m:0, s:sec})])[1];
+const dmTone = (tone, sent) => tone === 'escalate' ? ['soft', 'firm', 'last'][Math.min(sent, 2)] : tone;
 const MOOD = {soft:'😇 친절', firm:'🙂 단호', last:'😠 엄격', g:'😇 친절', dm0:'😇 친절', dl0:'😇 친절', dm1:'🙂 단호', dl2:'😠 엄격', burst:'🤬 버럭', sorry:'🙏 급사과'};
 
 /* ---------- 유틸 ---------- */
@@ -577,9 +637,51 @@ function voteSequence(persona, strategy, ctx, seed){
   }
   return ks.map(mk);
 }
+// 참석 조사 단체방 독촉 순서: 일관=친절 반복, 강화=친절→단호→엄격(이후 엄격), 급발진=무작위
+// 단체방 독촉 문구 공통: 일관=친절 반복, 강화=친절→단호→엄격(이후 엄격), 급발진=무작위
+function groupMsgFrom(L, st, ctx, label){
+  const k0 = st.gstage || 0, rng = rngFrom(S.chaosSeed * 31 + k0);
+  const k = S.strategy === 'consistent' ? 'soft' : S.strategy === 'escalate' ? ['soft', 'firm', 'last'][Math.min(k0, 2)]
+    : k0 === 0 ? 'soft' : (st.lastK === 'burst' ? (rng() < .65 ? 'sorry' : 'burst') : (rng() < .5 ? 'burst' : 'firm'));
+  const t = Array.isArray(L[k]) ? L[k][Math.floor(rng() * L[k].length)] : L[k];
+  return {k, label:`${label} ${k0 + 1}차`, ch:'group', mood:MOOD[k], text:fill(t, ctx)};
+}
+const dlCtx = iso => { const d = new Date(iso); return {deadline:fmtDeadline(iso), dtime:isNaN(d) ? '' : `${d.getHours()}시${d.getMinutes() ? ` ${d.getMinutes()}분` : ''}`}; };
+const openVoteNames = () => ['date', 'place'].filter(isOpen).map(k => VOTES[k].label).join('·');
+const surveyGroupMsg = () => groupMsgFrom(SURVEY_GROUP[S.persona], S.survey, {n:surveyPending().length, event:S.event.name, ...dlCtx(S.survey.deadline)}, '참석 조사 단체 독촉');
+const voteGroupMsg = () => groupMsgFrom(VOTE_GROUP[S.persona], S.voteGroup, {n:votePending().length, what:openVoteNames(), event:S.event.name, ...dlCtx(voteDeadline())}, '투표 단체 독촉');
+function voteDmMsg(p, k){
+  const e = eff(p), n = p.sdm || 0;
+  k = k || (e.strategy === 'consistent' ? 'soft' : ['soft', 'firm', 'last'][Math.min(n, 2)]);
+  return {k, label:`투표 개인 DM ${n + 1}차`, ch:'dm', mood:MOOD[k] || '🤬 버럭',
+    text:fill(VOTE_LINES[e.persona][k], {name:dmName(p.id), event:S.event.name, what:missingVotes(p.id).join('·') || openVoteNames(), ...dlCtx(voteDeadline())})};
+}
+// 단계별 독촉 공통 (1단계 투표 · 2단계 참석 조사)
+const votePending = () => people().filter(p => missingVotes(p.id).length);
+const phaseActive = () => voteOn() && S.started && (S.phase === 'plan' ? ['date', 'place'].some(isOpen) : S.phase === 'survey' && !!(S.survey && S.survey.ts));
+const phasePending = () => S.phase === 'survey' ? surveyPending() : votePending();
+const phaseDeadline = () => S.phase === 'survey' ? S.survey.deadline : voteDeadline();
+const groupState = () => S.phase === 'survey' ? S.survey : (S.voteGroup = S.voteGroup || {gstage:0, lastGroup:Date.now()});
+const dmMsg = (p, k) => S.phase === 'survey' ? surveyDmMsg(p, k) : voteDmMsg(p, k);
+function surveyDmMsg(p, k){
+  const e = eff(p), L = SURVEY_DM[e.persona], n = p.sdm || 0, d = new Date(S.survey.deadline);
+  k = k || (e.strategy === 'consistent' ? 'soft' : ['soft', 'firm', 'last'][Math.min(n, 2)]);
+  return {k, label:`참석 조사 개인 DM ${n + 1}차`, ch:'dm', mood:MOOD[k] || '🤬 버럭',
+    text:fill(L[k], {name:dmName(p.id), event:S.event.name, deadline:fmtDeadline(S.survey.deadline), dtime:isNaN(d) ? '' : `${d.getHours()}시`})};
+}
+const surveyPending = () => people().filter(p => !p.surveyAt);
+const dmName = id => id === 'me' ? '총무' : shortName(id); // 본인에게 가는 DM은 '나님' 대신 '총무님'
+// 모임 시작 시각 (확정된 날짜) → 참석 조사 마감 기본값: 3시간 전
+function eventAt(){
+  const D = S.dinner;
+  if (D.dateMode === 'fixed') return `${D.date}T${D.time || '19:00'}`;
+  const o = VOTES.date.options()[D.dateVote.winner]; return o ? o.at : '';
+}
+function toLocalInput(ms){ const d = new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+
 function nextVoteMsg(p){
   const e = eff(p), d = new Date(voteDeadline());
-  const ctx = {name:shortName(p.id), event:S.event.name, what:missingVotes(p.id).join('·') || '날짜·장소', deadline:fmtDeadline(voteDeadline()), dtime:isNaN(d) ? '' : `${d.getHours()}시`};
+  const ctx = {name:dmName(p.id), event:S.event.name, what:missingVotes(p.id).join('·') || '날짜·장소', deadline:fmtDeadline(voteDeadline()), dtime:isNaN(d) ? '' : `${d.getHours()}시`};
   return voteSequence(e.persona, e.strategy, ctx, hashStr(p.id) + (p.vstage || 0) * 17 + S.chaosSeed)[Math.min(p.vstage || 0, 2)];
 }
 
@@ -689,7 +791,7 @@ function seedRun(){
   S.invited.forEach(id => S.people[id] = buildPerson(id));
   if (voteOn()){
     // 회식: 날짜·장소가 둘 다 정해져 있으면 투표 단계를 건너뛰고 참석 조사로
-    S.dinner.dateVote = defaultPoll(); Object.assign(S.vote, defaultPoll());
+    S.dinner.dateVote = defaultPoll(); Object.assign(S.vote, defaultPoll()); S.voteGroup = {gstage:0, lastGroup:Date.now()};
     S.phase = decided('date') && decided('place') ? 'survey' : 'plan';
     log('총무', '설정 확인 · 총무봇 시작 (HITL 1)');
     return;
@@ -1125,6 +1227,7 @@ function renderDinnerDash(){
     ${S.paused ? '<span class="tag o">⏸ 봇 일시정지</span>' : '<span class="tag g">● 봇 동작 중</span>'}
     <div class="grow"></div>
     <button class="btn" data-act="goSetup">⚙️ 전체 설정</button>
+    <button class="btn danger-o" data-act="cancelMeet">⏹ 모임 중단</button>
   </div></header>
   <main class="page">
     <div class="headline"><div>
@@ -1135,6 +1238,7 @@ function renderDinnerDash(){
     <div class="steps">${PHASES.map(([k, l], i) => `<div class="step ${i < idx ? 'done' : i === idx ? 'now' : ''}"><span class="n">${i < idx ? '✓' : i + 1}</span>${l}${i === 0 && bothFixed ? '<small>총무가 정하기</small>' : ''}</div>`).join('<span class="sep"></span>')}</div>
     ${ph === 'plan' ? `
       <div class="polls">${pollCard('date')}${pollCard('place')}</div>
+      ${voteRemindBar()}
       ${ready ? `<div class="card next"><div><b>날짜와 장소가 모두 정해졌어요</b><div class="small muted">확정 공지를 보내고 참석 조사로 넘어가요.</div></div><span class="grow"></span>
         <span class="hitl">HITL 2</span><button class="btn yellow" data-act="startSurvey">확정 공지 + 참석 조사 시작</button></div>` : ''}`
     : surveyCard(d, pl)}
@@ -1151,7 +1255,9 @@ function renderDinnerDash(){
               <input class="inp num" type="number" min="0" max="59" data-dbind="freq.m" value="${esc(S.freq.m)}">분
               <input class="inp num" type="number" min="0" max="59" data-dbind="freq.s" value="${esc(S.freq.s)}">초</div></div>
             <div class="set-row"><label>금지 시간</label><div class="time-in small"><input class="inp" type="time" data-dbind="quiet.from" value="${esc(S.quiet.from)}">~<input class="inp" type="time" data-dbind="quiet.to" value="${esc(S.quiet.to)}"></div></div>
-            <div class="set-row" style="margin:0"><label>투표 마감</label><input class="inp" type="datetime-local" data-dbind="dinner.voteDeadline" value="${esc(S.dinner.voteDeadline)}"></div>
+            ${ph === 'survey' && (S.survey || {}).ts
+              ? `<div class="set-row" style="margin:0"><label>조사 마감</label><input class="inp" type="datetime-local" data-dbind="survey.deadline" value="${esc(S.survey.deadline)}"></div>`
+              : ph === 'plan' ? `<div class="set-row" style="margin:0"><label>투표 마감</label><input class="inp" type="datetime-local" data-dbind="dinner.voteDeadline" value="${esc(S.dinner.voteDeadline)}"></div>` : ''}
           </div>
         </section>
         <section class="card">
@@ -1161,35 +1267,45 @@ function renderDinnerDash(){
       </div>
       <section class="card">
         <div class="card-h"><h3>👥 ${ph === 'plan' ? '투표 현황' : '참가자'}</h3><span class="grow"></span>
-          ${ph === 'plan' ? `<span class="small muted">투표 안 한 사람에게 ${freqText(S.freq)}마다 자동 독촉 · 3회 후 총무에게 이관</span>` : ''}</div>
+          <span class="small muted">자동 독촉은 ${freqText(S.freq)}마다 단체방에 · 개인 DM은 이름을 눌러 직접 보내요</span></div>
         ${ps.map(p => dinnerPersonRow(p, ph)).join('') || '<div class="card-b muted">참가자가 없어요.</div>'}
       </section>
     </div>
   </main>`;
 }
+function voteRemindBar(){
+  if (!['date', 'place'].some(isOpen)) return '';
+  const pend = votePending(), over = new Date(voteDeadline()) < new Date(), st = S.voteGroup || {};
+  const note = !pend.length ? '✓ 모두 투표했어요' : over ? '투표 마감 시간이 지났어요' : S.paused ? '⏸ 봇 일시정지 · 단체방 독촉 멈춤'
+    : `다음 단체방 독촉 <b data-due="${(st.lastGroup || 0) + freqSec(S.freq) * 1000}">…</b> · “아직 ${pend.length}명이 ${esc(openVoteNames())} 투표를 안 했어요”`;
+  return `<div class="card remind"><span class="small">📣 ${note}</span><span class="grow"></span>
+    ${pend.length && !over ? `<button class="btn sm" data-act="phaseDmAll">미투표자 ${pend.length}명에게 DM</button>` : ''}</div>`;
+}
 function dinnerPersonRow(p, ph){
-  const miss = ph === 'plan' ? missingVotes(p.id) : [], open = UI.open === p.id;
-  const mark = kind => !isOpen(kind) && VOTES[kind].mode() === 'fixed' ? '' : `<span class="tag ${tallyOf(kind).flat().includes(p.id) ? 'g' : ''}">${VOTES[kind].label} ${tallyOf(kind).flat().includes(p.id) ? '✓' : '–'}</span>`;
-  let status = '';
-  if (ph === 'plan'){
-    if (!['date', 'place'].some(isOpen)) status = '<span class="small muted">투표 끝</span>';
-    else if (!miss.length) status = '<span class="tag g">✓ 투표 완료 · 독촉 없음</span>';
-    else if ((p.vstage || 0) >= 3) status = '<span class="tag o">독촉 3회 · 총무 직접 연락</span>';
-    else if (S.paused || eff(p).stop) status = '<span class="tag">⏸ 독촉 멈춤</span>';
-    else status = `<span class="small">다음 자동 독촉 <b data-due="${nextDue(p)}">…</b> · ${(p.vstage || 0) + 1}차</span>`;
-  }
-  if (ph !== 'plan'){
+  const open = UI.open === p.id, active = phaseActive(), pending = active && phasePending().includes(p);
+  const mark = kind => VOTES[kind].mode() === 'fixed' ? '' : `<span class="tag ${tallyOf(kind).flat().includes(p.id) ? 'g' : ''}">${VOTES[kind].label} ${tallyOf(kind).flat().includes(p.id) ? '✓' : '–'}</span>`;
+  const rep = p.dmPlan && !p.dmPlan.done ? `<span class="tag b">DM 반복 ${p.dmPlan.sent}/${p.dmPlan.max}</span>` : '';
+  let status;
+  if (ph === 'plan') status = !['date', 'place'].some(isOpen) ? '<span class="small muted">투표 끝</span>'
+    : missingVotes(p.id).length ? `${rep}<span class="tag r">미투표</span>` : '<span class="tag g">✓ 투표 완료</span>';
+  else {
     const f = surveyQuestions().filter(q => q.key !== '참석').map(q => p.fields[q.key] ? `<span class="tag">${esc(q.key)} ${esc(p.fields[q.key])}</span>` : '').join('');
-    status = p.surveyAt ? `${chip(p.attend)}${f}<span class="small muted">${esc(p.surveyAt)}</span>` : '<span class="tag r">무응답</span>';
+    status = p.surveyAt ? `${chip(p.attend)}${f}<span class="small muted">${esc(p.surveyAt)}</span>` : `${rep}<span class="tag r">무응답</span>`;
   }
-  const canSend = ph === 'plan' && miss.length && (p.vstage || 0) < 3;
-  const m = canSend ? nextVoteMsg(p) : null;
+  let body = '';
+  if (open){
+    if (pending){
+      const dm = dmMsg(p), btn = ph === 'survey' ? '\n[ 📝 응답하기 ]' : '';
+      body = `<div class="stage-lb" style="margin-bottom:8px">개인 DM 미리보기 · ${dm.label}</div>${bubble(dm.text + btn, dm.mood, dm.k === 'burst')}
+        ${p.dmPlan && !p.dmPlan.done ? `<div class="row" style="margin-top:10px"><span class="tag b">개인 DM 반복 중 · ${DM_TONES[p.dmPlan.tone]} · ${p.dmPlan.sent}/${p.dmPlan.max}회 · 다음 <b data-due="${p.dmPlan.next}">…</b></span><button class="btn sm" data-act="dmStop" data-id="${p.id}">멈추기</button></div>`
+          : `<div class="row" style="margin-top:10px"><button class="btn sm primary" data-act="phaseDm" data-id="${p.id}">개인 DM 보내기…</button><span class="small muted">강도와 빈도를 정해서 보내요. 자동으로는 단체방에만 독촉해요${p.sdm ? ` · 지금까지 ${p.sdm}번 보냄` : ''}</span></div>`}`;
+    } else body = `<p class="small muted" style="margin:0">${ph === 'plan' ? (['date', 'place'].some(isOpen) ? '투표를 마쳐서 독촉 대상이 아니에요.' : '투표가 끝났어요.')
+      : p.surveyAt ? `${esc(p.surveyAt)}에 응답했어요. 바뀌면 본인이 [응답하기]를 다시 누르면 돼요.` : '참석 조사를 보내면 응답을 받을 수 있어요.'}</p>`;
+  }
   return `<div class="drow ${open ? 'open' : ''}">
     <div class="drow-h" data-act="openPerson" data-id="${p.id}">${avatar(p.id)}<b>${esc(p.id === 'me' ? '나 (총무)' : MEM[p.id].name)}</b>
       ${ph === 'plan' ? `${mark('date')}${mark('place')}` : ''}<span class="grow"></span>${status}<span class="small muted">${open ? '▴' : '▾'}</span></div>
-    ${open ? `<div class="drow-b">${m ? `<div class="stage-lb" style="margin-bottom:8px">다음 메시지 · ${m.label}</div>${bubble(m.text, m.mood, m.k === 'burst')}
-        <div class="row" style="margin-top:10px"><button class="btn sm primary" data-act="voteRemind" data-id="${p.id}" ${S.paused || eff(p).stop ? 'disabled' : ''}>지금 DM 보내기</button><span class="small muted">보내면 자동 독촉 시계가 다시 시작돼요</span></div>`
-      : `<p class="small muted" style="margin:0">${ph === 'plan' ? (miss.length ? '독촉을 3번 보냈어요. 직접 연락해 주세요.' : '투표를 마쳐서 독촉 대상이 아니에요.') : '참석 조사 단계에서 응답을 받아요.'}</p>`}</div>` : ''}
+    ${open ? `<div class="drow-b">${body}</div>` : ''}
   </div>`;
 }
 
@@ -1198,7 +1314,8 @@ const surveyQuestions = () => S.schema.filter(c => !['이름', '회비'].include
   .map(c => ({key:c.key, type:c.type, options:c.key === '참석' ? '참석,부분,불참' : c.options || ''}));
 function surveyText(){
   const d = decidedValue('date'), p = decidedValue('place');
-  return `📋 *${S.event.name} 참석 조사*\n📅 ${d ? d.label : '-'}  ·  📍 ${p ? p.label : '-'}\n아래 *[응답하기]* 를 눌러 ${surveyQuestions().map(q => q.key).join(', ')}을(를) 알려 주세요! 나중에 다시 눌러 고칠 수 있어요.`;
+  const dl = (S.survey && S.survey.deadline) || UI.surveyDeadline;
+  return `📋 *${S.event.name} 참석 조사*\n📅 ${d ? d.label : '-'}  ·  📍 ${p ? p.label : '-'}\n아래 *[응답하기]* 를 눌러 ${surveyQuestions().map(q => q.key).join(', ')}을(를) 알려 주세요! 나중에 다시 눌러 고칠 수 있어요.${dl ? `\n⏰ 마감: ${fmtDeadline(dl)}` : ''}`;
 }
 function surveyCard(d, pl){
   const sv = S.survey || {}, ps = people(), done = ps.filter(p => p.surveyAt).length;
@@ -1209,9 +1326,13 @@ function surveyCard(d, pl){
     <div class="card-b">${head}
       <p class="small muted" style="margin:8px 0 6px">채널에 [📝 응답하기] 버튼이 달린 메시지가 올라가고, 누르면 아래 질문이 담긴 입력창이 떠요.</p>
       <div class="row wrap">${surveyQuestions().map(q => `<span class="tag">${esc(q.key)} · ${TYPE_LB[q.type]}</span>`).join('')}</div></div></section>`;
+  const pend = surveyPending(), over = new Date(sv.deadline) < new Date();
+  const gnote = !pend.length ? '✓ 모두 응답했어요' : over ? '마감 시간이 지났어요' : S.paused ? '⏸ 봇 일시정지 · 단체방 독촉 멈춤'
+    : `다음 단체방 독촉 <b data-due="${(sv.lastGroup || 0) + freqSec(S.freq) * 1000}">…</b> · “아직 ${pend.length}명이 답하지 않았어요”`;
   return `<section class="card" style="margin-bottom:16px"><div class="card-h"><h3>📋 2단계 · 참석 조사</h3>${sock}<span class="grow"></span>
-      <b>${done} / ${ps.length}명 응답</b></div>
+      <b>${done} / ${ps.length}명 응답</b>${pend.length && !over ? `<button class="btn sm" data-act="phaseDmAll">미응답자 ${pend.length}명에게 DM</button>` : ''}</div>
     <div class="card-b">${head}<div class="bar" style="margin-top:8px"><i style="width:${ps.length ? done / ps.length * 100 : 0}%"></i></div>
+      <p class="small" style="margin:8px 0 0">⏰ 마감 ${fmtDeadline(sv.deadline)} · ${gnote}</p>
       <p class="small muted" style="margin:6px 0 0">응답이 들어오면 5초 안에 아래 목록과 시트에 반영돼요.${SLACK.status === 'on' && !(UI.socket || {}).connected ? ' ⚠️ 서버의 응답 받기가 꺼져 있어 버튼을 눌러도 입력창이 안 떠요.' : ''}</p></div></section>`;
 }
 // 응답 읽어 오기 (5초마다) → 참석·조사 항목에 반영
@@ -1303,31 +1424,85 @@ setInterval(async () => {
   if (changed){ if (!document.activeElement || !document.activeElement.matches('#app input, #app select')) render(); else save(); }
 }, 5000);
 
-// 투표 자동 독촉 (브라우저 타이머: 대시보드가 열려 있는 동안만. 응답 받기 단계에서 서버 예약으로 옮길 예정)
-function voteTargets(){
-  if (!voteOn() || !S.started || S.phase !== 'plan' || !['date', 'place'].some(isOpen)) return [];
-  return people().filter(p => missingVotes(p.id).length && (p.vstage || 0) < 3);
-}
-function nextDue(p){ return (p.lastSent || 0) + freqSec(eff(p).freq) * 1000; }
-async function sendVoteReminder(p, manual){
-  const m = nextVoteMsg(p);
-  p.lastSent = Date.now(); p.vstage = (p.vstage || 0) + 1;
-  const what = `${MEM[p.id].name}님께 ${m.label}${manual ? '' : ' (자동)'}`;
-  if (SLACK.status === 'on' && MEM[p.id].slackId) await slackSend({user:MEM[p.id].slackId, name:shortName(p.id)}, m, eff(p).persona, what);
-  else { log('소통', `${what} (${m.mood}): “${m.text.slice(0, 50)}${m.text.length > 50 ? '…' : ''}”`); }
-  if (p.vstage >= 3) log('소통', `${MEM[p.id].name}님 투표 독촉 3회 · 총무에게 이관`);
+let remindBusy = false;
+// 참석 조사 독촉: 자동은 단체방에만 (인원만 말함). 개인 DM은 총무가 보낼 때만
+async function sendGroup(){
+  const st = groupState(), survey = S.phase === 'survey', m = survey ? surveyGroupMsg() : voteGroupMsg();
+  st.lastGroup = Date.now(); st.gstage = (st.gstage || 0) + 1; st.lastK = m.k;
+  if (SLACK.status === 'on' && S.slackChannel)
+    await slackSend({channel:S.slackChannel}, m, S.persona, `#${S.channel} ${m.label} (자동)`, survey ? {survey_channel:S.slackChannel} : {});
+  else log('소통', `#${S.channel} ${m.label} (자동, 데모) (${m.mood}): “${m.text.slice(0, 50)}${m.text.length > 50 ? '…' : ''}”`);
   render();
 }
-let remindBusy = false;
+// 개인 DM 설정 창: 강도와 빈도(한 번만 / 반복)를 정해서 보냄
+function dmPlanModal(){
+  const P = UI.dmPlan, ids = UI.dmIds, ex = S.people[ids[0]];
+  const opt = (k, v, l) => `<button class="${String(P[k]) === String(v) ? 'on' : ''}" data-act="dmSet" data-k="${k}" data-v="${v}">${l}</button>`;
+  const first = dmMsg(ex, dmTone(P.tone, 0)), btn = S.phase === 'survey' ? '\n[ 📝 응답하기 ]' : '', who = S.phase === 'survey' ? '미응답자' : '미투표자';
+  modal(`<div class="mh"><h3 class="grow">${ids.length > 1 ? `${who} ${ids.length}명에게 개인 DM` : `${esc(MEM[ids[0]].name)}님께 개인 DM`}</h3><button class="btn sm ghost" data-act="closeModal">✕</button></div>
+    <div class="mb">
+      <label class="f">멘트 강도</label>
+      <div class="seg sm" style="margin-bottom:14px">${Object.entries(DM_TONES).map(([k, l]) => opt('tone', k, l)).join('')}</div>
+      <label class="f">빈도</label>
+      <div class="seg sm" style="margin-bottom:8px">${opt('mode', 'once', '한 번만')}${opt('mode', 'repeat', '반복')}</div>
+      ${P.mode === 'repeat' ? `<div class="row wrap" style="margin-bottom:6px"><div class="seg sm">${DM_EVERY.map(([v, l]) => opt('every', v, l)).join('')}</div>
+          <span class="small">마다 · 최대</span><input class="inp num" type="number" min="1" max="20" id="dmMax" value="${P.max}"><span class="small">번</span></div>
+        <p class="small muted" style="margin:0 0 12px">지금 한 번 보내고, ${S.phase === 'survey' ? '응답' : '투표'}하거나 마감(${fmtDeadline(phaseDeadline())})이 되면 자동으로 멈춰요. 전송 금지 시간엔 보내지 않아요.</p>` : '<p class="small muted" style="margin:0 0 12px">지금 한 번만 보내요.</p>'}
+      <div class="stage-lb" style="margin-bottom:8px">미리보기 · ${esc(MEM[ex.id].name)}님${P.tone === 'escalate' ? ' · 첫 번째(이후 단호 → 엄격)' : ''}</div>
+      <div class="slack">${bubble(first.text + btn, first.mood, first.k === 'burst')}</div>
+      ${ids.length > 1 ? `<p class="small muted">받는 사람: ${ids.map(id => esc(MEM[id].name)).join(', ')} · 사람마다 이름을 넣어 각자 DM으로 보내요.</p>` : ''}
+    </div>
+    <div class="mf"><button class="btn" data-act="closeModal">취소</button><button class="btn yellow" data-act="dmGo">${P.mode === 'repeat' ? '보내고 반복 시작' : '보내기'}</button></div>`);
+}
+function openDmPlan(ids){
+  UI.dmIds = ids;
+  UI.dmPlan = UI.dmPlan || {tone:'soft', mode:'once', every:1800, max:3};
+  if (!UI.dmPlan.every) UI.dmPlan.every = 1800;
+  dmPlanModal();
+}
+// 반복 DM: 사람마다 계획(p.dmPlan)을 두고 엔진이 간격마다 보냄
+async function sendPlannedDm(p){
+  const pl = p.dmPlan, k = dmTone(pl.tone, pl.sent), m = dmMsg(p, k);
+  pl.sent++; pl.next = Date.now() + pl.every * 1000; p.sdm = (p.sdm || 0) + 1;
+  const what = `${MEM[p.id].name}님께 ${m.label}${pl.every ? ` (반복 ${pl.sent}/${pl.max})` : ''}`;
+  if (SLACK.status === 'on' && MEM[p.id].slackId)
+    await slackSend({user:MEM[p.id].slackId, name:shortName(p.id)}, m, eff(p).persona, what, S.phase === 'survey' ? {survey_channel:S.slackChannel} : {});
+  else log('소통', `${what} · 데모 (${m.mood}): “${m.text.slice(0, 40)}…”`);
+  if (!pl.every || pl.sent >= pl.max) pl.done = true;
+}
+
+// 데모 모드: 몇 초마다 가짜 응답이 하나씩 들어옴
+function fakeSurveyAnswer(){
+  const pend = surveyPending(); if (!pend.length) return;
+  const p = pend[Math.floor(Math.random() * pend.length)], r = Math.random();
+  const att = r < .7 ? '참석' : r < .85 ? '부분' : '불참';
+  p.attend = att;
+  if (att !== '불참'){
+    S.schema.forEach(c => {
+      if (c.key === '1차') p.fields[c.key] = att === '부분' && Math.random() < .5 ? 'X' : 'O';
+      else if (c.key === '2차') p.fields[c.key] = Math.random() < .55 ? 'O' : 'X';
+      else if (c.key === '도착 시간') p.fields[c.key] = att === '부분' ? ['20:00', '20:30', '21:00'][Math.floor(Math.random() * 3)] : ['19:00', '19:00', '19:30'][Math.floor(Math.random() * 3)];
+      else if (c.key === '음주 여부') p.fields[c.key] = Math.random() < .75 ? 'O' : 'X';
+    });
+  }
+  p.surveyAt = nowHM();
+  log('기록', `${MEM[p.id].name}님 참석 조사 응답 → 시트 반영 (${att}) · 데모`);
+}
+// 독촉 엔진 (1초마다): 개인 DM 반복(총무가 정한 사람) → 단체방 독촉. 두 단계 공통
 setInterval(async () => {
-  if (remindBusy || S.paused) return;
-  const now = new Date();
-  if (inQuiet(now, S.quiet) || new Date(voteDeadline()) < now) return;
-  const due = voteTargets().find(p => !eff(p).stop && nextDue(p) <= now.getTime());
-  if (!due) return;
+  if (!phaseActive()) return;
+  const now = Date.now(), sv = S.survey;
+  if (S.phase === 'survey' && SLACK.status !== 'on' && sv.nextFake && now >= sv.nextFake){ fakeSurveyAnswer(); sv.nextFake = now + 6000 + Math.random() * 6000; render(); }
+  const pend = phasePending();
+  people().forEach(p => { if (p.dmPlan && !p.dmPlan.done && !pend.includes(p)){ p.dmPlan.done = true; log('소통', `${MEM[p.id].name}님 ${S.phase === 'survey' ? '응답' : '투표'} → 개인 DM 반복 종료`); } });
+  if (remindBusy || S.paused || !pend.length || now > new Date(phaseDeadline()).getTime() || inQuiet(new Date(), S.quiet)) return;
+  const dmDue = pend.find(p => p.dmPlan && !p.dmPlan.done && now >= p.dmPlan.next);
+  if (dmDue){ remindBusy = true; try { await sendPlannedDm(dmDue); render(); } finally { remindBusy = false; } return; }
+  if (now - (groupState().lastGroup || 0) < freqSec(S.freq) * 1000) return;
   remindBusy = true;
-  try { await sendVoteReminder(due, false); } finally { remindBusy = false; }
+  try { await sendGroup(); } finally { remindBusy = false; }
 }, 1000);
+
 // 다음 자동 독촉까지 남은 시간 표시 (화면 전체를 다시 그리지 않고 글자만 갱신)
 setInterval(() => document.querySelectorAll('[data-due]').forEach(el => {
   const left = Math.max(0, Math.round((+el.dataset.due - Date.now()) / 1000));
@@ -1501,6 +1676,7 @@ function renderDash(){
     <button class="btn bell" data-act="openDrawer" data-tab="issues">🔔 확인 필요${S.issues.length ? `<span class="cnt">${S.issues.length}</span>` : ''}</button>
     <button class="btn" data-act="openDrawer" data-tab="sms">📩 문자 붙여넣기</button>
     <button class="btn" data-act="openDrawer" data-tab="settle">🧮 정산</button>
+    <button class="btn danger-o" data-act="cancelMeet">⏹ 모임 중단</button>
   </div></header>
   <main class="page">
     <!-- 상단1 -->
@@ -1934,24 +2110,73 @@ document.addEventListener('click', e => {
         <div class="mb"><div class="slack">${bubble(dinnerConfirmText(), '', false)}</div><p class="small muted">이 문구 그대로 #${esc(S.channel)}에 올라가요.</p></div>
         <div class="mf"><button class="btn" data-act="closeModal">취소</button><button class="btn yellow" data-act="doSurvey">공지하고 넘어가기</button></div>`); return;
     case 'doSurvey':
-      closeModal(); S.phase = 'survey'; log('총무', '일정·장소 확정 → 참석 조사 단계 (HITL 2)');
+      closeModal(); S.phase = 'survey'; people().forEach(p => { if (p.dmPlan) p.dmPlan.done = true; p.sdm = 0; });
+      log('총무', '일정·장소 확정 → 참석 조사 단계 (HITL 2)');
       if (SLACK.status === 'on' && S.slackChannel) slackSend({channel:S.slackChannel}, {text:dinnerConfirmText(), label:'일정 확정 공지', mood:''}, S.persona, '일정 확정 공지', {raw:true});
       else log('소통', `#${S.channel} 일정 확정 공지 (데모)`);
       break;
     case 'surveySend':
+      UI.surveyDeadline = UI.surveyDeadline || (eventAt() ? toLocalInput(new Date(eventAt()).getTime() - 3 * 3600 * 1000) : '');
       modal(`<div class="mh"><span class="hitl">HITL</span><h3 class="grow">참석 조사를 보낼까요?</h3><button class="btn sm ghost" data-act="closeModal">✕</button></div>
-        <div class="mb"><div class="slack">${bubble(surveyText().replace(/\*/g, '') + '\n[ 📝 응답하기 ]', '', false)}</div>
+        <div class="mb"><div class="row" style="margin-bottom:12px"><label class="f" style="margin:0">⏰ 참석 조사 마감</label><span class="grow"></span>
+            <input class="inp" style="width:auto" type="datetime-local" id="surveyDeadline" value="${esc(UI.surveyDeadline)}"></div>
+          <p class="small muted" style="margin:-6px 0 12px">기본값은 모임 시작(${fmtDeadline(eventAt())}) 3시간 전이에요. 마감까지 ${freqText(S.freq)}마다 단체방에 “아직 N명이 답하지 않았어요” 독촉이 올라가요.</p>
+          <div class="slack">${bubble(surveyText().replace(/\*/g, '') + '\n[ 📝 응답하기 ]', '', false)}</div>
           <p class="small muted">#${esc(S.channel)}에 올라가요. 입력창 질문: ${surveyQuestions().map(q => esc(q.key)).join(' · ')}</p></div>
         <div class="mf"><button class="btn" data-act="closeModal">취소</button><button class="btn yellow" data-act="doSurveySend">보내기</button></div>`); return;
-    case 'doSurveySend':
-      closeModal();
+    case 'doSurveySend': {
+      const dl = ($('#surveyDeadline') || {}).value || UI.surveyDeadline;
+      if (!(new Date(dl) > new Date())){ toast('마감을 지금 이후로 정해 주세요'); return; }
+      UI.surveyDeadline = dl; closeModal();
+      const base = {deadline:dl, gstage:0, lastGroup:Date.now(), nextFake:Date.now() + 5000};
       if (SLACK.status === 'on' && S.slackChannel){
         slackApi('/api/survey/start', {channel:S.slackChannel, title:`${S.event.name} 참석 조사`, text:surveyText(), questions:surveyQuestions()})
-          .then(r => { S.survey = {ts:r.ts}; log('소통', `#${S.channel} 참석 조사 메시지 발송 ([응답하기] 버튼)`); toast('참석 조사를 보냈어요'); render(); surveyPull(); })
+          .then(r => { S.survey = {...base, ts:r.ts}; log('소통', `#${S.channel} 참석 조사 메시지 발송 ([응답하기] 버튼)`); toast('참석 조사를 보냈어요'); render(); surveyPull(); })
           .catch(e => toast(`참석 조사 실패: ${slackErr(e.message)}`));
-      } else { S.survey = {ts:'demo'}; log('소통', `#${S.channel} 참석 조사 메시지 (데모)`); toast('참석 조사를 보냈어요 (데모)'); render(); }
-      return;
-    case 'voteRemind': { const p = S.people[d.id]; if (p) sendVoteReminder(p, true); return; }
+      } else { S.survey = {...base, ts:'demo'}; log('소통', `#${S.channel} 참석 조사 메시지 (데모)`); toast('참석 조사를 보냈어요 (데모)'); render(); }
+      return; }
+    case 'cancelMeet': {
+      const live = SLACK.status === 'on' && S.slackChannel;
+      modal(`<div class="mh"><span class="hitl">HITL</span><h3 class="grow">이번 모임을 중단할까요?</h3><button class="btn sm ghost" data-act="closeModal">✕</button></div>
+        <div class="mb">
+          <label class="f">#${esc(S.channel)}에 남길 안내</label>
+          <textarea class="inp" rows="3" id="cancelText">🙇 ${esc(S.event.name)} 모임은 취소되었습니다.\n그동안 투표하고 응답해 주셔서 감사합니다.</textarea>
+          <ul class="small muted" style="margin:10px 0 0;padding-left:18px;line-height:1.7">
+            <li>${live ? `#${esc(S.channel)}에 안내만 남기고, 채널은 그대로 둬요.` : 'Slack에 연결돼 있지 않아 안내 없이 화면만 처음으로 돌아가요.'}</li>
+            <li>진행 중인 투표·참석 조사·예약된 독촉이 모두 멈추고, 설정과 기록이 지워진 채 시작 화면으로 돌아가요.</li>
+            <li>되돌릴 수 없어요.</li></ul>
+        </div>
+        <div class="mf"><button class="btn" data-act="closeModal">취소</button><button class="btn danger-fill" data-act="doCancelMeet">모임 중단</button></div>`); return; }
+    case 'doCancelMeet': {
+      const text = ($('#cancelText') || {}).value || '', ch = S.slackChannel, live = SLACK.status === 'on' && ch;
+      closeModal();
+      const finish = msg => { S = defaults(); UI.open = null; UI.surveyDeadline = ''; UI.dmPlan = null; render(); window.scrollTo(0, 0); toast(msg); };
+      if (live){
+        toast('취소 안내를 보내는 중…');
+        slackApi('/api/slack/cancel', {channel:ch, text})
+          .then(() => finish('모임을 중단하고 취소 안내를 보냈어요'))
+          .catch(e => finish(`Slack 안내 실패 (${slackErr(e.message)}) · 화면만 처음으로 돌렸어요`));
+      } else finish('모임을 중단했어요');
+      return; }
+    case 'phaseDm': openDmPlan([d.id]); return;
+    case 'phaseDmAll': openDmPlan(phasePending().map(p => p.id)); return;
+    case 'dmSet': {
+      const mx = $('#dmMax'); if (mx) UI.dmPlan.max = Math.max(1, +mx.value || 1);
+      UI.dmPlan[d.k] = d.k === 'every' ? +d.v : d.v; dmPlanModal(); return; }
+    case 'dmGo': {
+      const P = UI.dmPlan;
+      const mx = $('#dmMax'); if (mx) P.max = Math.max(1, +mx.value || 1);
+      const every = P.mode === 'repeat' ? +P.every : 0;
+      if (P.mode === 'repeat' && (!every || P.max < 1)){ toast('반복 간격과 횟수를 정해 주세요'); return; }
+      closeModal();
+      const pend = phasePending(), list = UI.dmIds.map(id => S.people[id]).filter(p => p && pend.includes(p));
+      (async () => {
+        for (const p of list){ p.dmPlan = {tone:P.tone, every, max:every ? P.max : 1, sent:0, next:0, done:false}; await sendPlannedDm(p); }
+        log('총무', `개인 DM ${list.length}명 · ${DM_TONES[P.tone]} · ${every ? `${everyLabel(every)}마다 최대 ${P.max}번` : '한 번만'}`);
+        toast(`${list.length}명에게 DM을 보냈어요${every ? ' · 반복 시작' : ''}`); render();
+      })();
+      return; }
+    case 'dmStop': { const p = S.people[d.id]; if (p && p.dmPlan){ p.dmPlan.done = true; log('총무', `${MEM[p.id].name}님 개인 DM 반복 멈춤`); } break; }
     case 'inviteNone': S.invited = ['me']; break;
     case 'tpl':
       if (S.template === d.val) return;
