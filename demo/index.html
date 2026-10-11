@@ -314,6 +314,11 @@ img.av{object-fit:cover;background:var(--grey-l)}
    대모임 전용 스타일 — 채총 영역
    클래스 이름은 .lg- 로 시작합니다. (공용 클래스 .card .sec .btn .opt .inp 등은 그대로 써도 됩니다)
    ========================================================= */
+.lg-row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+.lg-pill{display:inline-block;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600;background:var(--grey-l);color:var(--muted)}
+.lg-on{background:var(--green-l);color:var(--green-d)}
+.lg-off{background:var(--yellow-l);color:#7a5a00}
+.lg-note{font-size:12px;margin-top:6px}
 </style>
 </head>
 <body>
@@ -987,27 +992,61 @@ function renderSizePick(){
    ③ 화면:  render(el) 에서 el.innerHTML 로 그림
    ========================================================= */
 const LARGE = {
+  // 실제 대모임 화면은 React 앱(large/frontend)이고, 공용 서버가 /large/ 에서 제공합니다.
+  // 이 블록은 규모 선택 뒤의 '진입 카드'만 맡습니다. 서버 없이 연 정적 데모(GitHub Pages·파일)에서는 열 수 없다고 안내합니다.
+  server:'unknown', // unknown | on | off — 공용 서버의 LARGE API 응답 여부. 페이지를 열 때마다 새로 확인(저장 안 함)
   defaults(){
-    return {
-      // 예) busFee:20000, walkFee:15000,
-    };
+    return {};
   },
 
   render(el){
+    const on = LARGE.server === 'on';
+    const status = {
+      unknown:'<span class="lg-pill">서버 확인 중…</span>',
+      on:'<span class="lg-pill lg-on">공용 서버 실행 중 — 실제 대모임 화면을 열 수 있어요</span>',
+      off:'<span class="lg-pill lg-off">정적 데모 — 대모임 화면은 공용 서버에서만 열려요</span>'
+    }[LARGE.server] || '';
     el.innerHTML = `
     <header class="top"><div class="top-in">
       <button class="btn ghost sm" data-act="${S.started ? 'goDash' : 'changeSize'}">← ${S.started ? '대시보드' : '모임 규모'}</button>
-      <div class="brand"><span class="logo">🐸</span>대모임 총무봇 ${S.started ? '설정' : '만들기'}</div>
+      <div class="brand"><span class="logo">🐸</span>대모임 총무봇</div>
     </div></header>
     <main class="page"><div class="card" style="max-width:880px;margin:24px auto 0">
       <section class="sec">
-        <div class="sec-h"><span class="n">🏢</span><div><h3>대모임 설정</h3><p>준비 중입니다 (채총 작업 영역).</p></div></div>
+        <div class="sec-h"><span class="n">🏢</span><div><h3>대모임(워크숍·연수) 총무 Agent</h3>
+          <p>수백 명 규모 행사의 개인 참석 응답 → 팀 청구 → 입금 대조 → 변경·불일치 확인 대화 → 정산까지. 참가자는 이메일 개인 링크, 팀 담당자는 이메일 인증으로 들어옵니다.</p></div></div>
+        <p>${status}</p>
+        <div class="lg-row">
+          <button class="btn primary" data-act="large:open" ${on ? '' : 'disabled'}>대모임 관리 화면 열기 →</button>
+          <button class="btn ghost" data-act="large:recheck">서버 다시 확인</button>
+        </div>
+        ${LARGE.server === 'off' ? `<p class="muted lg-note">공용 서버를 켠 뒤 <code>http://127.0.0.1:8787</code> 로 다시 열어 주세요. 실행: <code>.venv/bin/python -m hub</code> (README 참고)</p>` : ''}
+        <p class="muted lg-note">대모임은 Slack 을 쓰지 않습니다(이메일 + 모바일 웹). 대모임 화면에 들어가도 소모임의 Slack 발송은 실행되지 않습니다.</p>
       </section>
     </div></main>`;
+    if (LARGE.server === 'unknown') LARGE.probe();
+  },
+
+  // 같은 출처의 /api/large/meta 가 응답하면 공용 서버에서 열린 것
+  probe(){
+    if (!location.protocol.startsWith('http')) { LARGE.server = 'off'; return setTimeout(render); }
+    fetch('/api/large/meta', {cache:'no-store'})
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(j => { LARGE.server = j.system === 'large' ? 'on' : 'off'; })
+      .catch(() => { LARGE.server = 'off'; })
+      .finally(() => { if (S.size === 'large' && S.screen === 'setup') render(); });
   },
 
   act: {
-    // 예) addRule(d){ S.large.rules.push({...}); },
+    open(){
+      // 돌아오면 시작 화면이 보이도록(기존 '시작화면'·'모임 규모' 버튼과 같은 전환). 진행 중인 소모임이 있으면 규모는 그대로 둠
+      S.screen = 'start';
+      if (!S.started) S.size = null;
+      save();
+      location.href = '/large/';
+      return false;
+    },
+    recheck(){ LARGE.server = 'unknown'; }
   }
 };
 /* ===================== 대모임 블록 끝 ===================== */
