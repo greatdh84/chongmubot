@@ -121,8 +121,8 @@ label.f{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:0
 .av{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-size:12px;font-weight:800;color:#fff;flex:none}
 img.av{object-fit:cover;background:var(--grey-l)}
 .vote-set{margin-top:16px;padding:14px;border:1px dashed var(--green);border-radius:12px;background:#fbfdf9}
-.vote-ai{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:6px}
-.vote-row{display:grid;grid-template-columns:24px 1.4fr .8fr 1.4fr auto auto;gap:6px;align-items:center;margin-bottom:6px}
+.vote-ai{display:grid;grid-template-columns:1fr 1fr auto;gap:6px}
+.vote-row{display:grid;grid-template-columns:24px 1fr 1.6fr auto auto;gap:6px;align-items:center;margin-bottom:6px}
 .vote-row .num{font-size:16px}
 .place-search .btn{white-space:nowrap}
 .kmap{position:relative;width:100%;height:440px;border-radius:12px;overflow:hidden;border:1px solid var(--line)}
@@ -149,9 +149,24 @@ img.av{object-fit:cover;background:var(--grey-l)}
 .set-list .ex{padding:10px 12px;border-radius:10px;background:var(--grey-l)}
 .acct{display:grid;grid-template-columns:1fr 1.6fr 1fr;gap:6px}
 .vote-bar{padding:8px 0;border-bottom:1px solid var(--line)}
+.steps{display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.step{display:flex;align-items:center;gap:6px;padding:6px 12px 6px 6px;border-radius:999px;background:#fff;border:1px solid var(--line);font-weight:700;font-size:13px;color:var(--muted)}
+.step .n{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--grey-l);font-size:11px}
+.step small{font-weight:600;font-size:11px;color:var(--green-d)}
+.step.now{border-color:var(--green);color:var(--ink,#1f2a1c);background:var(--green-l)}
+.step.now .n{background:var(--green);color:#fff}
+.step.done{color:var(--green-d)} .step.done .n{background:var(--green-l);color:var(--green-d)}
+.steps .sep{width:18px;height:2px;background:var(--line)}
+.polls{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.poll-fixed{font-size:18px;font-weight:800;margin-bottom:4px}
+.card.next{display:flex;align-items:center;gap:10px;padding:14px 16px;margin-bottom:16px;border-color:var(--green);background:var(--green-l)}
+.drow{border-top:1px solid var(--line)}
+.drow-h{display:flex;align-items:center;gap:8px;padding:10px 16px;cursor:pointer;flex-wrap:wrap}
+.drow-b{padding:4px 16px 14px 50px}
+@media (max-width:760px){.polls{grid-template-columns:1fr}}
 .vote-bar.win b{color:var(--green-d)}
 .vote-bar .bar{height:8px}
-@media (max-width:640px){.vote-ai{grid-template-columns:1fr 1fr}.vote-row{grid-template-columns:24px 1fr 1fr auto}.vote-row input:nth-of-type(3){grid-column:2/4}}
+@media (max-width:640px){.vote-ai{grid-template-columns:1fr 1fr}.vote-row{grid-template-columns:24px 1fr 1fr auto}.vote-row input:nth-of-type(2){grid-column:2/4}}
 .mem-hits{display:grid;gap:4px;margin-bottom:10px;max-width:420px}
 .mem-chips{display:flex;flex-wrap:wrap;gap:6px}
 .mem-chip{display:inline-flex;align-items:center;gap:6px;padding:3px 6px 3px 3px;border-radius:999px;background:var(--green-l);border:1px solid var(--green);font-size:13px;font-weight:600}
@@ -352,6 +367,12 @@ const PALETTE = MEMBERS.map(m => m.color);
 const memShown = m => !UI.memQ || S.invited.includes(m.id) || m.name.toLowerCase().includes(UI.memQ.toLowerCase());
 // 멤버가 많을 때 기본 화면: 검색 결과(최대 8명) + 고른 사람 칩. '전체 보기'를 누르면 격자로 전원 표시
 const memCompact = () => MEMBERS.length > 20 && !UI.memAll;
+function memArea(s){
+  return memCompact() ? memPicker(s) : `<div class="members">${MEMBERS.filter(memShown).map(m => `
+    <button class="mem ${s.invited.includes(m.id) ? 'on' : ''} ${m.id === 'me' ? 'lock' : ''}" data-act="toggleInvite" data-id="${m.id}">
+      ${avatar(m.id)}<span>${esc(m.name)}</span>${s.invited.includes(m.id) ? '<span class="grow"></span>✓' : ''}</button>`).join('')}
+  </div>`;
+}
 function memPicker(s){
   const q = (UI.memQ || '').trim().toLowerCase();
   const hits = q ? MEMBERS.filter(m => !s.invited.includes(m.id) && m.name.toLowerCase().includes(q)) : [];
@@ -362,12 +383,12 @@ function memPicker(s){
     <div class="mem-chips">${s.invited.map(id => `
       <span class="mem-chip">${avatar(id)}${esc(MEM[id].name)}${id === 'me' ? '' : `<button data-act="toggleInvite" data-id="${id}" title="빼기">✕</button>`}</span>`).join('')}</div>`;
 }
-const onMemQ = e => {
-  if (e.target.id !== 'memQ' || e.isComposing) return; // 한글 조합 중엔 다시 그리지 않음
-  UI.memQ = e.target.value; const pos = e.target.selectionStart; render();
-  const q = $('#memQ'); if (q){ q.focus(); q.setSelectionRange(pos, pos); }
-};
-document.addEventListener('input', onMemQ); document.addEventListener('compositionend', onMemQ);
+// 검색창은 그대로 두고 아래 목록만 다시 그림 (화면 전체를 다시 그리면 조합 중인 한글이 사라짐)
+document.addEventListener('input', e => {
+  if (e.target.id !== 'memQ') return;
+  UI.memQ = e.target.value;
+  const box = $('#memArea'); if (box) box.innerHTML = memArea(S);
+});
 async function slackLoad(){
   SLACK.status = 'loading'; SLACK.error = '';
   try {
@@ -483,7 +504,25 @@ const LINES = {
     sorry:['…방금 건 좀 심했네요. 그래도 답은 주세요.','흠. 기분 상하셨다면 유감입니다. 회신은 여전히 필요합니다.']
   }
 };
-const MOOD = {g:'😇 친절', dm0:'😇 친절', dl0:'😇 친절', dm1:'🙂 단호', dl2:'😠 엄격', burst:'🤬 버럭', sorry:'🙏 급사과'};
+// 투표 독촉 문구 ({what}: 아직 안 한 투표, 예: 날짜·장소). 버럭·급사과는 LINES 것을 같이 씀
+const VOTE_LINES = {
+  active:{
+    soft:'{name}님~ {event} {what} 투표 아직이에요! 😆 이모지 하나만 콕 눌러주세요~ (마감 {deadline})',
+    firm:'{name}님! {what} 투표 꼭 부탁드려요 🙏 여러 개 골라도 돼요! {deadline} 마감이에요~',
+    last:'{name}님!! 오늘 {dtime} {what} 투표 마감이에요 ⏰ 안 하시면 다수결로 정할게요!'
+  },
+  shy:{
+    soft:'{name}님… 혹시 {what} 투표… 시간 되실 때 눌러주실 수 있을까요…? 🥹 ({deadline} 마감이에요)',
+    firm:'{name}님… 자꾸 연락드려서 죄송해요… {what} 투표만 부탁드려도 될까요…?',
+    last:'{name}님… 오늘 {dtime}에 {what} 투표가 끝나요… 그 전에 꼭… 부탁드려요… 🙏'
+  },
+  grumpy:{
+    soft:'{name}님, {what} 투표 바랍니다. 마감 {deadline}.',
+    firm:'{name}님, {what} 투표 아직입니다. 이모지 하나면 됩니다.',
+    last:'{name}님. 오늘 {dtime} {what} 투표 마감. 미참여 시 다수결로 정합니다.'
+  }
+};
+const MOOD = {soft:'😇 친절', firm:'🙂 단호', last:'😠 엄격', g:'😇 친절', dm0:'😇 친절', dl0:'😇 친절', dm1:'🙂 단호', dl2:'😠 엄격', burst:'🤬 버럭', sorry:'🙏 급사과'};
 
 /* ---------- 유틸 ---------- */
 function rngFrom(seed){ let a = seed >>> 0; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -521,6 +560,29 @@ function ctxFor(id){
 }
 const fill = (tpl, c) => tpl.replace(/\{(\w+)\}/g, (_, k) => c[k] ?? '');
 
+// 투표 독촉 순서 (전략별). 3번 보내면 총무에게 이관
+function voteSequence(persona, strategy, ctx, seed){
+  const V = VOTE_LINES[persona], L = LINES[persona], rng = rngFrom(seed);
+  const pick = k => V[k] || (Array.isArray(L[k]) ? L[k][Math.floor(rng() * L[k].length)] : L[k]);
+  const mk = (k, i) => ({k, label:`투표 독촉 ${i + 1}차`, ch:'dm', mood:MOOD[k], text:fill(pick(k), ctx)});
+  if (strategy === 'consistent') return ['soft', 'soft', 'soft'].map(mk);
+  if (strategy === 'escalate') return ['soft', 'firm', 'last'].map(mk);
+  const ks = ['soft']; let burst = false;
+  for (let i = 1; i < 3; i++){
+    const prev = ks[i - 1], r = rng(); let k;
+    if (prev === 'burst') k = r < .65 ? 'sorry' : 'burst';
+    else if (!burst && i === 2) k = 'burst';
+    else k = r < .5 ? 'burst' : 'firm';
+    if (k === 'burst') burst = true; ks.push(k);
+  }
+  return ks.map(mk);
+}
+function nextVoteMsg(p){
+  const e = eff(p), d = new Date(voteDeadline());
+  const ctx = {name:shortName(p.id), event:S.event.name, what:missingVotes(p.id).join('·') || '날짜·장소', deadline:fmtDeadline(voteDeadline()), dtime:isNaN(d) ? '' : `${d.getHours()}시`};
+  return voteSequence(e.persona, e.strategy, ctx, hashStr(p.id) + (p.vstage || 0) * 17 + S.chaosSeed)[Math.min(p.vstage || 0, 2)];
+}
+
 // 전략에 따른 메시지 순서
 function sequence(persona, strategy, ctx, seed){
   const L = LINES[persona], rng = rngFrom(seed);
@@ -541,14 +603,16 @@ function sequence(persona, strategy, ctx, seed){
 }
 
 /* ---------- 회식 장소 투표 (소모임 · 회식 템플릿 전용) ---------- */
-const defaultVote = () => ({places:[], area:'', food:'', budget:'', deadline:'', ts:null, channel:null, tally:null, closed:false, winner:null});
+const defaultVote = () => ({places:[], area:'', food:'', deadline:'', ts:null, channel:null, tally:null, closed:false, winner:null});
 // 회식 설정: 날짜·장소는 총무 확정(fixed) 또는 투표(vote), 정산은 후정산 + 기본회비(선택)
 const defaultDinner = () => ({
   dateMode:'fixed', date:'2026-10-24', time:'19:00', dateCands:[{at:'2026-10-23T19:00'}, {at:'2026-10-24T19:00'}],
   placeMode:'vote', placePick:0, voteDeadline:'2026-10-17T18:00',
   baseFee:{on:false, amount:20000}, byRound:true, nonDrink:{on:false, amount:5000},
-  account:{bank:'', number:'', holder:''}
+  account:{bank:'', number:'', holder:''},
+  dateVote:defaultPoll() // 날짜 투표 진행 상태 (장소 투표는 S.vote)
 });
+function defaultPoll(){ return {ts:null, channel:null, tally:null, closed:false, winner:null}; }
 const getPath = (obj, path) => path.split('.').reduce((o, k) => o && o[k], obj);
 const dinnerWhen = () => S.dinner.dateMode === 'fixed' ? fmtDeadline(`${S.dinner.date}T${S.dinner.time || '19:00'}`) : null;
 const dinnerPlace = () => S.dinner.placeMode === 'fixed' ? votePlaces()[S.dinner.placePick] || null : null;
@@ -562,19 +626,35 @@ function splitRound(total, n, nonDrinkers, discount){
 const NUMS = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟'];
 const voteOn = () => S.size === 'small' && S.template === 'dinner';
 const votePlaces = () => S.vote.places.filter(p => (p.name || '').trim());
+// 날짜·장소 투표 공용 정의
+const VOTES = {
+  date:{label:'날짜', icon:'📅', mode:() => S.dinner.dateMode, cfg:() => S.dinner.dateVote,
+    options:() => S.dinner.dateCands.filter(c => c.at).map(c => ({label:fmtDeadline(c.at), at:c.at}))},
+  place:{label:'장소', icon:'📍', mode:() => S.dinner.placeMode, cfg:() => S.vote,
+    options:() => votePlaces().map(p => ({label:p.name, extra:p.memo || '', url:p.url || '', addr:p.addr || ''}))}
+};
 // 후보별 투표자(멤버 id). Slack 연결 시 실제 이모지 반응, 데모는 참가자 이름으로 만든 예시 결과
-function voteTally(){
-  const ps = votePlaces();
-  if (S.vote.tally) return ps.map((_, i) => (S.vote.tally[i] || []).map(uid => (MEMBERS.find(m => m.slackId === uid) || {}).id).filter(Boolean));
-  if (SLACK.status === 'on' || !S.started) return ps.map(() => []);
-  const out = ps.map(() => []);
-  S.invited.forEach(id => { const h = hashStr(id); if (h % 5 === 0) return; out[h % ps.length].push(id); if (h % 3 === 0) out[(h >> 3) % ps.length].push(id); });
+function tallyOf(kind){
+  const V = VOTES[kind], c = V.cfg(), opts = V.options();
+  if (c.tally) return opts.map((_, i) => (c.tally[i] || []).map(uid => (MEMBERS.find(m => m.slackId === uid) || {}).id).filter(Boolean));
+  if (SLACK.status === 'on' || !S.started || !opts.length) return opts.map(() => []);
+  const salt = kind === 'date' ? 7 : 0, out = opts.map(() => []);
+  S.invited.forEach(id => { const h = hashStr(id) + salt; if (h % 5 === 0) return; out[h % opts.length].push(id); if (h % 3 === 0) out[(h >> 3) % opts.length].push(id); });
   return out.map(a => [...new Set(a)]);
 }
+const isOpen = kind => VOTES[kind].mode() === 'vote' && !VOTES[kind].cfg().closed;
+const decided = kind => VOTES[kind].mode() === 'fixed' || VOTES[kind].cfg().closed;
+function decidedValue(kind){
+  if (kind === 'date') return S.dinner.dateMode === 'fixed' ? {label:dinnerWhen()} : VOTES.date.options()[S.dinner.dateVote.winner] || null;
+  if (S.dinner.placeMode === 'fixed'){ const p = dinnerPlace(); return p ? {label:p.name, url:p.url, addr:p.addr} : null; }
+  return VOTES.place.options()[S.vote.winner] || null;
+}
+// 아직 안 한 투표 (열려 있는 것만)
+const missingVotes = id => ['date', 'place'].filter(k => isOpen(k) && !tallyOf(k).flat().includes(id)).map(k => VOTES[k].label);
 const voteDeadline = () => (S.dinner && S.dinner.voteDeadline) || S.event.deadline;
 
 /* ---------- 상태 ---------- */
-const KEY = 'chongmubot-demo-v2'; // 저장 구조·기본값이 바뀌면 숫자를 올려 예전 상태를 버림
+const KEY = 'chongmubot-demo-v3'; // 저장 구조·기본값이 바뀌면 숫자를 올려 예전 상태를 버림
 function defaults(){
   return {
     screen:'start', started:false, size:null, // size: 모임 규모 'small'(소모임·도총) | 'large'(대모임·채총)
@@ -601,12 +681,19 @@ function buildPerson(id){
   // Slack 연결 시엔 데모 예시값 없이 모두 미입력(무응답·미입금)에서 시작
   const p = (SLACK.status !== 'on' && PROFILE[id]) || {attend:'무응답', pay:'미입금', stage:1};
   const needs = p.pay !== '입금' && p.attend !== '불참';
-  return {id, attend:p.attend, pay:p.pay, note:p.note||'', fields:{...(p.f||{})},
+  return {id, attend:p.attend, pay:p.pay, note:p.note||'', fields:{...(p.f||{})}, vstage:0, lastSent:Date.now(),
           stage: needs ? (p.stage || 1) : 0, ov:{on:false, persona:'', strategy:'', freq:null, stop:false}};
 }
 function seedRun(){
   S.people = {}; S.tx = []; S.issues = []; S.log = []; S.refunds = []; S.settled = false;
   S.invited.forEach(id => S.people[id] = buildPerson(id));
+  if (voteOn()){
+    // 회식: 날짜·장소가 둘 다 정해져 있으면 투표 단계를 건너뛰고 참석 조사로
+    S.dinner.dateVote = defaultPoll(); Object.assign(S.vote, defaultPoll());
+    S.phase = decided('date') && decided('place') ? 'survey' : 'plan';
+    log('총무', '설정 확인 · 총무봇 시작 (HITL 1)');
+    return;
+  }
   const fee = +S.event.fee || 0;
   S.invited.forEach((id, i) => { if (S.people[id].pay === '입금') S.tx.push({id:++S.txSeq, kind:'in', who:MEM[id].name.replace(' (총무)',''), amount:fee, match:id, status:'ok', at:`10/${6+i%3} ${pad(9+i)}:1${i%6}`}); });
   if (SLACK.status === 'on'){ log('총무', '설정 확인 · 총무봇 시작 (HITL ①)'); return; } // 실제 모임은 예시 거래·로그 없이 시작
@@ -626,7 +713,7 @@ function seedRun(){
   if (S.people.sj) log('소통', '정서준님 2단계 개인 DM 발송');
 }
 function syncPeople(){
-  S.invited.forEach(id => { if (!S.people[id]) { S.people[id] = {...buildPerson(id), attend:'무응답', pay:'미입금', fields:{}, note:'', stage:1}; log('소통', `${MEM[id].name}님 채널 초대 · 1단계 공지 발송`); } });
+  S.invited.forEach(id => { if (!S.people[id]) { S.people[id] = {...buildPerson(id), attend:'무응답', pay:'미입금', fields:{}, note:'', stage:1, vstage:0, lastSent:Date.now()}; log('소통', `${MEM[id].name}님 채널 초대 · 1단계 공지 발송`); } });
   Object.keys(S.people).forEach(id => { if (!S.invited.includes(id)) delete S.people[id]; });
 }
 
@@ -831,7 +918,7 @@ function dinnerPlan(n){
     <label class="f">모임 이름</label><input class="inp" data-bind="event.name" value="${esc(e.name)}" style="margin-bottom:14px">
 
     <div class="row" style="margin-bottom:8px"><label class="f" style="margin:0">📅 날짜</label><span class="grow"></span>
-      <div class="seg sm">${seg('dinner.dateMode', 'fixed', '총무가 정함')}${seg('dinner.dateMode', 'vote', '투표로 정함')}</div></div>
+      <div class="seg sm">${seg('dinner.dateMode', 'fixed', '총무가 정하기')}${seg('dinner.dateMode', 'vote', '투표로 정하기')}</div></div>
     ${D.dateMode === 'fixed' ? `<div class="grid2" style="margin-bottom:14px">
         <input class="inp" type="date" data-bind="dinner.date" value="${esc(D.date)}"><input class="inp" type="time" data-bind="dinner.time" value="${esc(D.time)}"></div>`
       : `<div style="margin-bottom:14px">${D.dateCands.map((c, i) => `<div class="vote-row date">
@@ -840,21 +927,19 @@ function dinnerPlan(n){
         ${D.dateCands.length < 10 ? '<button class="btn sm" data-act="dcandAdd">＋ 날짜 후보</button>' : ''}</div>`}
 
     <div class="row" style="margin-bottom:8px"><label class="f" style="margin:0">📍 장소</label><span class="grow"></span>
-      <div class="seg sm">${seg('dinner.placeMode', 'fixed', '총무가 정함')}${seg('dinner.placeMode', 'vote', '투표로 정함')}</div></div>
+      <div class="seg sm">${seg('dinner.placeMode', 'fixed', '총무가 정하기')}${seg('dinner.placeMode', 'vote', '투표로 정하기')}</div></div>
     <div class="vote-set">
       <div class="vote-ai">
         <input class="inp" data-bind="vote.area" value="${esc(v.area)}" placeholder="지역 (예: 강남역)">
         <input class="inp" data-bind="vote.food" value="${esc(v.food)}" placeholder="음식 (비우면 상관없음)">
-        <input class="inp" data-bind="vote.budget" value="${esc(v.budget)}" placeholder="1인 예산 (예: 3만원)">
         <button class="btn sm primary" data-act="voteRecommend" ${UI.voteBusy ? 'disabled' : ''}>${UI.voteBusy ? '찾는 중…' : '✨ AI 추천'}</button>
       </div>
-      <p class="small muted" style="margin:6px 0 12px">카카오맵의 실제 가게 중 Claude가 조건에 맞게 골라요. 금액은 업종으로 짐작한 예상값이에요.
-        ${D.placeMode === 'fixed' ? '<b>총무가 정함</b>: 후보 중 하나를 ◉ 로 고르세요.' : '<b>투표</b>: 후보 2곳 이상.'}</p>
+      <p class="small muted" style="margin:6px 0 12px">카카오맵의 실제 가게 중 Claude가 조건에 맞게 골라요. 옆 칸은 카카오 업종 분류이고, 실제 메뉴를 적어 두면 투표 메시지에 그대로 나가요.
+        ${D.placeMode === 'fixed' ? '<b>총무가 정하기</b>: 후보 중 하나를 ◉ 로 고르세요.' : '<b>투표</b>: 후보 2곳 이상.'}</p>
       ${v.places.map((p, i) => `<div class="vote-row">
         ${D.placeMode === 'fixed' ? `<button class="pick ${D.placePick === i ? 'on' : ''}" data-act="placePick" data-i="${i}" aria-label="이 장소로">${D.placePick === i ? '◉' : '○'}</button>` : `<span class="num">${NUMS[i]}</span>`}
         <input class="inp" data-bind="vote.places.${i}.name" value="${esc(p.name)}" placeholder="가게 이름">
-        <input class="inp" data-bind="vote.places.${i}.price" value="${esc(p.price)}" placeholder="1인 예상">
-        <input class="inp" data-bind="vote.places.${i}.memo" value="${esc(p.memo)}" placeholder="메모">
+        <input class="inp" data-bind="vote.places.${i}.memo" value="${esc(p.memo)}" placeholder="메뉴 (예: 삼겹살 · 항정살 · 오겹살)" title="카카오 업종 분류예요. 실제 메뉴는 직접 적어 주세요">
         ${p.lat ? `<button class="btn sm ghost" data-act="mapFocus" data-kind="cand" data-i="${i}" title="${esc(p.addr || '')}">📍 위치</button>` : p.url ? `<a class="btn sm ghost" href="${esc(p.url)}" target="_blank" rel="noopener">지도</a>` : '<span></span>'}
         <button class="btn sm ghost danger" data-act="voteDel" data-i="${i}" aria-label="후보 삭제">✕</button></div>`).join('')}
       ${v.places.length >= 10 ? '' : UI.placeAdd ? placeSearchBox() : '<button class="btn sm" data-act="placeAddOpen">＋ 직접 추가 (카카오맵 검색)</button>'}
@@ -891,21 +976,24 @@ function dinnerFee(n){
 }
 // 직접 추가: 카카오맵 가게 검색 자동완성 (서버 /api/places/search)
 function placeSearchBox(){
-  const hits = UI.placeHits || [];
   return `<div class="place-search">
     <div class="row"><input class="inp" id="placeQ" placeholder="가게 이름 검색 (예: 육전식당)${S.vote.area ? ` · ${esc(S.vote.area)} 근처` : ''}" value="${esc(UI.placeQ || '')}" autocomplete="off">
       <button class="btn sm ghost" data-act="placeAddClose">닫기</button></div>
     ${SLACK.status !== 'on' ? '<p class="small muted">검색은 서버(app/server.py)가 켜져 있어야 해요. 아래에서 이름만 추가할 수 있어요.</p>' : ''}
-    ${UI.placeErr ? `<p class="small muted">⚠️ ${esc(UI.placeErr)}</p>` : ''}
-    ${hits.map((p, i) => `<div class="hit" data-act="mapFocus" data-kind="hit" data-i="${i}" style="cursor:pointer"><div><b>${esc(p.name)}</b> <span class="tag">${esc(p.category)}</span><div class="small muted">${esc(p.addr)}</div></div>
-      <span class="grow"></span><button class="btn sm primary" data-act="placeHit" data-i="${i}">추가</button></div>`).join('')}
-    ${(UI.placeQ || '').trim() && !hits.length && !UI.placeErr && SLACK.status === 'on' ? '<p class="small muted">검색 결과가 없어요.</p>' : ''}
+    <div id="placeHits">${placeHitsHtml()}</div>
     <button class="btn sm ghost" data-act="voteAdd">검색 없이 이름만 추가</button>
   </div>`;
 }
+function placeHitsHtml(){
+  const hits = UI.placeHits || [];
+  return `${UI.placeErr ? `<p class="small muted">⚠️ ${esc(UI.placeErr)}</p>` : ''}
+    ${hits.map((p, i) => `<div class="hit" data-act="mapFocus" data-kind="hit" data-i="${i}" style="cursor:pointer"><div><b>${esc(p.name)}</b> <span class="tag">${esc(p.category)}</span><div class="small muted">${esc(p.addr)}</div></div>
+      <span class="grow"></span><button class="btn sm primary" data-act="placeHit" data-i="${i}">추가</button></div>`).join('')}
+    ${(UI.placeQ || '').trim() && !hits.length && !UI.placeErr && SLACK.status === 'on' ? '<p class="small muted">검색 결과가 없어요.</p>' : ''}`;
+}
 let placeTimer;
 const onPlaceQ = e => {
-  if (e.target.id !== 'placeQ' || e.isComposing) return;
+  if (e.target.id !== 'placeQ') return;
   UI.placeQ = e.target.value; clearTimeout(placeTimer);
   placeTimer = setTimeout(async () => {
     const q = UI.placeQ.trim(); UI.placeErr = '';
@@ -919,11 +1007,12 @@ const onPlaceQ = e => {
         UI.placeHits = r.places;
       } catch(err){ UI.placeHits = []; UI.placeErr = slackErr(err.message); }
     }
-    const pos = ($('#placeQ') || {}).selectionStart; render();
-    const el = $('#placeQ'); if (el){ el.focus(); if (pos != null) el.setSelectionRange(pos, pos); }
+    // 검색창은 건드리지 않고 결과 목록과 지도 핀만 갱신
+    const box = $('#placeHits'); if (box) box.innerHTML = placeHitsHtml();
+    renderPreview();
   }, 300);
 };
-document.addEventListener('input', onPlaceQ); document.addEventListener('compositionend', onPlaceQ);
+document.addEventListener('input', onPlaceQ);
 
 // 카카오 지도: 오른쪽 '지도' 탭에 후보(번호 핀)와 검색 결과(회색 핀)를 표시. 지도 요소는 한 번 만들고 다시 붙여 씀
 const MAP = {status:'off', map:null, el:null, overlays:[], info:null, sig:''};
@@ -1019,37 +1108,125 @@ function dinnerNotice(){
   const votes = [D.dateMode === 'vote' && '날짜', D.placeMode === 'vote' && '장소'].filter(Boolean);
   return [`🍻 ${S.event.name} 안내드려요!`,
     `📅 ${when || '날짜는 투표로 정해요'}`,
-    `📍 ${pl ? pl.name : D.placeMode === 'fixed' ? '(장소 미정)' : '장소는 투표로 정해요'}`,
+    `📍 ${pl ? pl.name + (pl.url ? `\n🗺 ${pl.url}` : '') : D.placeMode === 'fixed' ? '(장소 미정)' : '장소는 투표로 정해요'}`,
     votes.length ? `아래 ${votes.join('·')} 투표에 참여해 주세요. 여러 개 골라도 돼요! (마감 ${fmtDeadline(voteDeadline())})` : '참석 여부는 곧 따로 여쭤볼게요.'].join('\n');
 }
-function voteCard(){
-  const v = S.vote, ps = votePlaces(), tally = voteTally();
-  const voted = new Set(tally.flat()), max = Math.max(1, ...tally.map(a => a.length));
-  const notVoted = S.invited.filter(id => !voted.has(id));
-  const live = SLACK.status === 'on' && v.ts;
-  return `<section class="card" style="margin-bottom:16px">
-    <div class="card-h"><h3>🍻 장소 투표</h3>
-      ${v.closed ? '<span class="tag g">확정</span>' : live ? '<span class="tag g">● 실시간</span>' : `<span class="tag">${SLACK.status === 'on' ? '투표 메시지 없음' : '데모 예시'}</span>`}
-      <span class="small muted">마감 ${fmtDeadline(voteDeadline())} · 중복 가능</span><span class="grow"></span>
-      ${v.closed ? '' : '<span class="hitl">HITL</span><button class="btn sm primary" data-act="voteClose">마감하고 확정</button>'}</div>
+// 회식 대시보드: 단계 표시줄 + 단계별 카드
+const PHASES = [['plan', '날짜·장소'], ['survey', '참석 조사'], ['event', '모임'], ['settle', '정산']];
+function renderDinnerDash(){
+  const ph = S.phase || 'plan', idx = PHASES.findIndex(x => x[0] === ph), d = decidedValue('date'), pl = decidedValue('place');
+  const bothFixed = S.dinner.dateMode === 'fixed' && S.dinner.placeMode === 'fixed';
+  const ready = decided('date') && decided('place');
+  const ps = people();
+  $('#app').innerHTML = `
+  <header class="top"><div class="top-in">
+    <button class="brand btn ghost" data-act="goStart" style="padding:4px 8px"><span class="logo">🐸</span>도총 & 채총</button>
+    <span class="tag b">#${esc(S.channel)}</span>
+    ${S.paused ? '<span class="tag o">⏸ 봇 일시정지</span>' : '<span class="tag g">● 봇 동작 중</span>'}
+    <div class="grow"></div>
+    <button class="btn" data-act="goSetup">⚙️ 전체 설정</button>
+  </div></header>
+  <main class="page">
+    <div class="headline"><div>
+      <div class="small muted" style="font-weight:700">🍻 회식</div>
+      <h1>${esc(S.event.name)}</h1>
+      <div class="small" style="font-weight:700">📅 ${esc(decided('date') && d ? d.label : '투표 중')} · 📍 ${esc(decided('place') && pl ? pl.label : '투표 중')}</div>
+    </div></div>
+    <div class="steps">${PHASES.map(([k, l], i) => `<div class="step ${i < idx ? 'done' : i === idx ? 'now' : ''}"><span class="n">${i < idx ? '✓' : i + 1}</span>${l}${i === 0 && bothFixed ? '<small>총무가 정하기</small>' : ''}</div>`).join('<span class="sep"></span>')}</div>
+    ${ph === 'plan' ? `
+      <div class="polls">${pollCard('date')}${pollCard('place')}</div>
+      ${ready ? `<div class="card next"><div><b>날짜와 장소가 모두 정해졌어요</b><div class="small muted">확정 공지를 보내고 참석 조사로 넘어가요.</div></div><span class="grow"></span>
+        <span class="hitl">HITL 2</span><button class="btn yellow" data-act="startSurvey">확정 공지 + 참석 조사 시작</button></div>` : ''}`
+    : `<section class="card" style="margin-bottom:16px"><div class="card-h"><h3>📋 2단계 · 참석 조사</h3><span class="tag">준비 중</span></div>
+        <div class="card-b"><p style="margin:0">📅 ${esc(d ? d.label : '-')} · 📍 ${esc(pl ? pl.label : '-')}${pl && pl.url ? ` · <a href="${esc(pl.url)}" target="_blank" rel="noopener">카카오맵 ›</a>` : ''}</p>
+        <p class="small muted" style="margin:6px 0 0">참석·1차/2차·도착 시간·음주 여부를 묻는 참석 조사는 다음 작업에서 만들어요.</p></div></section>`}
+    <div class="dash">
+      <div class="col">
+        <section class="card">
+          <div class="card-h"><h3>⚙️ 총무 설정</h3></div>
+          <div class="card-b">
+            <div class="set-row"><label>봇 상태</label><div class="row"><button class="switch ${S.paused ? '' : 'on'}" data-act="togglePause" aria-label="봇 동작"></button><span class="small">${S.paused ? '일시정지 · 독촉 안 보냄' : '동작 중'}</span></div></div>
+            <div class="set-row"><label>성격</label><div class="seg sm">${Object.entries(PERSONAS).map(([k,p]) => `<button class="${S.persona === k ? 'on' : ''}" data-act="dset" data-path="persona" data-val="${k}">${p.ic} ${p.label}</button>`).join('')}</div></div>
+            <div class="set-row"><label>독촉 전략</label><div class="seg sm">${Object.entries(STRATEGIES).map(([k,p]) => `<button class="${S.strategy === k ? 'on' : ''}" data-act="dset" data-path="strategy" data-val="${k}">${p.label}</button>`).join('')}</div></div>
+            <div class="set-row"><label>독촉 간격</label><div class="time-in small">
+              <input class="inp num" type="number" min="0" data-dbind="freq.h" value="${esc(S.freq.h)}">시간
+              <input class="inp num" type="number" min="0" max="59" data-dbind="freq.m" value="${esc(S.freq.m)}">분
+              <input class="inp num" type="number" min="0" max="59" data-dbind="freq.s" value="${esc(S.freq.s)}">초</div></div>
+            <div class="set-row"><label>금지 시간</label><div class="time-in small"><input class="inp" type="time" data-dbind="quiet.from" value="${esc(S.quiet.from)}">~<input class="inp" type="time" data-dbind="quiet.to" value="${esc(S.quiet.to)}"></div></div>
+            <div class="set-row" style="margin:0"><label>투표 마감</label><input class="inp" type="datetime-local" data-dbind="dinner.voteDeadline" value="${esc(S.dinner.voteDeadline)}"></div>
+          </div>
+        </section>
+        <section class="card">
+          <div class="card-h"><h3>🕑 에이전트 활동</h3></div>
+          <div class="card-b"><div class="log">${S.log.slice(0, 8).map(l => `<div class="li"><time>${l.t}</time><span class="tag ${({소통:'b',기록:'y',정산:'g',총무:''})[l.who]}">${l.who}</span><span>${esc(l.text)}</span></div>`).join('') || '<span class="muted small">아직 활동이 없어요.</span>'}</div></div>
+        </section>
+      </div>
+      <section class="card">
+        <div class="card-h"><h3>👥 ${ph === 'plan' ? '투표 현황' : '참가자'}</h3><span class="grow"></span>
+          ${ph === 'plan' ? `<span class="small muted">투표 안 한 사람에게 ${freqText(S.freq)}마다 자동 독촉 · 3회 후 총무에게 이관</span>` : ''}</div>
+        ${ps.map(p => dinnerPersonRow(p, ph)).join('') || '<div class="card-b muted">참가자가 없어요.</div>'}
+      </section>
+    </div>
+  </main>`;
+}
+function dinnerPersonRow(p, ph){
+  const miss = ph === 'plan' ? missingVotes(p.id) : [], open = UI.open === p.id;
+  const mark = kind => !isOpen(kind) && VOTES[kind].mode() === 'fixed' ? '' : `<span class="tag ${tallyOf(kind).flat().includes(p.id) ? 'g' : ''}">${VOTES[kind].label} ${tallyOf(kind).flat().includes(p.id) ? '✓' : '–'}</span>`;
+  let status = '';
+  if (ph === 'plan'){
+    if (!['date', 'place'].some(isOpen)) status = '<span class="small muted">투표 끝</span>';
+    else if (!miss.length) status = '<span class="tag g">✓ 투표 완료 · 독촉 없음</span>';
+    else if ((p.vstage || 0) >= 3) status = '<span class="tag o">독촉 3회 · 총무 직접 연락</span>';
+    else if (S.paused || eff(p).stop) status = '<span class="tag">⏸ 독촉 멈춤</span>';
+    else status = `<span class="small">다음 자동 독촉 <b data-due="${nextDue(p)}">…</b> · ${(p.vstage || 0) + 1}차</span>`;
+  }
+  const canSend = ph === 'plan' && miss.length && (p.vstage || 0) < 3;
+  const m = canSend ? nextVoteMsg(p) : null;
+  return `<div class="drow ${open ? 'open' : ''}">
+    <div class="drow-h" data-act="openPerson" data-id="${p.id}">${avatar(p.id)}<b>${esc(p.id === 'me' ? '나 (총무)' : MEM[p.id].name)}</b>
+      ${ph === 'plan' ? `${mark('date')}${mark('place')}` : ''}<span class="grow"></span>${status}<span class="small muted">${open ? '▴' : '▾'}</span></div>
+    ${open ? `<div class="drow-b">${m ? `<div class="stage-lb" style="margin-bottom:8px">다음 메시지 · ${m.label}</div>${bubble(m.text, m.mood, m.k === 'burst')}
+        <div class="row" style="margin-top:10px"><button class="btn sm primary" data-act="voteRemind" data-id="${p.id}" ${S.paused || eff(p).stop ? 'disabled' : ''}>지금 DM 보내기</button><span class="small muted">보내면 자동 독촉 시계가 다시 시작돼요</span></div>`
+      : `<p class="small muted" style="margin:0">${ph === 'plan' ? (miss.length ? '독촉을 3번 보냈어요. 직접 연락해 주세요.' : '투표를 마쳐서 독촉 대상이 아니에요.') : '참석 조사 단계에서 응답을 받아요.'}</p>`}</div>` : ''}
+  </div>`;
+}
+
+// 1단계 대시보드: 날짜·장소 카드 (총무가 정했으면 값, 투표면 실시간 득표)
+function pollCard(kind){
+  const V = VOTES[kind], c = V.cfg();
+  if (V.mode() === 'fixed'){
+    const v = decidedValue(kind);
+    return `<section class="card poll"><div class="card-h"><h3>${V.icon} ${V.label}</h3><span class="tag g">✓ 총무가 정하기</span></div>
+      <div class="card-b"><div class="poll-fixed">${esc(v ? v.label : '-')}</div>${v && v.url ? `<a class="small" href="${esc(v.url)}" target="_blank" rel="noopener">카카오맵에서 보기 ›</a>` : ''}</div></section>`;
+  }
+  const opts = V.options(), tally = tallyOf(kind), voted = new Set(tally.flat()), max = Math.max(1, ...tally.map(a => a.length));
+  const notVoted = S.invited.filter(id => !voted.has(id)), over = new Date(voteDeadline()) < new Date();
+  const live = SLACK.status === 'on' && c.ts;
+  return `<section class="card poll"><div class="card-h"><h3>${V.icon} ${V.label} 투표</h3>
+      ${c.closed ? '<span class="tag g">✓ 확정</span>' : over ? '<span class="tag o">마감 시간 지남</span>' : live ? '<span class="tag g">● 실시간</span>' : `<span class="tag">${SLACK.status === 'on' ? '투표 메시지 없음' : '데모 예시'}</span>`}
+      <span class="grow"></span>${c.closed ? '' : `<span class="hitl">HITL</span><button class="btn sm primary" data-act="pollClose" data-kind="${kind}">마감하고 확정</button>`}</div>
     <div class="card-b">
-      ${ps.map((p, i) => `<div class="vote-bar ${v.winner === i ? 'win' : ''}">
-        <div class="row"><span>${NUMS[i]}</span>${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener"><b>${esc(p.name)}</b></a>` : `<b>${esc(p.name)}</b>`}
-          ${p.price ? `<span class="tag">${esc(p.price)}</span>` : ''}${v.winner === i ? '<span class="tag g">📍 확정</span>' : ''}<span class="grow"></span><b>${tally[i].length}표</b></div>
+      ${opts.map((o, i) => `<div class="vote-bar ${c.winner === i ? 'win' : ''}">
+        <div class="row"><span>${NUMS[i]}</span><b>${esc(o.label)}</b>${o.extra ? `<span class="small muted">${esc(o.extra)}</span>` : ''}${c.winner === i ? '<span class="tag g">확정</span>' : ''}<span class="grow"></span><b>${tally[i].length}표</b></div>
         <div class="bar"><i style="width:${tally[i].length / max * 100}%"></i></div>
         <div class="small muted" style="margin-top:4px">${tally[i].map(shortName).map(esc).join(', ') || '&nbsp;'}</div></div>`).join('')}
-      <p class="small muted" style="margin:10px 0 0">투표 ${voted.size}명 · 미투표 ${notVoted.length}명${notVoted.length ? ` (${notVoted.slice(0, 8).map(shortName).map(esc).join(', ')}${notVoted.length > 8 ? ' …' : ''})` : ''}${!v.closed && notVoted.length ? ' · 독촉 DM에 투표 요청이 함께 나가요' : ''}</p>
+      <p class="small muted" style="margin:10px 0 0">${c.closed ? '투표가 끝났어요.' : `마감 ${fmtDeadline(voteDeadline())} · 투표 ${voted.size}명 · 미투표 ${notVoted.length}명${notVoted.length ? ` (${notVoted.slice(0, 6).map(shortName).map(esc).join(', ')}${notVoted.length > 6 ? ' …' : ''})` : ''}`}</p>
     </div></section>`;
 }
-function voteCloseModal(){
-  const ps = votePlaces(), tally = voteTally();
-  const order = ps.map((p, i) => ({p, i, n:tally[i].length})).sort((a, b) => b.n - a.n);
-  const top = order.filter(o => o.n === order[0].n);
-  modal(`<div class="mh"><span class="hitl">HITL</span><h3 class="grow">회식 장소를 확정할까요?</h3><button class="btn sm ghost" data-act="closeModal">✕</button></div>
-    <div class="mb">${top.length > 1 && order[0].n ? `<div class="warn" style="margin-bottom:10px">${top.map(o => esc(o.p.name)).join(', ')} 동점이에요. 한 곳을 골라 주세요.</div>` : ''}
-      ${order.map(o => `<button class="opt ${o.i === top[0].i && top.length === 1 ? 'on' : ''}" style="width:100%;margin-bottom:6px;text-align:left" data-act="voteConfirm" data-i="${o.i}">
-        <b>${NUMS[o.i]} ${esc(o.p.name)} · ${o.n}표</b><span>${esc([o.p.price, o.p.memo].filter(Boolean).join(' · ') || ' ')}</span></button>`).join('')}
-      <p class="small muted">누르면 확정되고${SLACK.status === 'on' ? ` #${esc(S.channel)}에 장소가 공지돼요` : ' 채널에 장소가 공지돼요 (데모)'}.</p></div>`);
+function pollCloseModal(kind){
+  const V = VOTES[kind], opts = V.options(), tally = tallyOf(kind);
+  const order = opts.map((o, i) => ({o, i, n:tally[i].length})).sort((a, b) => b.n - a.n);
+  const top = order.filter(x => x.n === order[0].n);
+  modal(`<div class="mh"><span class="hitl">HITL</span><h3 class="grow">${V.label}를 확정할까요?</h3><button class="btn sm ghost" data-act="closeModal">✕</button></div>
+    <div class="mb">${top.length > 1 && order[0].n ? `<div class="warn" style="margin-bottom:10px">${top.map(x => esc(x.o.label)).join(', ')} 동점이에요. 하나를 골라 주세요.</div>` : ''}
+      ${order.map(x => `<button class="opt ${x.i === top[0].i && top.length === 1 ? 'on' : ''}" style="width:100%;margin-bottom:6px;text-align:left" data-act="pollConfirm" data-kind="${kind}" data-i="${x.i}">
+        <b>${NUMS[x.i]} ${esc(x.o.label)} · ${x.n}표</b><span>${esc(x.o.extra || ' ')}</span></button>`).join('')}
+      <p class="small muted">누르면 투표가 마감되고${SLACK.status === 'on' ? ' 투표 메시지에 결과 댓글이 달려요' : ' 채널에 결과가 안내돼요 (데모)'}.</p></div>`);
+}
+// 2단계로 넘어가기 전 확정 공지 문구
+function dinnerConfirmText(){
+  const d = decidedValue('date'), p = decidedValue('place');
+  return [`🍻 ${S.event.name} 일정이 정해졌어요!`, `📅 ${d ? d.label : '-'}`, `📍 ${p ? p.label : '-'}${p && p.url ? `\n🗺 ${p.url}` : ''}`, '곧 참석 여부를 여쭤볼게요.'].join('\n');
 }
 async function voteRecommend(){
   if (SLACK.status !== 'on'){ toast('AI 추천은 서버(app/server.py)가 켜져 있어야 해요'); return; }
@@ -1058,12 +1235,12 @@ async function voteRecommend(){
   const drinks = S.started ? people().map(p => (p.fields || {})['음주 여부'] || (p.fields || {})['음주']).filter(Boolean) : [];
   UI.voteBusy = true; render();
   try {
-    const r = await slackApi('/api/places/recommend', {area:S.vote.area, food:S.vote.food, budget:S.vote.budget, headcount:S.invited.length,
+    const r = await slackApi('/api/places/recommend', {area:S.vote.area, food:S.vote.food,
       prefs:pref, drink: drinks.length ? `${drinks.filter(x => x === 'O').length}/${drinks.length}명 음주` : '모름'});
     if (!r.places.length) toast('검색 결과가 없어요. 지역이나 음식을 바꿔 보세요');
     else {
       const keep = S.vote.places.filter(p => (p.name || '').trim());
-      S.vote.places = [...keep, ...r.places.map(p => ({name:p.name, price:p.price || '', memo:p.memo || '', url:p.url, addr:p.addr, lat:p.lat, lng:p.lng}))].slice(0, 10);
+      S.vote.places = [...keep, ...r.places.map(p => ({name:p.name, memo:p.memo || '', url:p.url, addr:p.addr, lat:p.lat, lng:p.lng}))].slice(0, 10);
       UI.pvTab = 'map';
       toast(`후보 ${r.places.length}곳을 넣었어요${r.llm ? ' (Claude 추천)' : ' (검색 결과)'} · 확인 후 고쳐 주세요`);
     }
@@ -1072,14 +1249,49 @@ async function voteRecommend(){
 }
 // 실제 투표 집계: 대시보드가 열려 있는 동안 5초마다 이모지 반응을 읽음
 setInterval(async () => {
-  if (S.screen !== 'dash' || SLACK.status !== 'on' || !S.vote || !S.vote.ts || S.vote.closed || !voteOn()) return;
-  try {
-    const r = await slackApi(`/api/slack/poll?channel=${encodeURIComponent(S.vote.channel)}&ts=${encodeURIComponent(S.vote.ts)}`);
-    if (JSON.stringify(r.options) === JSON.stringify(S.vote.tally)) return;
-    S.vote.tally = r.options;
-    if (!document.activeElement || !document.activeElement.matches('#app input, #app select')) render(); else save();
-  } catch(e){}
+  if (S.screen !== 'dash' || SLACK.status !== 'on' || !voteOn() || S.phase !== 'plan') return;
+  let changed = false;
+  for (const kind of ['date', 'place']){
+    const c = VOTES[kind].cfg();
+    if (!c.ts || c.closed) continue;
+    try {
+      const r = await slackApi(`/api/slack/poll?channel=${encodeURIComponent(c.channel)}&ts=${encodeURIComponent(c.ts)}`);
+      if (JSON.stringify(r.options) !== JSON.stringify(c.tally)){ c.tally = r.options; changed = true; }
+    } catch(e){}
+  }
+  if (changed){ if (!document.activeElement || !document.activeElement.matches('#app input, #app select')) render(); else save(); }
 }, 5000);
+
+// 투표 자동 독촉 (브라우저 타이머: 대시보드가 열려 있는 동안만. 응답 받기 단계에서 서버 예약으로 옮길 예정)
+function voteTargets(){
+  if (!voteOn() || !S.started || S.phase !== 'plan' || !['date', 'place'].some(isOpen)) return [];
+  return people().filter(p => missingVotes(p.id).length && (p.vstage || 0) < 3);
+}
+function nextDue(p){ return (p.lastSent || 0) + freqSec(eff(p).freq) * 1000; }
+async function sendVoteReminder(p, manual){
+  const m = nextVoteMsg(p);
+  p.lastSent = Date.now(); p.vstage = (p.vstage || 0) + 1;
+  const what = `${MEM[p.id].name}님께 ${m.label}${manual ? '' : ' (자동)'}`;
+  if (SLACK.status === 'on' && MEM[p.id].slackId) await slackSend({user:MEM[p.id].slackId, name:shortName(p.id)}, m, eff(p).persona, what);
+  else { log('소통', `${what} (${m.mood}): “${m.text.slice(0, 50)}${m.text.length > 50 ? '…' : ''}”`); }
+  if (p.vstage >= 3) log('소통', `${MEM[p.id].name}님 투표 독촉 3회 · 총무에게 이관`);
+  render();
+}
+let remindBusy = false;
+setInterval(async () => {
+  if (remindBusy || S.paused) return;
+  const now = new Date();
+  if (inQuiet(now, S.quiet) || new Date(voteDeadline()) < now) return;
+  const due = voteTargets().find(p => !eff(p).stop && nextDue(p) <= now.getTime());
+  if (!due) return;
+  remindBusy = true;
+  try { await sendVoteReminder(due, false); } finally { remindBusy = false; }
+}, 1000);
+// 다음 자동 독촉까지 남은 시간 표시 (화면 전체를 다시 그리지 않고 글자만 갱신)
+setInterval(() => document.querySelectorAll('[data-due]').forEach(el => {
+  const left = Math.max(0, Math.round((+el.dataset.due - Date.now()) / 1000));
+  el.textContent = left >= 3600 ? `${Math.floor(left / 3600)}시간 ${Math.floor(left % 3600 / 60)}분 뒤` : left >= 60 ? `${Math.floor(left / 60)}분 ${left % 60}초 뒤` : `${left}초 뒤`;
+}), 1000);
 
 // 모임 종류별 설정 섹션 순서 (번호는 순서대로 자동)
 function setupSections(){
@@ -1099,10 +1311,7 @@ function setupSlack(n){ const s = S; return `
           ${memCompact() ? '' : '<button class="btn sm ghost" data-act="inviteAll">전체</button>'}<button class="btn sm ghost" data-act="inviteNone">해제</button>
           ${MEMBERS.length > 20 ? `<button class="btn sm ghost" data-act="memAll">${UI.memAll ? '접기' : `전체 보기 (${MEMBERS.length})`}</button>` : ''}</div>
         ${MEMBERS.length > 20 ? `<input class="inp" id="memQ" placeholder="이름 검색해서 추가 (예: 13기 박채원)" value="${esc(UI.memQ || '')}" autocomplete="off" style="margin-bottom:8px">` : ''}
-        ${memCompact() ? memPicker(s) : `<div class="members">${MEMBERS.filter(memShown).map(m => `
-          <button class="mem ${s.invited.includes(m.id) ? 'on' : ''} ${m.id === 'me' ? 'lock' : ''}" data-act="toggleInvite" data-id="${m.id}">
-            ${avatar(m.id)}<span>${esc(m.name)}</span>${s.invited.includes(m.id) ? '<span class="grow"></span>✓' : ''}</button>`).join('')}
-        </div>`}
+        <div id="memArea">${memArea(s)}</div>
         ${SLACK.error ? `<p class="muted" style="margin:8px 0 0;font-size:12px">⚠️ ${esc(SLACK.error)}</p>` : ''}
       </section>`; }
 function setupSchema(n, title, desc){ const s = S; return `
@@ -1162,7 +1371,7 @@ function setupFreq(n){ const s = S, sec = freqSec(s.freq); return `
             <div class="time-in"><input class="inp num" type="number" min="0" data-bind="freq.h" value="${esc(s.freq.h)}">시간
               <input class="inp num" type="number" min="0" max="59" data-bind="freq.m" value="${esc(s.freq.m)}">분
               <input class="inp num" type="number" min="0" max="59" data-bind="freq.s" value="${esc(s.freq.s)}">초</div>
-            <div class="row wrap" style="margin-top:8px">${[['12시간',12,0,0],['1시간',1,0,0],['10분',0,10,0],['🔥 5초',0,0,5]].map(([l,h,m,ss]) => `<button class="btn sm" data-act="freqPreset" data-h="${h}" data-m="${m}" data-s="${ss}">${l}</button>`).join('')}</div>
+            <div class="row wrap" style="margin-top:8px">${[['12시간',12,0,0],['1시간',1,0,0],['10분',0,10,0],['🔥 15초',0,0,15]].map(([l,h,m,ss]) => `<button class="btn sm" data-act="freqPreset" data-h="${h}" data-m="${m}" data-s="${ss}">${l}</button>`).join('')}</div>
           </div>
           <div><label class="f">전송 금지 시간</label>
             <div class="time-in"><input class="inp" type="time" data-bind="quiet.from" value="${esc(s.quiet.from)}">부터
@@ -1192,7 +1401,7 @@ function renderPreview(){
   } else if (UI.pvTab === 'msg' && voteOn()){
     const D = S.dinner, ps = votePlaces(), pl = dinnerPlace(), when = dinnerWhen();
     const dateVote = D.dateMode === 'vote' ? `🗳 *날짜 투표* (중복 가능 · 마감 ${fmtDeadline(voteDeadline())})\n` + D.dateCands.map((c, i) => `${NUMS[i]}  ${fmtDeadline(c.at)}`).join('\n') : '';
-    const placeVote = D.placeMode === 'vote' ? `🗳 *장소 투표* (중복 가능 · 마감 ${fmtDeadline(voteDeadline())})\n` + (ps.length ? ps.map((p, i) => `${NUMS[i]}  ${p.name}${p.price ? ' · ' + p.price : ''}${p.url ? '\n      🗺 카카오맵에서 보기' : ''}`).join('\n') : '(후보를 넣어 주세요)') : '';
+    const placeVote = D.placeMode === 'vote' ? `🗳 *장소 투표* (중복 가능 · 마감 ${fmtDeadline(voteDeadline())})\n` + (ps.length ? ps.map((p, i) => `${NUMS[i]}  ${p.name}${p.url ? '\n      🗺 카카오맵에서 보기' : ''}`).join('\n') : '(후보를 넣어 주세요)') : '';
     pv.innerHTML = `
       <div class="row" style="margin-bottom:12px"><b>1단계 · 일정·장소</b><span class="grow"></span><span class="tag">${PERSONAS[S.persona].ic} ${PERSONAS[S.persona].label}</span></div>
       <div class="slack">
@@ -1234,6 +1443,7 @@ function bubble(text, mood, burst, time){
 
 /* ---------- 2) 대시보드 ---------- */
 function renderDash(){
+  if (voteOn()) return renderDinnerDash();
   const t = totals(), e = S.event, ps = people();
   const fee = +e.fee || 0;
   const filtered = ps.filter(p => UI.filter === 'all' ? true
@@ -1257,7 +1467,6 @@ function renderDash(){
       <div>
         <div class="small muted" style="font-weight:700">${TEMPLATES[S.template].icon} ${TEMPLATES[S.template].label} · ${fmtDate(new Date(e.start))} ~ ${fmtDate(new Date(e.end))}</div>
         <h1>${esc(e.name)}</h1>
-        ${voteOn() && S.vote.closed && votePlaces()[S.vote.winner] ? `<div class="small" style="font-weight:700">📍 ${esc(votePlaces()[S.vote.winner].name)}</div>` : ''}
       </div>
       <div class="grow"></div>
       <div class="dday">
@@ -1273,7 +1482,6 @@ function renderDash(){
       <div class="card kpi"><div class="lb">잔액</div><div class="v">${won(t.balance)}</div><div class="small muted">지출 ${won(t.spent)} · ${S.tx.filter(x => x.kind === 'out').length}건</div><div class="bar"><i style="width:${t.income ? Math.max(0, t.balance / t.income * 100) : 0}%;background:var(--blue)"></i></div></div>
     </div>
 
-    ${voteOn() && votePlaces().length >= 2 ? voteCard() : ''}
     <div class="dash">
       <div class="col">
         <!-- 좌1 총무 설정 -->
@@ -1446,6 +1654,7 @@ function drawerSettle(){
 function modal(html, wide){ $('#modal').innerHTML = `<div class="modal" data-act="closeModalBg"><div class="mbox ${wide ? 'wide' : ''}" role="dialog" aria-modal="true">${html}</div></div>`; }
 function closeModal(){ $('#modal').innerHTML = ''; }
 function startConfirmModal(){
+  if (voteOn()) return dinnerStartModal();
   const sec = freqSec(S.freq);
   if (!sec){ toast('독촉 간격을 1초 이상으로 정해 주세요'); return; }
   if (!S.event.name.trim()){ toast('모임 이름을 입력해 주세요'); return; }
@@ -1462,6 +1671,38 @@ function startConfirmModal(){
         <dt>독촉</dt><dd>${freqText(S.freq)}마다 · ${esc(S.quiet.from)}~${esc(S.quiet.to)} 금지</dd>
       </dl>
       ${S.started ? '' : `<div style="margin-top:16px"><div class="stage-lb" style="margin-bottom:8px">시작하면 #${esc(S.channel)}에 바로 올라갈 첫 공지</div>${bubble(first.text, '', false)}</div>`}
+    </div>
+    <div class="mf"><button class="btn" data-act="closeModal">더 고치기</button><button class="btn yellow" data-act="doStart">${S.started ? '저장' : '확인하고 시작하기'}</button></div>`);
+}
+function dinnerStartModal(){
+  const D = S.dinner, err = [];
+  if (!S.event.name.trim()) err.push('모임 이름을 입력해 주세요');
+  if (D.dateMode === 'fixed' ? !D.date : VOTES.date.options().length < 2) err.push(D.dateMode === 'fixed' ? '날짜를 정해 주세요' : '날짜 후보를 2개 이상 넣어 주세요');
+  if (D.placeMode === 'fixed' ? !dinnerPlace() : votePlaces().length < 2) err.push(D.placeMode === 'fixed' ? '장소를 골라 주세요 (후보 중 ◉)' : '장소 후보를 2곳 이상 넣어 주세요');
+  if ((D.dateMode === 'vote' || D.placeMode === 'vote') && !(new Date(voteDeadline()) > new Date())) err.push('투표 마감이 이미 지났어요');
+  if (!freqSec(S.freq)) err.push('독촉 간격을 1초 이상으로 정해 주세요');
+  if (err.length && !S.started){ toast(err[0]); return; }
+  const bothFixed = D.dateMode === 'fixed' && D.placeMode === 'fixed';
+  const fee = D.baseFee.on ? `기본회비 ${won(+D.baseFee.amount || 0)} 먼저 받고 ` : '';
+  const vote = kind => VOTES[kind].options().map((o, i) => `${NUMS[i]}  ${o.label}${o.extra ? ' · ' + o.extra : ''}`).join('\n');
+  modal(`
+    <div class="mh"><span class="hitl">HITL 1</span><h3 class="grow">${S.started ? '변경 내용 확인' : '이대로 시작할까요?'}</h3><button class="btn sm ghost" data-act="closeModal">✕</button></div>
+    <div class="mb">
+      <dl class="sum">
+        <dt>슬랙 채널</dt><dd>#${esc(S.channel)} · ${S.invited.length}명 초대</dd>
+        <dt>모임</dt><dd>🍻 ${esc(S.event.name)}</dd>
+        <dt>날짜</dt><dd>${D.dateMode === 'fixed' ? `${esc(dinnerWhen())} (총무가 정하기)` : `투표 · 후보 ${VOTES.date.options().length}개`}</dd>
+        <dt>장소</dt><dd>${D.placeMode === 'fixed' ? `${esc((dinnerPlace() || {}).name || '-')} (총무가 정하기)` : `투표 · 후보 ${votePlaces().length}곳`}</dd>
+        ${bothFixed ? '' : `<dt>투표 마감</dt><dd>${fmtDeadline(voteDeadline())} · 중복 투표 가능</dd>`}
+        <dt>정산</dt><dd>${fee}후정산 · ${D.byRound ? '1·2차 따로' : '1·2차 합쳐서'}${D.nonDrink.on ? ` · 안 마신 사람 ${won(+D.nonDrink.amount || 0)} 할인` : ''}</dd>
+        <dt>성격 · 전략</dt><dd>${PERSONAS[S.persona].ic} ${PERSONAS[S.persona].label} · ${STRATEGIES[S.strategy].label}</dd>
+        <dt>투표 독촉</dt><dd>${freqText(S.freq)}마다 자동 (대시보드가 열려 있는 동안) · ${esc(S.quiet.from)}~${esc(S.quiet.to)} 금지</dd>
+      </dl>
+      ${S.started ? '' : `<div style="margin-top:16px" class="slack"><div class="stage-lb">시작하면 #${esc(S.channel)}에 올라갈 메시지</div>
+        ${bubble(dinnerNotice(), '', false)}
+        ${D.dateMode === 'vote' ? bubble(`🗳 날짜 투표 (여러 개 선택 가능)\n${vote('date')}`, '', false) : ''}
+        ${D.placeMode === 'vote' ? bubble(`🗳 장소 투표 (여러 개 선택 가능)\n${vote('place')}`, '', false) : ''}
+        <p class="small muted">${bothFixed ? '날짜·장소가 모두 정해져 있어 투표 없이 바로 참석 조사 단계로 넘어가요.' : '공지는 Claude가 성격에 맞게 다시 써요. 투표 메시지는 그대로 올라가요.'}</p></div>`}
     </div>
     <div class="mf"><button class="btn" data-act="closeModal">더 고치기</button><button class="btn yellow" data-act="doStart">${S.started ? '저장' : '확인하고 시작하기'}</button></div>`);
 }
@@ -1611,7 +1852,7 @@ document.addEventListener('click', e => {
       break;
     case 'inviteAll': S.invited = MEMBERS.filter(m => S.invited.includes(m.id) || memShown(m)).map(m => m.id); break; // 검색 중이면 보이는 사람만
     case 'memAll': UI.memAll = !UI.memAll; break;
-    case 'voteAdd': S.vote.places.push({name:'', price:'', memo:''}); UI.placeAdd = false; break;
+    case 'voteAdd': S.vote.places.push({name:'', memo:''}); UI.placeAdd = false; break;
     case 'placeAddOpen': UI.placeAdd = true; UI.pvTab = 'map'; UI.placeQ = ''; UI.placeHits = []; UI.placeErr = ''; render(); { const el = $('#placeQ'); if (el) el.focus(); } return;
     case 'placeAddClose': UI.placeAdd = false; break;
     case 'mapFocus': {
@@ -1624,7 +1865,7 @@ document.addEventListener('click', e => {
       const h = d.poi ? UI.poi : UI.placeHits[+d.i];
       if (S.vote.places.length >= 10){ toast('후보는 10곳까지예요'); return; }
       if (S.vote.places.some(p => p.url && p.url === h.url)){ toast('이미 후보에 있어요'); return; }
-      S.vote.places.push({name:h.name, price:'', memo:h.category, url:h.url, addr:h.addr, lat:h.lat, lng:h.lng}); if (MAP.info) MAP.info.setMap(null);
+      S.vote.places.push({name:h.name, memo:h.category, url:h.url, addr:h.addr, lat:h.lat, lng:h.lng}); if (MAP.info) MAP.info.setMap(null);
       if (!d.poi) UI.placeAdd = false;
       toast(`${h.name}을(를) 후보에 넣었어요`); break; }
     case 'dpath': setPath(S, d.path, d.val); break;
@@ -1634,18 +1875,29 @@ document.addEventListener('click', e => {
     case 'placePick': S.dinner.placePick = +d.i; break;
     case 'voteDel': S.vote.places.splice(+d.i, 1); if (S.dinner.placePick >= S.vote.places.length) S.dinner.placePick = 0; break;
     case 'voteRecommend': voteRecommend(); return;
-    case 'voteClose':
-      if (votePlaces().length < 2){ toast('후보가 2곳 이상 있어야 해요'); return; }
-      voteCloseModal(); return;
-    case 'voteConfirm': {
+    case 'pollClose':
+      if (VOTES[d.kind].options().length < 2){ toast('후보가 2개 이상 있어야 해요'); return; }
+      pollCloseModal(d.kind); return;
+    case 'pollConfirm': {
       closeModal();
-      const ps = votePlaces(), i = +d.i, p = ps[i];
-      S.vote.closed = true; S.vote.winner = i;
-      log('총무', `회식 장소 확정: ${p.name} (HITL)`);
-      if (SLACK.status === 'on' && S.slackChannel)
-        slackSend({channel:S.slackChannel}, {text:`📍 회식 장소가 정해졌어요: *${p.name}*${p.addr ? `\n${p.addr}` : ''}${p.url ? `\n${p.url}` : ''}`, label:'장소 확정 공지', mood:''}, S.persona, '회식 장소 확정 공지', {raw:true});
-      else log('소통', `#${S.channel} 회식 장소 공지 (데모)`);
-      toast(`${p.name}(으)로 확정했어요`); break; }
+      const V = VOTES[d.kind], c = V.cfg(), i = +d.i, o = V.options()[i];
+      c.closed = true; c.winner = i;
+      log('총무', `${V.label} 확정: ${o.label} (HITL)`);
+      if (SLACK.status === 'on' && c.ts)
+        slackApi('/api/slack/thread', {channel:c.channel, ts:c.ts, text:`🔒 투표를 마감했어요. ${V.label}는 *${o.label}* (으)로 정했어요!`})
+          .then(() => { log('소통', `${V.label} 투표 마감 안내 (스레드)`); render(); }).catch(e => toast(`마감 안내 실패: ${slackErr(e.message)}`));
+      else log('소통', `#${S.channel} ${V.label} 투표 마감 안내 (데모)`);
+      toast(decided('date') && decided('place') ? '날짜·장소가 다 정해졌어요 · 확정 공지를 보내 주세요' : `${V.label}를 ${o.label}(으)로 확정했어요`); break; }
+    case 'startSurvey':
+      modal(`<div class="mh"><span class="hitl">HITL 2</span><h3 class="grow">확정 공지를 보내고 참석 조사로 넘어갈까요?</h3><button class="btn sm ghost" data-act="closeModal">✕</button></div>
+        <div class="mb"><div class="slack">${bubble(dinnerConfirmText(), '', false)}</div><p class="small muted">이 문구 그대로 #${esc(S.channel)}에 올라가요.</p></div>
+        <div class="mf"><button class="btn" data-act="closeModal">취소</button><button class="btn yellow" data-act="doSurvey">공지하고 넘어가기</button></div>`); return;
+    case 'doSurvey':
+      closeModal(); S.phase = 'survey'; log('총무', '일정·장소 확정 → 참석 조사 단계 (HITL 2)');
+      if (SLACK.status === 'on' && S.slackChannel) slackSend({channel:S.slackChannel}, {text:dinnerConfirmText(), label:'일정 확정 공지', mood:''}, S.persona, '일정 확정 공지', {raw:true});
+      else log('소통', `#${S.channel} 일정 확정 공지 (데모)`);
+      break;
+    case 'voteRemind': { const p = S.people[d.id]; if (p) sendVoteReminder(p, true); return; }
     case 'inviteNone': S.invited = ['me']; break;
     case 'tpl':
       if (S.template === d.val) return;
@@ -1671,7 +1923,13 @@ document.addEventListener('click', e => {
       closeModal();
       if (SLACK.status === 'on' && !UI.slackDone){ slackStart(); return; }
       UI.slackDone = false;
-      if (!S.started){ S.started = true; seedRun(); toast(`#${S.channel}에 첫 공지를 보냈어요`); }
+      if (!S.started){
+        S.started = true; seedRun(); toast(`#${S.channel}에 첫 공지를 보냈어요`);
+        if (voteOn() && SLACK.status !== 'on'){
+          log('소통', `#${S.channel} 일정 안내 공지 (데모)`);
+          ['date', 'place'].forEach(k => { if (VOTES[k].mode() === 'vote') log('소통', `#${S.channel} ${VOTES[k].label} 투표 메시지 (데모)`); });
+        }
+      }
       else { syncPeople(); log('총무', '설정 변경 저장'); toast('설정을 저장했어요'); }
       S.screen = 'dash'; window.scrollTo(0, 0); break;
     // 대시보드
@@ -1688,9 +1946,7 @@ document.addEventListener('click', e => {
     case 'ovStop': S.people[d.id].ov.stop = !S.people[d.id].ov.stop; break;
     case 'sendNow': {
       const p = S.people[d.id], m = nextMessage(p);
-      const askVote = voteOn() && S.vote.ts && !S.vote.closed && !voteTally().flat().includes(p.id)
-        ? `📍 #${S.channel} 회식 장소 투표도 부탁드려요! (이모지로 여러 곳 선택 가능)` : '';
-      if (SLACK.status === 'on' && MEM[p.id].slackId) slackSend({user:MEM[p.id].slackId, name:shortName(p.id)}, m, eff(p).persona, `${MEM[p.id].name}님께 ${m.label}`, askVote ? {extra:askVote} : {});
+      if (SLACK.status === 'on' && MEM[p.id].slackId) slackSend({user:MEM[p.id].slackId, name:shortName(p.id)}, m, eff(p).persona, `${MEM[p.id].name}님께 ${m.label}`);
       log('소통', `${MEM[p.id].name}님께 ${m.label} 발송 (${m.mood})`);
       p.stage = Math.min(4, p.stage + 1);
       if (p.stage >= 4) log('소통', `${MEM[p.id].name}님 3단계 무응답 → 총무에게 이관`);
@@ -1785,16 +2041,23 @@ async function slackStart(){
   UI.slackDone = true;
   const b = document.createElement('button'); b.dataset.act = 'doStart'; document.body.appendChild(b); b.click(); b.remove();
   log('소통', msg); render(); // doStart 의 seedRun 이 로그를 비우므로 그 뒤에 기록
-  if (!sent0){
-    const g = sequence(S.persona, S.strategy, ctxFor(null), S.chaosSeed)[0];
-    await slackSend({channel:S.slackChannel}, g, S.persona, `#${S.channel} 1단계 공지`);
-  }
-  if (voteOn() && votePlaces().length >= 2 && !S.vote.ts){
+  if (sent0) return;
+  if (voteOn()) return dinnerKickoff();
+  const g = sequence(S.persona, S.strategy, ctxFor(null), S.chaosSeed)[0];
+  await slackSend({channel:S.slackChannel}, g, S.persona, `#${S.channel} 1단계 공지`);
+}
+// 회식 시작: 일정 공지 → (투표로 정하는 항목만) 날짜·장소 투표 메시지
+async function dinnerKickoff(){
+  await slackSend({channel:S.slackChannel}, {text:dinnerNotice(), label:'1단계 · 일정 안내 공지', mood:''}, S.persona, '일정 안내 공지');
+  for (const kind of ['date', 'place']){
+    const V = VOTES[kind], c = V.cfg();
+    if (V.mode() !== 'vote' || c.ts) continue;
     try {
-      const r = await slackApi('/api/slack/poll', {channel:S.slackChannel, title:`${S.event.name} 회식 장소 투표`, places:votePlaces(), deadline:fmtDeadline(voteDeadline())});
-      S.vote.ts = r.ts; S.vote.channel = r.channel; S.vote.tally = null;
-      log('소통', `#${S.channel} 회식 장소 투표 메시지 발송 (${votePlaces().length}곳)`); render();
-    } catch(e){ log('소통', `투표 메시지 실패: ${slackErr(e.message)}`); toast(`투표 메시지 실패: ${slackErr(e.message)}`); render(); }
+      const r = await slackApi('/api/slack/poll', {channel:S.slackChannel, title:`${S.event.name} ${V.label} 투표`, options:V.options(), deadline:fmtDeadline(voteDeadline())});
+      c.ts = r.ts; c.channel = r.channel; c.tally = null;
+      log('소통', `#${S.channel} ${V.label} 투표 메시지 발송 (${V.options().length}개)`);
+    } catch(e){ log('소통', `${V.label} 투표 메시지 실패: ${slackErr(e.message)}`); toast(`${V.label} 투표 메시지 실패: ${slackErr(e.message)}`); }
+    render();
   }
 }
 

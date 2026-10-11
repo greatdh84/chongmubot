@@ -13,11 +13,12 @@ API
   POST /api/slack/invite   {channel, users} 기존 채널에 추가 초대
   POST /api/slack/send     {channel|user, text, persona, situation, name}
                            Claude 가 성격에 맞게 문구를 다시 쓰고(키 없거나 실패 시 text 그대로) 채널/DM 발송
-  POST /api/places/recommend {area, food, budget, headcount, prefs, drink}
+  POST /api/places/recommend {area, food, prefs, drink}
                            카카오 로컬 검색 결과 중 Claude 가 조건에 맞는 후보를 골라 이유·예상 금액을 붙임
   GET  /api/places/search?q=  카카오맵 가게 검색 (직접 추가용 자동완성)
   GET  /api/places/nearby?x=&y=&r=  지도에서 클릭한 지점의 가장 가까운 음식점
-  POST /api/slack/poll     {channel, title, places, deadline}  이모지 투표 메시지 + 번호 이모지 미리 달기
+  POST /api/slack/poll     {channel, title, options, deadline}  이모지 투표 메시지 + 번호 이모지 미리 달기
+  POST /api/slack/thread   {channel, ts, text}  메시지 아래 스레드 댓글 (투표 마감 안내)
   GET  /api/slack/poll?channel=&ts=  번호 이모지별 투표자 (봇 반응 제외)
 """
 import json
@@ -194,24 +195,23 @@ def recommend(data):
     if not found:
         return {"places": [], "llm": False}
     if not LLM_KEY:
-        return {"places": [{**p, "price": "", "memo": p["category"]} for p in found[:4]], "llm": False}
+        return {"places": [{**p, "memo": p["category"]} for p in found[:4]], "llm": False}
     system = ("너는 회식 장소를 고르는 총무 도우미다. 주어진 실제 검색 결과 목록 안에서만 고른다. 목록에 없는 가게를 만들지 마라.\n"
-              "너는 이름·업종·주소만 안다. 좌석, 룸, 맛, 분위기, 가격 같은 확인 안 된 사실은 쓰지 말고, "
-              "고른 이유는 조건(음식 종류, 예산, 음주, 메뉴 선호, 위치)과 업종의 관계로만 쓴다.\n"
-              '출력은 JSON 배열만: [{"i": 목록 번호, "price": "1인 예상 금액(예: 3만원대)", "memo": "고른 이유 한 줄"}] 3~4개.')
-    user = (f"지역: {area}\n원하는 음식: {food or '상관없음'}\n1인 예산: {data.get('budget') or '미정'}\n"
-            f"인원: {data.get('headcount') or '미정'}명\n음주 희망 비율: {data.get('drink', '모름')}\n"
+              "조건(음식 종류, 음주, 메뉴 선호, 위치)에 가장 맞는 곳을 3~4개 고른다.\n"
+              '출력은 JSON 배열만: [{"i": 목록 번호}]')
+    user = (f"지역: {area}\n원하는 음식: {food or '상관없음'}\n음주 희망 비율: {data.get('drink', '모름')}\n"
             f"참가자 메뉴 선호: {', '.join(data.get('prefs') or []) or '없음'}\n\n검색 결과:\n"
             + "\n".join(f"{i}. {p['name']} ({p['category']}) {p['addr']}" for i, p in enumerate(found)))
     try:
         raw = claude(system, user)
         picks = json.loads(raw[raw.find("["): raw.rfind("]") + 1])
-        places = [{**found[int(x["i"])], "price": x.get("price", ""), "memo": x.get("memo", "")}
+        # 메모는 Claude 문장 대신 카카오 업종 분류만 (메뉴 정보는 카카오 API에 없음)
+        places = [{**found[int(x["i"])], "memo": found[int(x["i"])]["category"]}
                   for x in picks if 0 <= int(x["i"]) < len(found)]
         return {"places": places[:4], "llm": True}
     except Exception as e:
         print("추천 LLM 실패, 검색 결과 사용:", e)
-        return {"places": [{**p, "price": "", "memo": p["category"]} for p in found[:4]], "llm": False}
+        return {"places": [{**p, "memo": p["category"]} for p in found[:4]], "llm": False}
 
 
 # ---------- 이모지 투표 ----------
@@ -227,22 +227,31 @@ def bot_user():
 
 
 def poll_create(data):
-    places = data.get("places", [])[:10]
-    if len(places) < 2:
+    """options: [{label, extra, url}] (날짜·장소 공용). 예전 형식 places: [{name, memo, url}] 도 받음"""
+    opts = data.get("options") or [{"label": p.get("name", ""), "extra": p.get("memo", ""), "url": p.get("url", "")}
+                                   for p in data.get("places", [])]
+    opts = [o for o in opts if o.get("label")][:10]
+    if len(opts) < 2:
         raise SlackError("need_two_places")
-    lines = [f"🍻 *{data.get('title') or '회식 장소 투표'}*", "가고 싶은 곳의 번호 이모지를 눌러 주세요. *여러 곳 선택 가능!*", ""]
-    for i, p in enumerate(places):
-        extra = " · ".join(x for x in [p.get("price"), p.get("memo")] if x)
-        lines.append(f"{NUM_CHAR[i]}  *{p['name']}*" + (f"  _{extra}_" if extra else ""))
-        if p.get("url"):
-            lines.append(f"      🗺 <{p['url']}|카카오맵에서 보기>")
+    lines = [f"🗳 *{data.get('title') or '투표'}*", "번호 이모지를 눌러 주세요. *여러 개 골라도 돼요!*", ""]
+    for i, o in enumerate(opts):
+        lines.append(f"{NUM_CHAR[i]}  *{o['label']}*" + (f"  _{o['extra']}_" if o.get("extra") else ""))
+        if o.get("url"):
+            lines.append(f"      🗺 <{o['url']}|카카오맵에서 보기>")
     if data.get("deadline"):
         lines += ["", f"⏰ 투표 마감: {data['deadline']}"]
     r = slack("chat.postMessage", channel=data["channel"], text="\n".join(lines),
               username="총무봇 · 투표", icon_emoji=":ballot_box_with_ballot:", unfurl_links="false")
-    for i in range(len(places)):
+    for i in range(len(opts)):
         slack("reactions.add", channel=data["channel"], timestamp=r["ts"], name=NUM_EMOJI[i])
     return {"ts": r["ts"], "channel": data["channel"]}
+
+
+def thread_reply(data):
+    """투표 메시지 아래 스레드 댓글 (마감 안내 등). Slack 은 이모지를 막을 수 없어 안내로 대신함"""
+    slack("chat.postMessage", channel=data["channel"], thread_ts=data["ts"], text=data.get("text", ""),
+          reply_broadcast="false", username="총무봇 · 투표", icon_emoji=":ballot_box_with_ballot:")
+    return {"ok": True}
 
 
 def poll_tally(channel, ts):
@@ -301,6 +310,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/slack/invite": lambda: invite(data.get("channel", ""), data.get("users", [])),
             "/api/slack/send": lambda: send(data),
             "/api/slack/poll": lambda: poll_create(data),
+            "/api/slack/thread": lambda: thread_reply(data),
             "/api/places/recommend": lambda: recommend(data),
         }
         self.handle_api(routes.get(self.path, lambda: None))
