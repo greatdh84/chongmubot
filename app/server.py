@@ -16,6 +16,7 @@ API
   POST /api/slack/send     {channel|user, text, persona, situation, name, survey_channel?}
                            Claude 가 성격대로 처음부터 짧은 메시지 1~3개로 써서 몇 초 간격으로 나눠 보냄
   POST /api/pay/parse      {text?, images?[dataURL]}  은행 입금 문자·캡처에서 입금자·금액·시각을 읽음
+  POST /api/receipt/parse  {images[dataURL]}  영수증에서 최종 결제 금액과 가게 이름을 읽음
                            Claude 가 성격에 맞게 문구를 다시 쓰고(키 없거나 실패 시 text 그대로) 채널/DM 발송
   POST /api/places/recommend {area, food, prefs, drink}
                            카카오 로컬 검색 결과 중 Claude 가 조건에 맞는 후보를 골라 이유·예상 금액을 붙임
@@ -225,15 +226,37 @@ def send(data):
     return {"text": " / ".join(msgs), "parts": len(msgs), "llm": llm}
 
 
+def image_blocks(urls):
+    out = []
+    for url in (urls or [])[:4]:
+        head, _, b64 = url.partition(",")
+        mt = head[5:head.find(";")] if head.startswith("data:") else "image/jpeg"
+        out.append({"type": "image", "source": {"type": "base64", "media_type": mt, "data": b64}})
+    return out
+
+
+def receipt_parse(data):
+    """영수증 사진 → 최종 결제 금액(합계)과 가게 이름"""
+    if not LLM_KEY:
+        raise SlackError("no_llm_key")
+    content = image_blocks(data.get("images"))
+    if not content:
+        raise SlackError("bad_request")
+    content.append({"type": "text", "text": "이 영수증의 최종 결제 금액(합계, 할인 반영 후)과 가게 이름을 읽어라. 영수증이 여러 장이면 합계를 더해라. "
+                                            "보이지 않으면 0. 지어내지 마라. 출력은 JSON 만: {\"total\": 정수(원), \"store\": \"가게 이름\", \"count\": 영수증 장수}"})
+    raw = claude("너는 영수증 금액을 정확하게 옮겨 적는 도우미다.", content)
+    try:
+        r = json.loads(raw[raw.find("{"): raw.rfind("}") + 1])
+    except Exception:
+        r = {}
+    return {"total": int(r.get("total") or 0), "store": str(r.get("store") or ""), "count": int(r.get("count") or len(content) - 1)}
+
+
 def pay_parse(data):
     """은행 입금 문자(텍스트)나 캡처(이미지)에서 입금 건을 읽음 → [{name, amount, at}]"""
     if not LLM_KEY:
         raise SlackError("no_llm_key")
-    content = []
-    for url in (data.get("images") or [])[:4]:
-        head, _, b64 = url.partition(",")
-        mt = head[5:head.find(";")] if head.startswith("data:") else "image/jpeg"
-        content.append({"type": "image", "source": {"type": "base64", "media_type": mt, "data": b64}})
+    content = image_blocks(data.get("images"))
     if data.get("text"):
         content.append({"type": "text", "text": "은행 문자:\n" + data["text"][:6000]})
     if not content:
@@ -539,6 +562,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/survey/start": lambda: survey_start(data),
             "/api/slack/cancel": lambda: cancel_meeting(data),
             "/api/pay/parse": lambda: pay_parse(data),
+            "/api/receipt/parse": lambda: receipt_parse(data),
             "/api/places/recommend": lambda: recommend(data),
         }
         self.handle_api(routes.get(self.path, lambda: None))

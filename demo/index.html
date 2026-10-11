@@ -533,6 +533,33 @@ const VOTE_LINES = {
     burst:'{name}님. 몇 번째인지 세어보셨어요? 저는 셌습니다. 투표하세요. 😑'
   }
 };
+// 정산 단체방 독촉 (이름·금액 없이 인원만) · 개인 금액은 DM 으로만
+const SETTLE_GROUP = {
+  active:{soft:'정산 DM 보내드렸어요! 💸 아직 {n}분이 입금 전이에요~ DM 확인 부탁드려요 (마감 {deadline})',
+    firm:'{n}분 남았어요!! 🙏 DM으로 보내드린 금액 확인하고 보내주세요~ {deadline}까지예요!',
+    last:'정산 마감 임박!! ⏰ 아직 {n}분이에요! {dtime}까지 꼭 부탁드려요!!',
+    burst:['아직!!! {n}분!!! 정산!!! 부탁드려요!!! 😤😤', '{n}분!!! DM 읽으신 거 다 보여요!!! 👀🔥'],
+    sorry:['앗 흥분했네요 😅 {n}분 편하실 때 보내주세요~ 🌸', 'ㅎㅎ 농담이에요~ 💕 {n}분 천천히 부탁드려요!']},
+  shy:{soft:'저기… 정산 금액을 DM으로 보내드렸는데요… 아직 {n}분이… 확인 부탁드려도 될까요…? 🥹',
+    firm:'자꾸 말씀드려서 죄송해요… 정산 {n}분 남았어요… {deadline}까지예요…',
+    last:'정말 죄송한데요… 오늘 {dtime}에 정산을 마무리해야 해서요… 아직 {n}분… 🙏',
+    burst:['…{n}분. 저도 참을 만큼 참았어요. 정산 부탁드려요.', '{n}분!!!! 저 이거 쓰려고 30분 고민했다고요!!!'],
+    sorry:['헉… 제가 방금 무슨 말을… 죄송해요… 😳', '아까 건 실수예요… {n}분 천천히… 🙇']},
+  grumpy:{soft:'정산 미입금 {n}명. 금액은 DM 확인. 마감 {deadline}.', firm:'아직 {n}명입니다. DM에 금액과 계좌 있습니다.',
+    last:'{dtime} 정산 마감. 미입금 {n}명.', burst:['{n}명. 몇 번째인지 세어보셨어요? 저는 셌습니다.', '읽씹은 대답이 아닙니다. 😑'],
+    sorry:['…방금 건 좀 심했네요. 그래도 정산은 해 주세요.', '흠. 유감입니다. 정산은 여전히 필요합니다.']}
+};
+// 정산 개인 DM 독촉 ({amount}·{account} 는 그 사람 금액과 총무 계좌)
+const SETTLE_DM = {
+  active:{soft:'{name}님~ {event} 정산 {amount} 아직이에요! 😆 {account}로 보내주시면 돼요~ (마감 {deadline})',
+    firm:'{name}님! 정산 {amount} 부탁드려요 🙏 {account} · {deadline}까지예요!', last:'{name}님!! 오늘 {dtime} 정산 마감이에요 ⏰ {amount} → {account}',
+    burst:'{name}님!!!!! 정산 {amount}!!! 지금!!! 부탁드려요!!! 😤 {account}'},
+  shy:{soft:'{name}님… 혹시 정산 {amount}… 시간 되실 때 {account}로… 부탁드려도 될까요…? 🥹',
+    firm:'{name}님… 죄송해요… 정산 {amount}만… {account}로 부탁드려요…', last:'{name}님… 오늘 {dtime}까지라서요… {amount}… {account}로… 꼭… 🙏',
+    burst:'…{name}님. 저도 참을 만큼 참았어요. {amount}, {account}로 보내 주세요.'},
+  grumpy:{soft:'{name}님, 정산 {amount}. {account}. 마감 {deadline}.', firm:'{name}님, 정산 {amount} 미입금입니다. {account}.',
+    last:'{name}님. {dtime} 마감. {amount} → {account}.', burst:'{name}님. 몇 번째인지 세어보셨어요? {amount}, {account}. 😑'}
+};
 // 투표 단체방 독촉 (이름 없이 인원만) · {n}: 미투표 인원, {what}: 열린 투표(날짜·장소)
 const VOTE_GROUP = {
   active:{soft:'아직 {n}명이 {what} 투표를 안 했어요! 😆 위 투표 메시지에 이모지 하나만 콕 눌러주세요~ (마감 {deadline})',
@@ -662,14 +689,25 @@ function voteDmMsg(p, k){
 }
 // 단계별 독촉 공통 (1단계 투표 · 2단계 참석 조사)
 const votePending = () => people().filter(p => missingVotes(p.id).length);
-const phaseActive = () => voteOn() && S.started && (S.phase === 'plan' ? ['date', 'place'].some(isOpen) : S.phase === 'survey' && !!(S.survey && S.survey.ts));
-const phasePending = () => S.phase === 'survey' ? surveyPending() : votePending();
-const phaseDeadline = () => S.phase === 'survey' ? S.survey.deadline : voteDeadline();
-const groupState = () => S.phase === 'survey' ? S.survey : (S.voteGroup = S.voteGroup || {gstage:0, lastGroup:Date.now()});
+const settlePending = () => people().filter(p => (p.owe || 0) > 0 && p.pay !== '입금');
+const phaseActive = () => voteOn() && S.started && (S.phase === 'plan' ? ['date', 'place'].some(isOpen)
+  : S.phase === 'survey' ? !!(S.survey && S.survey.ts) : S.phase === 'settle' ? !!(S.settle && S.settle.sent && !S.settle.done) : false);
+const phasePending = () => S.phase === 'survey' ? surveyPending() : S.phase === 'settle' ? settlePending() : votePending();
+const phaseDeadline = () => S.phase === 'survey' ? S.survey.deadline : S.phase === 'settle' ? S.settle.deadline : voteDeadline();
+const groupState = () => S.phase === 'survey' ? S.survey : S.phase === 'settle' ? S.settle : (S.voteGroup = S.voteGroup || {gstage:0, lastGroup:Date.now()});
+const PHASE_WORD = {plan:['투표', '미투표자'], survey:['응답', '미응답자'], settle:['입금', '미입금자']};
 // 다음 단체방 독촉 시각: 간격을 ±10% 흔들어 정각마다 오는 기계 느낌을 줄임 (jit 은 보낼 때마다 새로 뽑음)
 const groupDue = st => (st.lastGroup || 0) + freqSec(S.freq) * 1000 * (st.jit || 1);
 const jitter = () => 0.9 + Math.random() * 0.2;
-const dmMsg = (p, k) => S.phase === 'survey' ? surveyDmMsg(p, k) : voteDmMsg(p, k);
+const dmMsg = (p, k) => S.phase === 'survey' ? surveyDmMsg(p, k) : S.phase === 'settle' ? settleDmMsg(p, k) : voteDmMsg(p, k);
+const acctText = () => { const a = S.dinner.account; return a.bank && a.number ? `${a.bank} ${a.number}${a.holder ? ` (${a.holder})` : ''}` : '총무 계좌'; };
+const settleGroupMsg = () => groupMsgFrom(SETTLE_GROUP[S.persona], S.settle, {n:settlePending().length, event:S.event.name, ...dlCtx(S.settle.deadline)}, '정산 단체 독촉');
+function settleDmMsg(p, k){
+  const e = eff(p), n = p.sdm || 0;
+  k = k || (e.strategy === 'consistent' ? 'soft' : ['soft', 'firm', 'last'][Math.min(n, 2)]);
+  return {k, label:`정산 개인 DM ${n + 1}차`, ch:'dm', mood:MOOD[k] || '🤬 버럭',
+    text:fill(SETTLE_DM[e.persona][k], {name:dmName(p.id), event:S.event.name, amount:won(p.owe || 0), account:acctText(), ...dlCtx(S.settle.deadline)})};
+}
 function surveyDmMsg(p, k){
   const e = eff(p), L = SURVEY_DM[e.persona], n = p.sdm || 0, d = new Date(S.survey.deadline);
   k = k || (e.strategy === 'consistent' ? 'soft' : ['soft', 'firm', 'last'][Math.min(n, 2)]);
@@ -847,7 +885,7 @@ function totals(){
 function fieldVal(p, col, idx){
   if (col.key === '이름') return p.id === 'me' ? '나 (총무)' : MEM[p.id].name;
   if (col.key === '참석') return p.attend;
-  if (col.key === '회비') return voteOn() && !S.dinner.baseFee.on && S.phase !== 'settle' ? '-' : p.pay;
+  if (col.key === '회비') return voteOn() && (p.attend === '불참' || (!S.dinner.baseFee.on && S.phase !== 'settle') || (S.phase === 'settle' && S.settle && S.settle.sent && !p.owe && !p.refund && p.pay !== '입금')) ? '-' : p.pay;
   if (voteOn()) return p.fields[col.key] != null && p.fields[col.key] !== '' ? p.fields[col.key] : (p.attend === '불참' ? '-' : '');
   if (col.key === '메모') return p.note || '';
   if (p.fields[col.key] != null) return p.fields[col.key];
@@ -1224,7 +1262,7 @@ function dinnerNotice(){
 // 회식 대시보드: 단계 표시줄 + 단계별 카드
 const PHASES = [['plan', '날짜·장소'], ['survey', '참석 조사'], ['event', '모임'], ['settle', '정산']];
 function renderDinnerDash(){
-  const ph = S.phase || 'plan', idx = PHASES.findIndex(x => x[0] === ph), d = decidedValue('date'), pl = decidedValue('place');
+  const ph = S.phase || 'plan', idx = ph === 'settle' && S.settle && S.settle.done ? PHASES.length : PHASES.findIndex(x => x[0] === ph), d = decidedValue('date'), pl = decidedValue('place');
   const bothFixed = S.dinner.dateMode === 'fixed' && S.dinner.placeMode === 'fixed';
   const ready = decided('date') && decided('place');
   const ps = people();
@@ -1249,7 +1287,7 @@ function renderDinnerDash(){
       ${voteRemindBar()}
       ${ready ? `<div class="card next"><div><b>날짜와 장소가 모두 정해졌어요</b><div class="small muted">확정 공지를 보내고 참석 조사로 넘어가요.</div></div><span class="grow"></span>
         <span class="hitl">HITL 2</span><button class="btn yellow" data-act="startSurvey">확정 공지 + 참석 조사 시작</button></div>` : ''}`
-    : ph === 'survey' ? surveyCard(d, pl) : eventCard(d, pl)}
+    : ph === 'survey' ? surveyCard(d, pl) : ph === 'settle' ? settleCard(d, pl) : eventCard(d, pl)}
     ${ph !== 'plan' ? dinnerSheetCard() : ''}
     <div class="dash">
       <div class="col">
@@ -1295,7 +1333,10 @@ function dinnerPersonRow(p, ph){
   const mark = kind => VOTES[kind].mode() === 'fixed' ? '' : `<span class="tag ${tallyOf(kind).flat().includes(p.id) ? 'g' : ''}">${VOTES[kind].label} ${tallyOf(kind).flat().includes(p.id) ? '✓' : '–'}</span>`;
   const rep = p.dmPlan && !p.dmPlan.done ? `<span class="tag b">DM 반복 ${p.dmPlan.sent}/${p.dmPlan.max}</span>` : '';
   let status;
-  if (ph === 'plan') status = !['date', 'place'].some(isOpen) ? '<span class="small muted">투표 끝</span>'
+  if (ph === 'settle'){
+    const r = dinnerSettle().rows[p.id];
+    status = !r ? `${chip(p.attend)}` : !S.settle.sent ? settleCell(p) : r.owe ? `${rep}${settleCell(p)}${chip(p.pay)}` : settleCell(p);
+  } else if (ph === 'plan') status = !['date', 'place'].some(isOpen) ? '<span class="small muted">투표 끝</span>'
     : missingVotes(p.id).length ? `${rep}<span class="tag r">미투표</span>` : '<span class="tag g">✓ 투표 완료</span>';
   else {
     const f = surveyQuestions().filter(q => q.key !== '참석').map(q => p.fields[q.key] ? `<span class="tag">${esc(q.key)} ${esc(p.fields[q.key])}</span>` : '').join('');
@@ -1309,7 +1350,9 @@ function dinnerPersonRow(p, ph){
       body = `<div class="stage-lb" style="margin-bottom:8px">개인 DM 미리보기 · ${dm.label}</div>${bubble(dm.text + btn, dm.mood, dm.k === 'burst')}
         ${p.dmPlan && !p.dmPlan.done ? `<div class="row" style="margin-top:10px"><span class="tag b">개인 DM 반복 중 · ${DM_TONES[p.dmPlan.tone]} · ${p.dmPlan.sent}/${p.dmPlan.max}회 · 다음 <b data-due="${p.dmPlan.next}">…</b></span><button class="btn sm" data-act="dmStop" data-id="${p.id}">멈추기</button></div>`
           : `<div class="row" style="margin-top:10px"><button class="btn sm primary" data-act="phaseDm" data-id="${p.id}">개인 DM 보내기…</button><span class="small muted">강도와 빈도를 정해서 보내요. 자동으로는 단체방에만 독촉해요${p.sdm ? ` · 지금까지 ${p.sdm}번 보냄` : ''}</span></div>`}`;
-    } else body = `<p class="small muted" style="margin:0">${ph === 'plan' ? (['date', 'place'].some(isOpen) ? '투표를 마쳐서 독촉 대상이 아니에요.' : '투표가 끝났어요.')
+    } else body = ph === 'settle' ? (() => { const r = dinnerSettle().rows[p.id];
+      return r ? `<div class="stage-lb" style="margin-bottom:8px">${S.settle.sent ? '보낸 정산 DM' : '정산 DM 미리보기'}</div>${bubble(settleDmText(p, r), '', false)}` : '<p class="small muted" style="margin:0">참석하지 않아 정산 대상이 아니에요.</p>'; })()
+      : `<p class="small muted" style="margin:0">${ph === 'plan' ? (['date', 'place'].some(isOpen) ? '투표를 마쳐서 독촉 대상이 아니에요.' : '투표가 끝났어요.')
       : p.surveyAt ? `${esc(p.surveyAt)}에 응답했어요. 바뀌면 본인이 [응답하기]를 다시 누르면 돼요.` : '참석 조사를 보내면 응답을 받을 수 있어요.'}</p>`;
   }
   return `<div class="drow ${open ? 'open' : ''}">
@@ -1320,22 +1363,32 @@ function dinnerPersonRow(p, ph){
 }
 
 // 회식 스프레드시트 카드 (참석 조사 이후)
+function settleCell(p){
+  const r = dinnerSettle().rows[p.id]; if (!r) return '<span class="muted">-</span>';
+  return r.owe ? `<b style="font-weight:600">${won(r.owe)}</b>` : r.refund ? `<span class="tag b">환급 ${won(r.refund)}</span>` : '<span class="muted">0원</span>';
+}
 function dinnerSheetCard(){
   const ps = people(), payOn = S.dinner.baseFee.on || S.phase === 'settle';
+  const editOn = S.phase === 'event' || (S.phase === 'settle' && !(S.settle || {}).sent), settleCol = S.phase === 'settle';
   return `<section class="card" style="margin-bottom:16px"><div class="card-h"><h3>📊 스프레드시트 · 참가자</h3><span class="tag g">● 실시간</span><span class="grow"></span>
       <button class="btn sm" data-act="csv">⬇ CSV 다운로드</button><button class="btn sm ghost" data-act="openSheet">크게 보기 ⤢</button></div>
-    <div class="card-b"><div class="sheet-wrap"><table class="sheet"><thead><tr>${S.schema.map(c => `<th>${esc(c.key)}${c.key === '회비' && payOn
-        ? '<button class="th-btn" data-act="payOpen" title="은행 입금 문자·캡처로 한 번에 확인">💰 입금 확인</button>' : ''}</th>`).join('')}<th>응답 시각</th></tr></thead>
-      <tbody>${ps.map((p, i) => `<tr class="${UI.flash === p.id ? 'flash' : ''}">${S.schema.map(c => c.key === '회비' && payOn && p.attend !== '불참'
+    <div class="card-b"><div class="sheet-wrap"><table class="sheet"><thead><tr>${S.schema.map(c => `<th>${esc(c.key === '회비' && S.phase === 'settle' && (S.settle || {}).sent ? '정산 입금' : c.key)}${c.key === '회비' && payOn && !(S.phase === 'settle' && !(S.settle || {}).sent)
+        ? '<button class="th-btn" data-act="payOpen" title="은행 입금 문자·캡처로 한 번에 확인">💰 입금 확인</button>' : ''}</th>`).join('')}${settleCol ? '<th>정산금</th>' : ''}<th>응답 시각</th></tr></thead>
+      <tbody>${ps.map((p, i) => `<tr class="${UI.flash === p.id ? 'flash' : ''}">${S.schema.map(c => c.key === '회비' && payOn && p.attend !== '불참' && !(S.phase === 'settle' && !(S.settle || {}).sent)
         ? `<td><button class="cell-btn" data-act="payCell" data-id="${p.id}" title="눌러서 입금 처리">${chip(fieldVal(p, c, i))}</button></td>`
-        : `<td>${chip(fieldVal(p, c, i), c.key === '이름')}</td>`).join('')}<td class="small muted">${esc(p.surveyAt || '')}</td></tr>`).join('')}</tbody></table></div>
+        : editOn && c.key !== '이름' && c.key !== '회비' ? `<td><button class="cell-btn" data-act="cellEdit" data-id="${p.id}" data-k="${esc(c.key)}" title="눌러서 고치기">${chip(fieldVal(p, c, i) || '·')}</button></td>`
+        : `<td>${chip(fieldVal(p, c, i), c.key === '이름')}</td>`).join('')}${settleCol ? `<td>${settleCell(p)}</td>` : ''}<td class="small muted">${esc(p.surveyAt || '')}</td></tr>`).join('')}</tbody></table></div>
+      ${editOn ? '<p class="small muted" style="margin:8px 0 0">✏️ 참석·1차·2차·음주 등 칸을 누르면 바로 고칠 수 있어요 (O/X·선택지는 눌러서 바꾸고, 글자는 입력).</p>' : ''}
       ${payOn ? '<p class="small muted" style="margin:8px 0 0">💰 회비 열의 <b>입금 확인</b>으로 은행 문자·캡처를 한 번에 대조하거나, 사람별 회비 칸을 눌러 직접 처리할 수 있어요.</p>' : ''}</div></section>`;
 }
 // CSV (엑셀에서 한글이 깨지지 않게 BOM 포함)
 function downloadCsv(){
   const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const head = [...S.schema.map(c => c.key), '응답 시각'];
-  const rows = people().map((p, i) => [...S.schema.map(c => { const v = fieldVal(p, c, i); return c.key === '이름' && p.id === 'me' ? (MEM.me.real || '나 (총무)') : v; }), p.surveyAt || '']);
+  const sc = S.phase === 'settle' ? dinnerSettle() : null;
+  const head = [...S.schema.map(c => c.key), ...(sc ? ['1차 몫', '2차 몫', '기본회비', '낼 돈', '돌려받을 돈'] : []), '응답 시각'];
+  const rows = people().map((p, i) => { const r = sc && sc.rows[p.id];
+    return [...S.schema.map(c => { const v = fieldVal(p, c, i); return c.key === '이름' && p.id === 'me' ? (MEM.me.real || '나 (총무)') : v; }),
+      ...(sc ? (r ? [r.a, r.b, r.base, r.owe, r.refund] : ['', '', '', '', '']) : []), p.surveyAt || '']; });
   const csv = '﻿' + [head, ...rows].map(r => r.map(q).join(',')).join('\r\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv;charset=utf-8'}));
@@ -1404,6 +1457,8 @@ async function payRead(){
 }
 document.addEventListener('change', e => {
   const t = e.target;
+  if (t.dataset.settle){ S.settle[t.dataset.settle] = Math.max(0, +t.value || 0); render(); return; }
+  if (t.dataset.rcpt && t.files && t.files[0]){ receiptRead(t.dataset.rcpt, t.files[0]); return; }
   if (t.dataset.payPid != null){ UI.payRows[+t.dataset.payPid].pid = t.value; UI.payRows[+t.dataset.payPid].on = !!t.value; UI.payText = ($('#payText') || {}).value || ''; payModal(); }
   if (t.dataset.payOn != null){ UI.payRows[+t.dataset.payOn].on = t.checked; UI.payText = ($('#payText') || {}).value || ''; payModal(); }
 });
@@ -1423,6 +1478,82 @@ function finalNoticeText(markNo){
     S.dinner.baseFee.on ? `💰 기본회비 ${t.paid}/${t.att}명 입금 확인` : '',
     markNo && t.nores ? `답이 없던 ${t.nores}분은 불참으로 정리했어요.` : '',
     '늦거나 못 오시게 되면 총무에게 알려 주세요!'].filter(Boolean).join('\n');
+}
+
+// ---------- 4단계 정산 ----------
+// 참석자별 1차·2차 몫(1·2차 따로, 술 안 마신 사람 할인) − 이미 낸 기본회비 → 낼 돈 / 돌려받을 돈
+function dinnerSettle(){
+  const D = S.dinner, st = S.settle, f = (p, k) => (p.fields || {})[k];
+  const att = people().filter(p => p.attend === '참석' || p.attend === '부분');
+  const nd = p => D.nonDrink.on && f(p, '음주 여부') === 'X';
+  const rows = {}; att.forEach(p => rows[p.id] = {a:0, b:0, base:0});
+  let rest = 0;
+  const share = (list, total, disc, key) => {
+    if (!list.length || !total) return;
+    const k = splitRound(total, list.length, disc ? list.filter(nd).length : 0, disc ? +D.nonDrink.amount || 0 : 0);
+    rest += k.rest; list.forEach(p => rows[p.id][key] += disc && nd(p) ? k.non : k.drink);
+  };
+  const r1 = att.filter(p => f(p, '1차') !== 'X'), r2 = att.filter(p => f(p, '2차') === 'O');
+  if (D.byRound){ share(r1, +st.r1 || 0, true, 'a'); share(r2, +st.r2 || 0, false, 'b'); }
+  else share(att.filter(p => f(p, '1차') !== 'X' || f(p, '2차') === 'O'), (+st.r1 || 0) + (+st.r2 || 0), true, 'a');
+  att.forEach(p => { const r = rows[p.id];
+    r.base = st.sent ? (p.basePaid || 0) : (D.baseFee.on && p.pay === '입금' ? (p.paid || +D.baseFee.amount || 0) : 0);
+    const t = r.a + r.b - r.base; r.owe = Math.max(0, t); r.refund = Math.max(0, -t); });
+  const list = Object.values(rows);
+  return {rows, att, r1:r1.length, r2:r2.length, rest, total:(+st.r1 || 0) + (+st.r2 || 0),
+    collect:list.reduce((a, r) => a + r.owe, 0), refund:list.reduce((a, r) => a + r.refund, 0), base:list.reduce((a, r) => a + r.base, 0)};
+}
+function settleDmText(p, r){
+  const nm = dmName(p.id);
+  if (r.refund) return `💸 ${S.event.name} 정산 안내\n${nm}님은 기본회비가 남아서 ${won(r.refund)}을 돌려드려요. 총무가 곧 보내 드릴게요!`;
+  if (!r.owe) return `💸 ${S.event.name} 정산 안내\n${nm}님은 기본회비로 정산이 끝났어요. 추가로 보내실 돈은 없어요 🙌`;
+  return [`💸 ${S.event.name} 정산 안내`, `${nm}님 보내실 돈: *${won(r.owe)}*`,
+    r.a ? `· 1차 ${won(r.a)}${S.dinner.nonDrink.on && (p.fields || {})['음주 여부'] === 'X' ? ' (술 안 드신 할인 반영)' : ''}` : '',
+    r.b ? `· 2차 ${won(r.b)}` : '', r.base ? `· 기본회비 −${won(r.base)}` : '',
+    `→ ${acctText()}`, `⏰ ${fmtDeadline(S.settle.deadline)}까지 부탁드려요!`].filter(Boolean).join('\n');
+}
+// 영수증 사진 → 금액 (서버, Claude)
+async function receiptRead(round, file){
+  if (SLACK.status !== 'on'){ toast('영수증 읽기는 서버가 켜져 있어야 해요'); return; }
+  UI.rcptBusy = round; render();
+  try {
+    const r = await slackApi('/api/receipt/parse', {images:[await shrink(file)]});
+    if (r.total){ S.settle[round] = r.total; log('기록', `영수증 읽기 → ${round === 'r1' ? '1차' : '2차'} ${won(r.total)}${r.store ? ` (${r.store})` : ''} · 총무 확인 필요`); toast(`${won(r.total)}${r.store ? ` · ${r.store}` : ''} 읽었어요 · 금액을 확인해 주세요`); }
+    else toast('금액을 찾지 못했어요. 직접 입력해 주세요');
+  } catch(e){ toast(`영수증 읽기 실패: ${slackErr(e.message)}`); }
+  UI.rcptBusy = null; render();
+}
+function settleCard(d, pl){
+  const st = S.settle, c = dinnerSettle(), D = S.dinner, ps = c.att;
+  const nm = p => p.id === 'me' ? (MEM.me.real || '나 (총무)') : MEM[p.id].name;
+  const round = (k, label, n) => `<div class="row" style="margin-bottom:8px"><b style="width:44px">${label}</b>
+      <input class="inp" style="width:150px" type="number" step="1000" min="0" data-settle="${k}" value="${esc(st[k] || '')}" placeholder="결제 금액" ${st.sent ? 'disabled' : ''}><span>원 · ${n}명</span>
+      ${st.sent ? '' : `<label class="btn sm ghost" style="cursor:pointer">${UI.rcptBusy === k ? '읽는 중…' : '🧾 영수증으로 읽기'}<input type="file" accept="image/*" data-rcpt="${k}" hidden></label>`}</div>`;
+  const table = `<div class="sheet-wrap"><table class="sheet"><thead><tr><th>이름</th><th>1차</th>${D.byRound ? '<th>2차</th>' : ''}${D.baseFee.on ? '<th>기본회비</th>' : ''}<th>낼 돈</th><th>돌려받을 돈</th>${st.sent ? '<th>입금</th>' : ''}</tr></thead>
+    <tbody>${ps.map(p => { const r = c.rows[p.id]; return `<tr><td><b style="font-weight:600">${esc(nm(p))}</b>${D.nonDrink.on && (p.fields || {})['음주 여부'] === 'X' ? ' <span class="tag">술 X</span>' : ''}</td>
+      <td>${r.a ? won(r.a) : '-'}</td>${D.byRound ? `<td>${r.b ? won(r.b) : '-'}</td>` : ''}${D.baseFee.on ? `<td>${r.base ? '−' + won(r.base) : '-'}</td>` : ''}
+      <td><b>${r.owe ? won(r.owe) : '-'}</b></td><td>${r.refund ? won(r.refund) : '-'}</td>
+      ${st.sent ? `<td>${r.owe ? chip(p.pay) : r.refund ? (p.refundDone ? '<span class="tag g">보냄</span>' : `<button class="btn sm" data-act="refundDone" data-id="${p.id}">보냈어요</button>`) : '<span class="tag g">끝</span>'}</td>` : ''}</tr>`; }).join('')}</tbody></table></div>`;
+  const sum = `<p class="small" style="margin:8px 0 0">총 결제 <b>${won(c.total)}</b> · 걷을 돈 <b>${won(c.collect)}</b>${c.base ? ` · 기본회비 ${won(c.base)}` : ''}${c.refund ? ` · 돌려줄 돈 ${won(c.refund)}` : ''}${c.rest ? ` · 100원 단위 반올림으로 ${won(c.rest)} 더 걷힘` : ''}</p>`;
+  if (!st.sent) return `<section class="card" style="margin-bottom:16px"><div class="card-h"><h3>💸 4단계 · 정산</h3><span class="tag">계산 중</span><span class="grow"></span>
+      <span class="hitl">HITL</span><button class="btn yellow" data-act="settleSend" ${c.total ? '' : 'disabled'}>정산표 확정 + 각자 DM</button></div>
+    <div class="card-b">${round('r1', '1차', c.r1)}${D.byRound ? round('r2', '2차', c.r2) : ''}
+      <p class="small muted" style="margin:0 0 10px">${D.byRound ? '1차는 1차 참석자끼리, 2차는 2차 참석자끼리' : '1·2차 합계를 참석자끼리'} 나눠요.${D.nonDrink.on ? ` 술 안 마신 분은 1차에서 ${won(+D.nonDrink.amount || 0)} 덜 내요.` : ''} 영수증 금액은 Claude가 읽은 값이라 꼭 확인해 주세요.</p>
+      ${c.total ? table + sum : '<p class="small muted">결제 금액을 넣으면 사람별 금액이 계산돼요.</p>'}</div></section>`;
+  const pend = settlePending(), refundLeft = ps.filter(p => c.rows[p.id].refund && !p.refundDone).length, over = new Date(st.deadline) < new Date();
+  const done = !pend.length && !refundLeft;
+  const note = st.done ? '✓ 정산 완료 공지를 보냈어요' : !pend.length ? (refundLeft ? `입금은 모두 끝났어요 · 돌려줄 돈 ${refundLeft}건 남음` : '✓ 모두 정산됐어요') : over ? '정산 마감 시간이 지났어요' : S.paused ? '⏸ 봇 일시정지 · 단체방 독촉 멈춤'
+    : `다음 단체방 독촉 <b data-due="${groupDue(st)}">…</b> · “아직 ${pend.length}분이 입금 전이에요”`;
+  return `<section class="card" style="margin-bottom:16px"><div class="card-h"><h3>💸 4단계 · 정산</h3><span class="tag ${st.done ? 'g' : 'b'}">${st.done ? '완료' : '송금 요청 보냄'}</span><span class="grow"></span>
+      <b>${ps.filter(p => c.rows[p.id].owe).length - pend.length} / ${ps.filter(p => c.rows[p.id].owe).length}명 입금</b>
+      ${pend.length && !st.done ? `<button class="btn sm" data-act="phaseDmAll">미입금자 ${pend.length}명에게 DM</button>` : ''}
+      ${done && !st.done ? '<span class="hitl">HITL</span><button class="btn yellow" data-act="settleDone">정산 완료 공지</button>' : ''}</div>
+    <div class="card-b">${table}${sum}<p class="small" style="margin:8px 0 0">📣 ${note} · 마감 ${fmtDeadline(st.deadline)}</p>
+      <p class="small muted" style="margin:6px 0 0">입금은 시트의 회비 열 <b>💰 입금 확인</b>이나 회비 칸을 눌러 처리해요. 금액은 각자 DM으로만 보냈어요.</p></div></section>`;
+}
+function settleDoneText(){
+  const c = dinnerSettle();
+  return [`✅ ${S.event.name} 정산이 끝났어요!`, `총 ${won(c.total)} · ${c.att.length}명 참석${c.refund ? ` · 기본회비 남은 ${won(c.refund)}은 돌려드렸어요` : ''}`, '모두 고생 많으셨어요. 다음 모임에서 봬요! 🙌'].join('\n');
 }
 
 // 2단계 참석 조사: 이름·회비를 뺀 조사 항목을 Slack [응답하기] 입력창으로 받음
@@ -1454,10 +1585,11 @@ function surveyCard(d, pl){
 }
 function eventCard(d, pl){
   const t = surveyStats();
-  return `<section class="card" style="margin-bottom:16px"><div class="card-h"><h3>🍻 3단계 · 모임 당일</h3><span class="tag g">참석 조사 마감</span></div>
+  return `<section class="card" style="margin-bottom:16px"><div class="card-h"><h3>🍻 3단계 · 모임 당일</h3><span class="tag g">참석 조사 마감</span><span class="grow"></span>
+      <span class="hitl">HITL</span><button class="btn yellow" data-act="eventEnd">모임 종료 → 정산</button></div>
     <div class="card-b"><p style="margin:0">📅 ${esc(d ? d.label : '-')} · 📍 ${esc(pl ? pl.label : '-')}${pl && pl.url ? ` · <a href="${esc(pl.url)}" target="_blank" rel="noopener">카카오맵 ›</a>` : ''}</p>
       <div class="row wrap" style="margin-top:10px"><span class="tag g">1차 ${t.r1}명</span><span class="tag g">2차 ${t.r2}명</span>${t.nodrink ? `<span class="tag">술 안 마심 ${t.nodrink}명</span>` : ''}<span class="tag">불참 ${t.no}명</span>${S.dinner.baseFee.on ? `<span class="tag ${t.paid === t.att ? 'g' : 'o'}">기본회비 ${t.paid}/${t.att}</span>` : ''}</div>
-      <p class="small muted" style="margin:8px 0 0">늦게 오거나 2차에 빠지는 등 바뀐 내용은 시트에 반영돼야 정산이 맞아요. 모임 당일 화면과 정산은 다음 작업에서 만들어요.</p></div></section>`;
+      <p class="small muted" style="margin:8px 0 0">늦게 오거나 2차에 빠지는 등 바뀐 내용은 아래 시트의 칸을 눌러 바로 고쳐 주세요. 정산은 이 기록대로 나눠요.</p></div></section>`;
 }
 // 응답 읽어 오기 (5초마다) → 참석·조사 항목에 반영
 async function surveyPull(){
@@ -1557,7 +1689,7 @@ setInterval(async () => {
 let remindBusy = false;
 // 참석 조사 독촉: 자동은 단체방에만 (인원만 말함). 개인 DM은 총무가 보낼 때만
 async function sendGroup(){
-  const st = groupState(), survey = S.phase === 'survey', m = survey ? surveyGroupMsg() : voteGroupMsg();
+  const st = groupState(), survey = S.phase === 'survey', m = survey ? surveyGroupMsg() : S.phase === 'settle' ? settleGroupMsg() : voteGroupMsg();
   st.lastGroup = Date.now(); st.jit = jitter(); st.gstage = (st.gstage || 0) + 1; st.lastK = m.k;
   if (SLACK.status === 'on' && S.slackChannel)
     await slackSend({channel:S.slackChannel}, m, S.persona, `#${S.channel} ${m.label} (자동)`, survey ? {survey_channel:S.slackChannel} : {});
@@ -1568,7 +1700,7 @@ async function sendGroup(){
 function dmPlanModal(){
   const P = UI.dmPlan, ids = UI.dmIds, ex = S.people[ids[0]];
   const opt = (k, v, l) => `<button class="${String(P[k]) === String(v) ? 'on' : ''}" data-act="dmSet" data-k="${k}" data-v="${v}">${l}</button>`;
-  const first = dmMsg(ex, dmTone(P.tone, 0)), btn = S.phase === 'survey' ? '\n[ 📝 응답하기 ]' : '', who = S.phase === 'survey' ? '미응답자' : '미투표자';
+  const first = dmMsg(ex, dmTone(P.tone, 0)), btn = S.phase === 'survey' ? '\n[ 📝 응답하기 ]' : '', who = PHASE_WORD[S.phase][1];
   modal(`<div class="mh"><h3 class="grow">${ids.length > 1 ? `${who} ${ids.length}명에게 개인 DM` : `${esc(MEM[ids[0]].name)}님께 개인 DM`}</h3><button class="btn sm ghost" data-act="closeModal">✕</button></div>
     <div class="mb">
       <label class="f">멘트 강도</label>
@@ -1577,7 +1709,7 @@ function dmPlanModal(){
       <div class="seg sm" style="margin-bottom:8px">${opt('mode', 'once', '한 번만')}${opt('mode', 'repeat', '반복')}</div>
       ${P.mode === 'repeat' ? `<div class="row wrap" style="margin-bottom:6px"><div class="seg sm">${DM_EVERY.map(([v, l]) => opt('every', v, l)).join('')}</div>
           <span class="small">마다 · 최대</span><input class="inp num" type="number" min="1" max="20" id="dmMax" value="${P.max}"><span class="small">번</span></div>
-        <p class="small muted" style="margin:0 0 12px">지금 한 번 보내고, ${S.phase === 'survey' ? '응답' : '투표'}하거나 마감(${fmtDeadline(phaseDeadline())})이 되면 자동으로 멈춰요. 전송 금지 시간엔 보내지 않아요.</p>` : '<p class="small muted" style="margin:0 0 12px">지금 한 번만 보내요.</p>'}
+        <p class="small muted" style="margin:0 0 12px">지금 한 번 보내고, ${PHASE_WORD[S.phase][0]}하거나 마감(${fmtDeadline(phaseDeadline())})이 되면 자동으로 멈춰요. 전송 금지 시간엔 보내지 않아요.</p>` : '<p class="small muted" style="margin:0 0 12px">지금 한 번만 보내요.</p>'}
       <div class="stage-lb" style="margin-bottom:8px">미리보기 · ${esc(MEM[ex.id].name)}님${P.tone === 'escalate' ? ' · 첫 번째(이후 단호 → 엄격)' : ''}</div>
       <div class="slack">${bubble(first.text + btn, first.mood, first.k === 'burst')}</div>
       ${ids.length > 1 ? `<p class="small muted">받는 사람: ${ids.map(id => esc(MEM[id].name)).join(', ')} · 사람마다 이름을 넣어 각자 DM으로 보내요.</p>` : ''}
@@ -1624,7 +1756,7 @@ setInterval(async () => {
   const now = Date.now(), sv = S.survey;
   if (S.phase === 'survey' && SLACK.status !== 'on' && sv.nextFake && now >= sv.nextFake){ fakeSurveyAnswer(); sv.nextFake = now + 6000 + Math.random() * 6000; render(); }
   const pend = phasePending();
-  people().forEach(p => { if (p.dmPlan && !p.dmPlan.done && !pend.includes(p)){ p.dmPlan.done = true; log('소통', `${MEM[p.id].name}님 ${S.phase === 'survey' ? '응답' : '투표'} → 개인 DM 반복 종료`); } });
+  people().forEach(p => { if (p.dmPlan && !p.dmPlan.done && !pend.includes(p)){ p.dmPlan.done = true; log('소통', `${MEM[p.id].name}님 ${PHASE_WORD[S.phase][0]} → 개인 DM 반복 종료`); } });
   if (remindBusy || S.paused || !pend.length || now > new Date(phaseDeadline()).getTime() || inQuiet(new Date(), S.quiet)) return;
   const dmDue = pend.find(p => p.dmPlan && !p.dmPlan.done && now >= p.dmPlan.next);
   if (dmDue){ remindBusy = true; try { await sendPlannedDm(dmDue); render(); } finally { remindBusy = false; } return; }
@@ -2290,6 +2422,70 @@ document.addEventListener('click', e => {
       } else finish('모임을 중단했어요');
       return; }
     case 'csv': downloadCsv(); return;
+    case 'cellEdit': {
+      const p = S.people[d.id], col = S.schema.find(c => c.key === d.k); if (!p || !col) return;
+      const cur = d.k === '참석' ? p.attend : (p.fields[d.k] || '');
+      let v;
+      if (d.k === '참석'){ const o = ['참석', '부분', '불참']; v = o[(o.indexOf(cur) + 1) % o.length]; }
+      else if (col.type === 'ox') v = cur === 'O' ? 'X' : 'O';
+      else if (col.type === 'select'){ const o = col.options.split(',').map(x => x.trim()).filter(Boolean); v = o[(o.indexOf(cur) + 1) % o.length]; }
+      else { v = prompt(`${MEM[p.id].name} · ${d.k}`, cur); if (v == null) return; v = v.trim(); }
+      if (d.k === '참석') p.attend = v; else p.fields[d.k] = v;
+      log('총무', `${p.id === 'me' ? '총무' : MEM[p.id].name} ${d.k}: ${cur || '-'} → ${v || '-'} (직접 수정)`);
+      UI.flash = p.id; break; }
+    case 'eventEnd': {
+      const t = surveyStats();
+      modal(`<div class="mh"><span class="hitl">HITL</span><h3 class="grow">모임을 마치고 정산으로 넘어갈까요?</h3><button class="btn sm ghost" data-act="closeModal">✕</button></div>
+        <div class="mb"><div class="row wrap"><span class="tag g">1차 ${t.r1}명</span><span class="tag g">2차 ${t.r2}명</span>${t.nodrink ? `<span class="tag">술 안 마심 ${t.nodrink}명</span>` : ''}</div>
+          <p class="small muted">정산은 지금 시트 기록(참석·1차·2차·음주 여부)대로 나눠요. 바뀐 게 있으면 취소하고 시트를 먼저 고쳐 주세요.</p></div>
+        <div class="mf"><button class="btn" data-act="closeModal">취소</button><button class="btn yellow" data-act="doEventEnd">정산 시작</button></div>`); return; }
+    case 'doEventEnd':
+      closeModal(); S.phase = 'settle'; S.settle = {r1:'', r2:'', sent:false, done:false, gstage:0};
+      log('총무', '모임 종료 → 4단계 정산 (HITL)'); break;
+    case 'settleSend': {
+      const c = dinnerSettle();
+      UI.settleDeadline = UI.settleDeadline || toLocalInput(Date.now() + 2 * 86400000).slice(0, 11) + '21:00';
+      const ex = c.att.find(p => c.rows[p.id].owe) || c.att[0];
+      modal(`<div class="mh"><span class="hitl">HITL</span><h3 class="grow">정산표를 확정하고 각자에게 DM을 보낼까요?</h3><button class="btn sm ghost" data-act="closeModal">✕</button></div>
+        <div class="mb"><div class="row wrap" style="margin-bottom:10px"><span class="tag">총 결제 ${won(c.total)}</span><span class="tag g">걷을 돈 ${won(c.collect)} · ${c.att.filter(p => c.rows[p.id].owe).length}명</span>${c.refund ? `<span class="tag b">돌려줄 돈 ${won(c.refund)}</span>` : ''}</div>
+          <div class="row" style="margin-bottom:12px"><label class="f" style="margin:0">⏰ 정산 마감</label><span class="grow"></span><input class="inp" style="width:auto" type="datetime-local" id="settleDeadline" value="${esc(UI.settleDeadline)}"></div>
+          <div class="stage-lb" style="margin-bottom:8px">개인 DM 예시 · ${esc(ex.id === 'me' ? '총무' : MEM[ex.id].name)}님</div>
+          <div class="slack">${bubble(settleDmText(ex, c.rows[ex.id]).replace(/\*/g, ''), '', false)}</div>
+          <p class="small muted">사람마다 자기 금액만 DM으로 받아요. 단체방에는 "정산 DM을 보냈어요" 안내만 올라가요. 확정하면 금액이 고정돼요.</p></div>
+        <div class="mf"><button class="btn" data-act="closeModal">취소</button><button class="btn yellow" data-act="doSettleSend">확정하고 보내기</button></div>`, true); return; }
+    case 'doSettleSend': {
+      const dl = ($('#settleDeadline') || {}).value || UI.settleDeadline;
+      if (!(new Date(dl) > new Date())){ toast('정산 마감을 지금 이후로 정해 주세요'); return; }
+      const c = dinnerSettle(); closeModal(); UI.settleDeadline = dl;
+      // 금액 고정: 기본회비는 basePaid 로 옮기고, 회비 칸은 정산 입금 상태로
+      c.att.forEach(p => { const r = c.rows[p.id]; p.basePaid = r.base; p.owe = r.owe; p.refund = r.refund; p.paid = 0; p.pay = r.owe ? '미입금' : '입금'; p.sdm = 0; if (p.dmPlan) p.dmPlan.done = true; });
+      Object.assign(S.settle, {sent:true, deadline:dl, lastGroup:Date.now(), gstage:0});
+      log('총무', `정산표 확정 · 걷을 돈 ${won(c.collect)}${c.refund ? ` · 돌려줄 돈 ${won(c.refund)}` : ''} (HITL)`);
+      (async () => {
+        const live = SLACK.status === 'on' && S.slackChannel;
+        for (const p of c.att){
+          const text = settleDmText(p, c.rows[p.id]);
+          if (live && MEM[p.id].slackId) await slackSend({user:MEM[p.id].slackId, name:shortName(p.id)}, {text, label:'정산 안내 DM', mood:''}, S.persona, `${MEM[p.id].name}님께 정산 안내 DM`, {raw:true});
+          else log('소통', `${p.id === 'me' ? '총무' : MEM[p.id].name}님께 정산 DM (데모): ${c.rows[p.id].owe ? won(c.rows[p.id].owe) : c.rows[p.id].refund ? '환급 ' + won(c.rows[p.id].refund) : '0원'}`);
+        }
+        const g = `💸 ${S.event.name} 정산 금액을 각자 DM으로 보내드렸어요! 확인하고 ${fmtDeadline(dl)}까지 보내 주세요 🙏`;
+        if (live) await slackSend({channel:S.slackChannel}, {text:g, label:'정산 안내', mood:''}, S.persona, '정산 안내 (단체방)', {raw:true});
+        else log('소통', `#${S.channel} 정산 안내 (데모)`);
+        toast('정산 DM을 보냈어요'); render();
+      })();
+      break; }
+    case 'refundDone': { const p = S.people[d.id]; p.refundDone = true; log('총무', `${p.id === 'me' ? '총무' : MEM[p.id].name}님께 ${won(p.refund || 0)} 돌려줌 (HITL)`); break; }
+    case 'settleDone':
+      modal(`<div class="mh"><span class="hitl">HITL</span><h3 class="grow">정산 완료 공지를 보낼까요?</h3><button class="btn sm ghost" data-act="closeModal">✕</button></div>
+        <div class="mb"><label class="f">#${esc(S.channel)}에 올릴 공지</label><textarea class="inp" rows="4" id="doneText">${esc(settleDoneText())}</textarea>
+          <p class="small muted">보내면 정산이 끝나고 모든 독촉이 멈춰요. 시트 CSV로 기록을 남겨 두세요.</p></div>
+        <div class="mf"><button class="btn" data-act="closeModal">취소</button><button class="btn yellow" data-act="doSettleDone">공지하고 끝내기</button></div>`); return;
+    case 'doSettleDone': {
+      const text = ($('#doneText') || {}).value || settleDoneText(); closeModal();
+      S.settle.done = true; log('총무', '정산 완료 (HITL)');
+      if (SLACK.status === 'on' && S.slackChannel) slackSend({channel:S.slackChannel}, {text, label:'정산 완료 공지', mood:''}, S.persona, '정산 완료 공지', {raw:true});
+      else log('소통', `#${S.channel} 정산 완료 공지 (데모)`);
+      toast('정산을 마쳤어요 🎉'); break; }
     case 'payOpen': UI.payRows = []; UI.payText = ''; payModal(); return;
     case 'payRead': payRead(); return;
     case 'payConfirm': {
