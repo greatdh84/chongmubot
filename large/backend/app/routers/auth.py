@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import clock
+from ..config import API_PREFIX
 from ..db import get_db
 from ..deps import current_admin
 from ..errors import AppError, unauthorized
@@ -20,7 +21,7 @@ from ..services import emails, invites
 from ..services.common import active_manager, audit
 from .util import clear_session_cookie, set_session_cookie
 
-router = APIRouter(prefix="/api/auth", tags=["auth"])
+router = APIRouter(prefix=API_PREFIX + "/auth", tags=["auth"])
 
 _login_failures: dict[str, deque[float]] = defaultdict(deque)
 LOGIN_WINDOW, LOGIN_MAX_FAILURES = 15 * 60, 5
@@ -85,7 +86,8 @@ def invite_exchange(body: InviteExchange, request: Request, response: Response, 
 
 def _managers_by_email(db: Session, email: str) -> list[tuple[Participant, int]]:
     out = []
-    for p in db.scalars(select(Participant).where(Participant.email == email.strip().lower())):
+    q = select(Participant).join(Event, Event.id == Participant.event_id).where(Participant.email == email.strip().lower(), Event.mode == "large")
+    for p in db.scalars(q):
         m = active_manager(db, p.team_id)
         if m is not None and m.participant_id == p.id:
             out.append((p, p.team_id))

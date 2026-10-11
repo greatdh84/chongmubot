@@ -43,6 +43,8 @@ class Event(Base):
     fee_car: Mapped[int] = mapped_column(default=15000)
     fee_absent: Mapped[int] = mapped_column(default=0)
     account_note: Mapped[str] = mapped_column(String(300), default="")
+    # 총무봇 공용 서버에서 SMALL/LARGE 를 구분. 이 DB 는 LARGE 전용이며 만든 뒤에는 바꾸지 않는다.
+    mode: Mapped[str] = mapped_column(String(10), default="large", server_default="large")
     snapshot_taken_at: Mapped[Optional[datetime]] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=_now)
 
@@ -186,6 +188,9 @@ class ChangeLog(Base):
     extra_charge: Mapped[int] = mapped_column(default=0)
     refund_rule_id: Mapped[Optional[int]] = mapped_column(ForeignKey("refund_rules.id"))
     rule_text: Mapped[str] = mapped_column(String(300), default="")
+    # 요청 시점에 맞는 환불 규칙이 없었음 → 환불액은 '임시 0원'일 뿐 확정이 아니다(총무 결정 필요)
+    rule_missing: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    admin_refund_decided: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     evidence_message_id: Mapped[Optional[int]] = mapped_column(ForeignKey("chat_messages.id"))
     note: Mapped[str] = mapped_column(String(300), default="")
 

@@ -35,6 +35,7 @@ class ChatSend(BaseModel):
 
 
 class EventUpdate(BaseModel):
+    mode: Optional[str] = None  # 받기만 하고 바꾸지 않음(모드 변경 금지 검사용)
     name: Optional[str] = None
     event_at: Optional[str] = None
     attend_deadline: Optional[str] = None
@@ -62,7 +63,9 @@ class AdminResponseSet(BaseModel):
 
 
 class Decision(BaseModel):
-    note: str = ""
+    note: str = Field(default="", max_length=300)
+    # 환불 규칙이 없는 변경을 승인할 때만: 총무가 정한 환불액
+    refund_amount: Optional[int] = Field(default=None, ge=0)
 
 
 class AllocationIn(BaseModel):

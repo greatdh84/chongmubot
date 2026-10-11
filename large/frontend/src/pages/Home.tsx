@@ -10,7 +10,7 @@ export default function Home() {
   const meta = useMeta();
   return (
     <Page narrow>
-      <div className="topbar"><h1>총무 Agent: 독촉부터 정산까지</h1></div>
+      <div className="topbar"><h1>대모임(LARGE) 총무 Agent: 독촉부터 정산까지</h1></div>
       <div className="card">
         <h2>들어가기</h2>
         <div className="grid">
@@ -24,7 +24,7 @@ export default function Home() {
   );
 }
 
-/** 시연 전용 역할 전환. 운영 모드에서는 서버가 /api/dev 를 등록하지 않아 쓸 수 없다. */
+/** 시연 전용 역할 전환. 운영 모드에서는 서버가 /api/large/dev 를 등록하지 않아 쓸 수 없다. */
 function DemoSwitch() {
   const nav = useNavigate();
   const [people, setPeople] = useState<People | null>(null);
@@ -32,7 +32,7 @@ function DemoSwitch() {
   const [pid, setPid] = useState("");
   const { busy, message, run } = useAction();
   useEffect(() => {
-    api.get<People>("/api/dev/people").then((p) => {
+    api.get<People>("/api/large/dev/people").then((p) => {
       setPeople(p);
       setMgr(String(p.managers[0]?.participant_id ?? ""));
       setPid(String(p.participants[1]?.participant_id ?? ""));
@@ -40,7 +40,7 @@ function DemoSwitch() {
   }, []);
   const go = (role: string, participant_id: number | null, to: string) =>
     run(async () => {
-      await api.post("/api/dev/switch", { role, participant_id });
+      await api.post("/api/large/dev/switch", { role, participant_id });
       nav(to);
     });
   return (

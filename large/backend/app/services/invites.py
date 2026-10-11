@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from .. import clock
 from ..config import settings
 from ..errors import AppError
-from ..models import Invite, Participant
+from ..models import Event, Invite, Participant
 from ..security import hash_token, new_token
 
 
@@ -44,8 +44,11 @@ def resolve(db: Session, token: str, now: datetime | None = None) -> Participant
         raise AppError(401, "INVITE_REVOKED", "폐기된 초대 링크입니다. 총무에게 재발급을 요청하세요")
     if inv.expires_at <= now:
         raise AppError(401, "INVITE_EXPIRED", "만료된 초대 링크입니다. 총무에게 재발급을 요청하세요")
+    p = db.get(Participant, inv.participant_id)
+    if db.get(Event, p.event_id).mode != "large":
+        raise AppError(401, "INVITE_INVALID", "유효하지 않은 초대 링크입니다")
     inv.last_used_at = now
-    return db.get(Participant, inv.participant_id)
+    return p
 
 
 def status(db: Session, participant_id: int, now: datetime | None = None) -> dict:

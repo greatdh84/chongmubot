@@ -12,7 +12,7 @@ export default function AdminLogin() {
   const submit = (e: FormEvent) => {
     e.preventDefault();
     run(async () => {
-      await api.post("/api/auth/admin/login", { email, password });
+      await api.post("/api/large/auth/admin/login", { email, password });
       nav("/admin");
     });
   };

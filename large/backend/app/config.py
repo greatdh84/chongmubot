@@ -7,6 +7,9 @@ from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_SECRET = "dev-only-insecure-secret"
+# 공용 서버(총무봇 hub)에서 SMALL API 와 섞이지 않도록 LARGE 의 API·화면은 각각 이 경로 아래에만 둔다.
+API_PREFIX = "/api/large"
+UI_PREFIX = "/large"
 
 
 def _load_dotenv() -> None:
@@ -36,7 +39,7 @@ class Settings:
     secret_key: str = DEFAULT_SECRET
     admin_email: str = ""
     admin_password: str = ""
-    public_base_url: str = "http://localhost:5173"
+    public_base_url: str = "http://127.0.0.1:8787/large"
     timezone: str = "Asia/Seoul"
     quiet_start_hour: int = 21  # 21시 ~ 다음날 8시는 발송 금지
     quiet_end_hour: int = 8
@@ -88,7 +91,7 @@ def load_settings() -> Settings:
         secret_key=_env("SECRET_KEY", DEFAULT_SECRET),
         admin_email=_env("ADMIN_EMAIL", "admin@example.com" if app_mode == "demo" else ""),
         admin_password=_env("ADMIN_PASSWORD", "demo1234!" if app_mode == "demo" else ""),
-        public_base_url=_env("PUBLIC_BASE_URL", "http://localhost:5173").rstrip("/"),
+        public_base_url=_env("PUBLIC_BASE_URL", "http://127.0.0.1:8787/large").rstrip("/"),
         daily_limit=int(_env("EMAIL_DAILY_LIMIT", "2")),
         quiet_start_hour=int(_env("EMAIL_QUIET_START", "21")),
         quiet_end_hour=int(_env("EMAIL_QUIET_END", "8")),

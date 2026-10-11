@@ -14,11 +14,11 @@ import ParticipantPage from "./pages/ParticipantPage";
 export default function App() {
   const [meta, setMeta] = useState<Meta | null>(null);
   useEffect(() => {
-    api.get<Meta>("/api/meta").then(setMeta).catch(() => setMeta(null));
+    api.get<Meta>("/api/large/meta").then(setMeta).catch(() => setMeta(null));
   }, []);
   return (
     <MetaContext.Provider value={meta}>
-      <BrowserRouter>
+      <BrowserRouter basename="/large">
         <ModeBanner />
         <Routes>
           <Route path="/" element={<Home />} />

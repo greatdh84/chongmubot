@@ -6,10 +6,10 @@ import { useAction, useLoad } from "../hooks";
 
 const OPTIONS: Choice[] = ["bus", "car", "absent", "undecided"];
 
-interface Preview { after_deadline: boolean; requires_approval: boolean; fee_before: number | null; fee_after: number | null; refund_amount: number; extra_charge: number; rule_text: string }
+interface Preview { needs_admin_rule?: boolean; after_deadline: boolean; requires_approval: boolean; fee_before: number | null; fee_after: number | null; refund_amount: number; extra_charge: number; rule_text: string }
 
 export default function ParticipantPage() {
-  const { data: me, error, reload } = useLoad(() => api.get<Me>("/api/me"));
+  const { data: me, error, reload } = useLoad(() => api.get<Me>("/api/large/me"));
   const [sel, setSel] = useState<Choice | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [pvError, setPvError] = useState("");
@@ -19,7 +19,7 @@ export default function ParticipantPage() {
     setPreview(null);
     setPvError("");
     if (!sel || !me || sel === me.response.choice) return;
-    api.post<Preview>("/api/me/response/preview", { choice: sel }).then(setPreview).catch((e) => setPvError(e.message));
+    api.post<Preview>("/api/large/me/response/preview", { choice: sel }).then(setPreview).catch((e) => setPvError(e.message));
   }, [sel, me]);
 
   if (error) return <Page narrow><div className="card"><p className="error">{error.message}</p><p className="muted">이메일의 개인 초대 링크로 다시 들어와 주세요.</p></div></Page>;
@@ -27,7 +27,7 @@ export default function ParticipantPage() {
   const ev = me.event;
   const submit = () =>
     run(async () => {
-      const r = await api.post<{ change: { status: string } }>("/api/me/response", { choice: sel });
+      const r = await api.post<{ change: { status: string } }>("/api/large/me/response", { choice: sel });
       setSel(null);
       reload();
       return r;
@@ -61,7 +61,7 @@ export default function ParticipantPage() {
         </div>
         {preview && (
           <div className="notice">
-            {won(preview.fee_before)} → {won(preview.fee_after)}
+            {preview.needs_admin_rule ? "환불액 미정 — 이 시점에 맞는 환불 규칙이 없어 총무가 정합니다(0원으로 확정된 것이 아님)" : `${won(preview.fee_before)} → ${won(preview.fee_after)}`}
             {preview.refund_amount > 0 && ` · 환불 ${won(preview.refund_amount)}`}
             {preview.extra_charge > 0 && ` · 추가 ${won(preview.extra_charge)}`}
             <div className="muted">규칙: {preview.rule_text}</div>
@@ -77,7 +77,7 @@ export default function ParticipantPage() {
         <Msg m={message} />
       </div>
 
-      <Chat base="/api/me/chat" title="Agent 에게 변경 요청·문의" examples={["버스 말고 자차로 갈게요", "제 회비 얼마예요?", "못 가게 됐어요"]} />
+      <Chat base="/api/large/me/chat" title="Agent 에게 변경 요청·문의" examples={["버스 말고 자차로 갈게요", "제 회비 얼마예요?", "못 가게 됐어요"]} />
 
       <div className="card">
         <h2>변경 이력</h2>

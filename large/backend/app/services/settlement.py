@@ -54,6 +54,8 @@ def compute_team(db: Session, event: Event, team: Team) -> dict:
                         "refund_amount": c.refund_amount,
                         "extra_charge": c.extra_charge,
                         "rule": c.rule_text,
+                        "rule_missing": c.rule_missing,
+                        "admin_refund_decided": c.admin_refund_decided,
                     }
                     for c in changes.get(m.id, [])
                 ],
@@ -89,6 +91,9 @@ def compute_team(db: Session, event: Event, team: Team) -> dict:
     unresolved = [l["name"] for l in lines if l["unresolved"]]
     if unresolved:
         blockers.append(f"응답 미확정 {len(unresolved)}명: {', '.join(unresolved[:5])}{' 외' if len(unresolved) > 5 else ''}")
+    undecided_refunds = sum(1 for l in lines for c in l["changes"] if c["status"] == "applied" and c["rule_missing"] and not c["admin_refund_decided"])
+    if undecided_refunds:
+        blockers.append(f"환불 규칙 없이 임시 0원으로 남은 변경 {undecided_refunds}건(총무 결정 필요)")
     pending = sum(1 for l in lines for c in l["changes"] if c["status"] == "pending_approval")
     if pending:
         blockers.append(f"총무 승인 대기 변경 {pending}건")

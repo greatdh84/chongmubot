@@ -3,16 +3,22 @@
 ## 먼저 읽을 것
 `docs/PRD.md`(범위·규칙) → `docs/api-contract.md`(계약) → `docs/workflows.md`(흐름·HITL).
 
-## 실행·검증
+## 실행·검증 (경로는 저장소 루트 기준)
 ```bash
-cd backend && .venv/bin/python -m app.seed --reset && .venv/bin/uvicorn app.main:app --port 8000
-cd frontend && npm run dev
+.venv/bin/python -m hub                                   # 공용 서버 127.0.0.1:8787 (SMALL + LARGE)
+cd large/frontend && npm run dev                          # 화면 개발 시에만 (5173/large/)
 # 커밋 전 반드시
-cd backend && .venv/bin/python -m pytest -q
-cd frontend && npm run typecheck && npm run build
+cd large/backend && ../../.venv/bin/python -m pytest -q
+cd large/frontend && npm run typecheck && npm run build
+.venv/bin/python -m pytest -q hub/tests                   # 공용 서버를 건드렸다면
 ```
 
-## 담당 경계 (2인 팀 제안 — 팀이 확정해서 고칠 것)
+## 총무봇 저장소 안에서의 경계
+- 이 폴더(`large/`)와 `demo/index.html` 의 대모임 블록·대모임 전용 `<style>` 이 채총 영역입니다.
+- 공용 서버(`hub/`), 루트 README, `docs/integration-plan.md` 는 공용 영역 — 도총 확인 후 머지.
+- 소모임(`app/`, demo 의 소모임 블록·공용 부분)은 고치지 않습니다. 필요하면 GitHub Issue 로 요청.
+
+## (이전 메모) 2인 담당 경계 제안 — 총무봇 저장소 규칙(README)이 우선
 | 영역 | 담당 | 주요 파일 |
 |---|---|---|
 | A: 워크플로·Agent·발표 | 팀원 A | `docs/workflows.md`, `backend/app/agents/`, `backend/app/adapters/llm.py`, 시드 시나리오 |

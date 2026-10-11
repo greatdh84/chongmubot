@@ -36,7 +36,7 @@ export const api = {
 export type Choice = "bus" | "car" | "absent" | "undecided";
 export const CHOICE_LABEL: Record<string, string> = { bus: "참석+버스", car: "참석+자차", absent: "불참", undecided: "미정", none: "미응답" };
 
-export interface Meta { app_mode: "demo" | "production"; email_mode: "mock" | "smtp"; llm_mode: "mock" | "gemini"; demo_tools: boolean }
+export interface Meta { system: "large"; app_mode: "demo" | "production"; email_mode: "mock" | "smtp"; llm_mode: "mock" | "gemini"; demo_tools: boolean }
 
 export interface EventInfo {
   id: number; name: string; event_at: string; attend_deadline: string; payment_deadline: string;
@@ -47,7 +47,7 @@ export interface Change {
   id: number; participant_id: number; participant_name: string | null; from_choice: string | null; to_choice: string;
   from_label: string; to_label: string; after_deadline: boolean; status: string; source: string; requested_at: string;
   decided_at: string | null; liability_before: number | null; liability_after: number | null; refund_amount: number;
-  extra_charge: number; rule_text: string; note: string;
+  extra_charge: number; rule_text: string; note: string; rule_missing: boolean; admin_refund_decided: boolean;
 }
 
 export interface Me {

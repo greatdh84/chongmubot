@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from .. import clock
 from ..agents import communication
 from ..agents.tools import ToolContext, run_tool, team_counts
+from ..config import API_PREFIX
 from ..db import get_db
 from ..deps import ManagerCtx, current_manager
 from ..errors import AppError, conflict
@@ -17,7 +18,7 @@ from ..services.common import add_message, audit, get_or_create_thread
 from ..services.settlement import compute_team
 from .util import change_out, event_out, task_out
 
-router = APIRouter(prefix="/api/team", tags=["manager"])
+router = APIRouter(prefix=API_PREFIX + "/team", tags=["manager"])
 
 
 def _settlement_out(s: Settlement | None) -> dict | None:

@@ -55,6 +55,9 @@ def match_rule(rules: Iterable[RuleLike], ctype: str, requested_at: datetime) ->
     return candidates[0] if candidates else None
 
 
+RULE_MISSING_TEXT = "적용할 환불 규칙 없음 → 환불액 미정(임시 0원), 총무가 정해야 함"
+
+
 @dataclass
 class ChangeEval:
     liability_before: int
@@ -85,7 +88,7 @@ def evaluate_post_deadline_change(
     rule = match_rule(rules, ctype, requested_at) if ctype else None
     refundable = before - new_fee
     if rule is None:
-        return ChangeEval(before, before, 0, 0, None, "적용할 환불 규칙 없음 → 환불 0원, 총무 확인 필요", True)
+        return ChangeEval(before, before, 0, 0, None, RULE_MISSING_TEXT, True)
     refund = refundable * rule.refund_percent // 100
     text = rule.description or f"{ctype} 환불 {rule.refund_percent}%"
     return ChangeEval(before, before - refund, refund, 0, rule.id, text, False)

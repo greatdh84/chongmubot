@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..agents import communication
+from ..config import API_PREFIX
 from ..db import get_db
 from ..deps import ParticipantCtx, current_participant
 from ..models import CHOICE_LABELS, ChangeLog, Team
@@ -14,7 +15,7 @@ from ..services import responses as resp_svc
 from ..services.common import is_active_manager
 from .util import change_out, event_out
 
-router = APIRouter(prefix="/api/me", tags=["participant"])
+router = APIRouter(prefix=API_PREFIX + "/me", tags=["participant"])
 
 
 def me_out(db: Session, ctx: ParticipantCtx) -> dict:

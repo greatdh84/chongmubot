@@ -9,7 +9,7 @@ interface Mail { id: number; to_email: string; subject: string; body: string; cr
 export default function DevInbox() {
   const [to, setTo] = useState("");
   const [query, setQuery] = useState("");
-  const { data, error, reload } = useLoad(() => api.get<Mail[]>(`/api/dev/inbox${query ? `?to=${encodeURIComponent(query)}` : ""}`), [query]);
+  const { data, error, reload } = useLoad(() => api.get<Mail[]>(`/api/large/dev/inbox${query ? `?to=${encodeURIComponent(query)}` : ""}`), [query]);
   return (
     <Page>
       <div className="topbar"><h1>개발용 수신함 <span className="pill warn">모의 이메일 · 실제 발송 아님</span></h1></div>

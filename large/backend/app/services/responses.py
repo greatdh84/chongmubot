@@ -165,6 +165,7 @@ def submit_change(
         change.refund_amount = pv["refund_amount"]
         change.extra_charge = pv["extra_charge"]
         change.refund_rule_id = pv.get("rule_id")
+        change.rule_missing = bool(pv.get("needs_admin_rule"))
     else:
         change.decided_at = now
         _set_response(db, participant.id, to_choice, source, now)
@@ -172,7 +173,9 @@ def submit_change(
     db.flush()
     if change.status == "pending_approval":
         amount_txt = (
-            f"환불 {won(change.refund_amount)}" if change.refund_amount else (f"추가 {won(change.extra_charge)}" if change.extra_charge else "금액 변동 없음")
+            "환불액 미정 — 규칙 없음, 승인 시 총무가 환불액을 정해야 함"
+            if change.rule_missing
+            else f"환불 {won(change.refund_amount)}" if change.refund_amount else (f"추가 {won(change.extra_charge)}" if change.extra_charge else "금액 변동 없음")
         )
         create_task(
             db,
@@ -201,7 +204,18 @@ def _set_response(db: Session, participant_id: int, choice: str, source: str, no
         r.choice, r.source, r.updated_at = choice, source, now
 
 
-def decide_change(db: Session, event: Event, change: ChangeLog, admin: Admin, approve: bool, note: str = "", now: datetime | None = None) -> ChangeLog:
+def decide_change(
+    db: Session,
+    event: Event,
+    change: ChangeLog,
+    admin: Admin,
+    approve: bool,
+    note: str = "",
+    now: datetime | None = None,
+    refund_amount: int | None = None,
+) -> ChangeLog:
+    """총무 승인/반려. 요청 시각에 맞는 환불 규칙이 없으면 '임시 0원'으로 승인하지 않고,
+    총무가 환불액(refund_amount)과 사유(note)를 직접 정하거나 규칙을 추가한 뒤 승인해야 한다."""
     now = now or clock.now()
     if change.event_id != event.id:
         raise not_found("변경 요청")
@@ -212,6 +226,25 @@ def decide_change(db: Session, event: Event, change: ChangeLog, admin: Admin, ap
         participant = db.get(Participant, change.participant_id)
         state = fee_table(db, event, participant.team_id)[participant.id]
         ev = fees.evaluate_post_deadline_change(event, _rules(db, event), change.from_choice, change.to_choice, state.liability, change.requested_at)
+        change.rule_missing = ev.needs_admin_rule
+        if ev.needs_admin_rule:
+            refundable = ev.liability_before - (fees.fee_for(event, change.to_choice) or 0)
+            if refund_amount is None:
+                raise conflict(
+                    "REFUND_RULE_MISSING",
+                    "이 변경 시점에 맞는 환불 규칙이 없습니다. 환불 규칙을 추가하거나 환불액과 사유를 직접 정해 승인하세요",
+                    {"refundable_max": refundable},
+                )
+            if not 0 <= refund_amount <= refundable:
+                raise invalid("INVALID_REFUND", f"환불액은 0원 이상 {refundable:,}원 이하여야 합니다", {"refundable_max": refundable})
+            if not note.strip():
+                raise invalid("NOTE_REQUIRED", "규칙 없이 환불액을 정할 때는 사유를 적어야 합니다")
+            ev.liability_after = ev.liability_before - refund_amount
+            ev.refund_amount = refund_amount
+            ev.rule_text = f"총무 직접 결정(규칙 없음): 환불 {refund_amount:,}원"
+            change.admin_refund_decided = True
+        elif refund_amount is not None and refund_amount != ev.refund_amount:
+            raise conflict("RULE_APPLIES", f"이 변경은 규칙({ev.rule_text})으로 환불액 {ev.refund_amount:,}원이 정해집니다")
         change.liability_before, change.liability_after = ev.liability_before, ev.liability_after
         change.refund_amount, change.extra_charge = ev.refund_amount, ev.extra_charge
         change.refund_rule_id, change.rule_text = ev.rule_id, ev.rule_text

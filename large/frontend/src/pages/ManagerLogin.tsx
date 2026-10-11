@@ -14,12 +14,12 @@ export default function ManagerLogin() {
   const { busy, message, run } = useAction();
   const request = (e: FormEvent) => {
     e.preventDefault();
-    run(() => api.post<{ message: string }>("/api/auth/manager/request-code", { email }), (r) => r.message).then((r) => r && setSent(true));
+    run(() => api.post<{ message: string }>("/api/large/auth/manager/request-code", { email }), (r) => r.message).then((r) => r && setSent(true));
   };
   const verify = (e: FormEvent) => {
     e.preventDefault();
     run(async () => {
-      await api.post("/api/auth/manager/verify", { email, code });
+      await api.post("/api/large/auth/manager/verify", { email, code });
       nav("/manager");
     });
   };

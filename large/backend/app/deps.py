@@ -35,7 +35,8 @@ def current_admin(request: Request, db: Session = Depends(get_db)) -> Admin:
 
 def admin_event(event_id: int, admin: Admin = Depends(current_admin), db: Session = Depends(get_db)) -> Event:
     ev = db.get(Event, event_id)
-    if ev is None or ev.admin_id != admin.id:
+    # 이 서버의 LARGE API 는 mode='large' 행사만 다룬다(SMALL 행사 ID 가 섞여 들어와도 404).
+    if ev is None or ev.admin_id != admin.id or ev.mode != "large":
         raise not_found("행사")  # 남의 행사는 존재 여부도 알리지 않음
     return ev
 
@@ -45,7 +46,10 @@ def current_participant(request: Request, db: Session = Depends(get_db)) -> Part
     if s is None:
         raise unauthorized("초대 링크로 다시 들어와 주세요")
     p = db.get(Participant, s.participant_id)
-    return ParticipantCtx(p, db.get(Event, p.event_id))
+    ev = db.get(Event, p.event_id)
+    if ev.mode != "large":
+        raise not_found("행사")
+    return ParticipantCtx(p, ev)
 
 
 def current_manager(request: Request, db: Session = Depends(get_db)) -> ManagerCtx:
@@ -56,4 +60,7 @@ def current_manager(request: Request, db: Session = Depends(get_db)) -> ManagerC
     if not is_active_manager(db, s.participant_id, s.team_id):
         raise forbidden("더 이상 이 팀의 담당자가 아닙니다")
     p = db.get(Participant, s.participant_id)
-    return ManagerCtx(p, db.get(Team, s.team_id), db.get(Event, p.event_id))
+    ev = db.get(Event, p.event_id)
+    if ev.mode != "large":
+        raise not_found("행사")
+    return ManagerCtx(p, db.get(Team, s.team_id), ev)

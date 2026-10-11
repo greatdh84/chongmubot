@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import Response as HttpResponse
 
 from .. import clock
-from ..config import settings
+from ..config import API_PREFIX, settings
 from ..models import CHOICE_LABELS, ChangeLog, ConfirmTask, Event
 from ..security import COOKIE_NAMES
 
@@ -18,12 +18,12 @@ def set_session_cookie(resp: HttpResponse, role: str, token: str) -> None:
         httponly=True,
         samesite="lax",
         secure=settings.cookie_secure,
-        path="/api",
+        path=API_PREFIX,
     )
 
 
 def clear_session_cookie(resp: HttpResponse, role: str) -> None:
-    resp.delete_cookie(COOKIE_NAMES[role], path="/api")
+    resp.delete_cookie(COOKIE_NAMES[role], path=API_PREFIX)
 
 
 def event_out(ev: Event) -> dict[str, Any]:
@@ -59,6 +59,8 @@ def change_out(c: ChangeLog, name: str | None = None) -> dict[str, Any]:
         "refund_amount": c.refund_amount,
         "extra_charge": c.extra_charge,
         "rule_text": c.rule_text,
+        "rule_missing": c.rule_missing,
+        "admin_refund_decided": c.admin_refund_decided,
         "evidence_message_id": c.evidence_message_id,
         "note": c.note,
     }

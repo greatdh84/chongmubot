@@ -51,6 +51,23 @@ def init_db() -> None:
     from . import models  # noqa: F401
 
     Base.metadata.create_all(engine)
+    _add_missing_columns()
+
+
+# create_all 은 기존 테이블에 새 컬럼을 넣지 않으므로, 이전 버전 DB 를 위해 필요한 컬럼만 추가한다.
+_COLUMN_UPGRADES = {
+    "events": {"mode": "VARCHAR(10) NOT NULL DEFAULT 'large'"},
+    "change_logs": {"rule_missing": "BOOLEAN NOT NULL DEFAULT 0", "admin_refund_decided": "BOOLEAN NOT NULL DEFAULT 0"},
+}
+
+
+def _add_missing_columns() -> None:
+    with engine.begin() as conn:
+        for table, cols in _COLUMN_UPGRADES.items():
+            have = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+            for col, ddl in cols.items():
+                if col not in have:
+                    conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
 
 
 def get_db():

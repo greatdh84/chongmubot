@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import clock
-from ..config import settings
+from ..config import API_PREFIX, settings
 from ..db import get_db
 from ..errors import invalid, not_found
 from ..models import Admin, ChangeLog, DevMail, Participant, Team, TeamManager
@@ -15,7 +15,7 @@ from ..security import create_session
 from ..services.common import audit, is_active_manager
 from .util import set_session_cookie
 
-router = APIRouter(prefix="/api/dev", tags=["dev (demo only)"])
+router = APIRouter(prefix=API_PREFIX + "/dev", tags=["dev (demo only)"])
 
 
 @router.get("/inbox")

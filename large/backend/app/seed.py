@@ -113,7 +113,7 @@ def seed(base: date, rng_seed: int = 20261015) -> dict:
         clock.freeze(kst(base, -20))
         ev = Event(
             admin_id=admin.id, name="2026 가을 전사 워크숍", event_at=event_at, attend_deadline=attend_deadline, payment_deadline=payment_deadline,
-            fee_bus=20000, fee_car=15000, fee_absent=0, account_note="(시연) 가상은행 000-000000-00 워크숍 총무",
+            mode="large", fee_bus=20000, fee_car=15000, fee_absent=0, account_note="(시연) 가상은행 000-000000-00 워크숍 총무",
         )
         db.add(ev)
         db.flush()

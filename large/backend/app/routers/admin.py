@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from .. import clock
 from ..agents import settlement_agent
-from ..config import settings
+from ..config import API_PREFIX, settings
 from ..db import get_db
 from ..deps import admin_event, current_admin
 from ..errors import conflict, invalid, not_found
@@ -21,7 +21,7 @@ from ..services import emails, invites, payments, responses as resp_svc, roster,
 from ..services.common import active_manager, audit, get_participant_in_event, get_team_in_event
 from .util import change_out, event_out, task_out
 
-router = APIRouter(prefix="/api/admin", tags=["admin"])
+router = APIRouter(prefix=API_PREFIX + "/admin", tags=["admin"])
 MAX_UPLOAD = 2 * 1024 * 1024
 
 
@@ -80,6 +80,8 @@ def dashboard(ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
 @router.put("/events/{event_id}")
 def update_event(body: EventUpdate, ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
     data = body.model_dump(exclude_none=True)
+    if data.pop("mode", ev.mode) != ev.mode:
+        raise conflict("MODE_LOCKED", "행사의 모임 규모(small/large)는 만든 뒤 바꿀 수 없습니다")
     if ev.snapshot_taken_at and any(k in data for k in ("fee_bus", "fee_car", "fee_absent", "attend_deadline")):
         raise conflict("LOCKED_AFTER_SNAPSHOT", "마감 기준 응답을 저장한 뒤에는 회비와 참석 마감을 바꿀 수 없습니다")
     for k in ("event_at", "attend_deadline", "payment_deadline"):
@@ -259,7 +261,7 @@ def _get_change(db: Session, ev: Event, change_id: int) -> ChangeLog:
 
 @router.post("/events/{event_id}/changes/{change_id}/approve")
 def approve_change(change_id: int, body: Decision, ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
-    c = resp_svc.decide_change(db, ev, _get_change(db, ev, change_id), admin, approve=True, note=body.note)
+    c = resp_svc.decide_change(db, ev, _get_change(db, ev, change_id), admin, approve=True, note=body.note, refund_amount=body.refund_amount)
     db.commit()
     return change_out(c)
 

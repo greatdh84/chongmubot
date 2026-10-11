@@ -12,13 +12,13 @@ export default function InviteLanding() {
     if (started.current) return;
     started.current = true;
     const token = new URLSearchParams(window.location.hash.slice(1)).get("t");
-    window.history.replaceState(null, "", "/invite"); // 주소창·방문 기록에서 토큰 제거
+    window.history.replaceState(null, "", `${import.meta.env.BASE_URL}invite`); // 주소창·방문 기록에서 토큰 제거
     if (!token) {
       setError("초대 링크가 올바르지 않습니다.");
       return;
     }
     api
-      .post("/api/auth/invite/exchange", { token })
+      .post("/api/large/auth/invite/exchange", { token })
       .then(() => nav("/me", { replace: true }))
       .catch((e) => setError(e.message));
   }, [nav]);

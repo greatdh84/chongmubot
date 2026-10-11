@@ -31,7 +31,10 @@ def _won(v: int | None) -> str:
 def _confirm_text(tool: str, dry: dict[str, Any]) -> str:
     if tool == "request_change":
         lines = [f"'{dry['from_label']}' → '{dry['to_label']}'(으)로 바꿀까요?"]
-        if dry["after_deadline"]:
+        if dry["after_deadline"] and dry.get("needs_admin_rule"):
+            lines.append("- 환불액: 미정 — 이 시점에 맞는 환불 규칙이 없어 총무가 정합니다(0원으로 확정된 것이 아님)")
+            lines.append("- 참석 마감 후 변경이라 총무 승인 후 반영됩니다.")
+        elif dry["after_deadline"]:
             lines.append(f"- 회비 부담: {_won(dry['fee_before'])} → {_won(dry['fee_after'])}")
             if dry["refund_amount"]:
                 lines.append(f"- 환불 예정: {_won(dry['refund_amount'])}")
@@ -85,6 +88,9 @@ def handle_message(db: Session, event: Event, actor: Participant, role: str, tex
 
     def finish(reply: str, outcome: str) -> dict[str, Any]:
         msg = add_message(db, thread, "agent", reply, {"steps": steps, "state": thread.state, "rules": rules})
+        if thread.state == "awaiting_confirmation" and thread.pending:
+            # '네'는 바로 이 확인 질문에만 묶인다. 사이에 다른 메시지(새 확인 요청 알림 등)가 끼면 다시 묻는다.
+            thread.pending = {**thread.pending, "asked_message_id": msg.id}
         db.add(
             AgentRun(
                 event_id=event.id,
@@ -105,6 +111,18 @@ def handle_message(db: Session, event: Event, actor: Participant, role: str, tex
     # 1) 확인 대기 중이면 '네/아니요'는 코드가 판정해 실행·취소한다.
     if thread.state == "awaiting_confirmation" and thread.pending:
         tool, args = thread.pending["tool"], thread.pending["args"]
+        last_before = db.scalar(
+            select(ChatMessage.id).where(ChatMessage.thread_id == thread.id, ChatMessage.id < user_msg.id).order_by(ChatMessage.id.desc()).limit(1)
+        )
+        if is_yes(text) and last_before != thread.pending.get("asked_message_id"):
+            # 확인 질문 뒤에 새 알림·다른 답변이 끼어 있음 → 어떤 질문에 대한 '네'인지 모호하므로 실행하지 않고 다시 확인
+            dry = run_tool(ctx, tool, args, dry=True)
+            steps.append(dry)
+            if not dry["ok"]:
+                _set_state(thread, "idle", None)
+                return finish(f"확인하던 요청을 더 진행할 수 없어요: {dry['error']['message']}", "reconfirm_failed")
+            _set_state(thread, "awaiting_confirmation", {"tool": tool, "args": dry["args"], "preview": dry["result"]})
+            return finish("확인 질문 뒤에 새 메시지가 와서, 어느 요청에 대한 '네'인지 다시 확인할게요.\n" + _confirm_text(tool, dry["result"]), "reconfirm")
         if is_yes(text):
             step = run_tool(ctx, tool, args)
             steps.append(step)

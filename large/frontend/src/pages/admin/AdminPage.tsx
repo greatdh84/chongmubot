@@ -20,18 +20,18 @@ type Tab = (typeof TABS)[number];
 
 export default function AdminPage() {
   const nav = useNavigate();
-  const { data: events, error } = useLoad(() => api.get<EventInfo[]>("/api/admin/events"));
+  const { data: events, error } = useLoad(() => api.get<EventInfo[]>("/api/large/admin/events"));
   const [tab, setTab] = useState<Tab>("대시보드");
   if (error) return <Page narrow><div className="card"><p className="error">{error.message}</p><button onClick={() => nav("/admin/login")}>로그인</button></div></Page>;
   if (!events) return <Page><p className="muted">불러오는 중…</p></Page>;
   if (events.length === 0) return <Page narrow><div className="card">관리하는 행사가 없습니다. 시드 데이터를 만들거나 행사를 등록하세요.</div></Page>;
   const ev = events[0];
-  const base = `/api/admin/events/${ev.id}`;
+  const base = `/api/large/admin/events/${ev.id}`;
   return (
     <Page>
       <div className="topbar">
         <h1>총무 · {ev.name}</h1>
-        <button onClick={() => api.post("/api/auth/admin/logout").then(() => nav("/"))}>로그아웃</button>
+        <button onClick={() => api.post("/api/large/auth/admin/logout").then(() => nav("/"))}>로그아웃</button>
       </div>
       <nav className="tabs" aria-label="총무 메뉴">
         {TABS.map((t) => <button key={t} className={t === tab ? "active" : ""} onClick={() => setTab(t)}>{t}</button>)}
@@ -152,14 +152,19 @@ function ChangesTab({ base }: { base: string }) {
   const [status, setStatus] = useState("pending_approval");
   const { data, reload } = useLoad(() => api.get<Change[]>(`${base}/changes${status ? `?status=${status}` : ""}`), [base, status]);
   const { busy, message, run } = useAction();
-  const decide = (c: Change, ok: boolean) => run(() => api.post(`${base}/changes/${c.id}/${ok ? "approve" : "reject"}`, { note: "" }), ok ? "승인했습니다." : "반려했습니다.").then(reload);
+  const [manual, setManual] = useState<Record<number, { amount: string; note: string }>>({});
+  const decide = (c: Change, ok: boolean) => {
+    const m = manual[c.id];
+    const body = ok && c.rule_missing ? { note: m?.note ?? "", refund_amount: m?.amount === undefined || m.amount === "" ? null : Number(m.amount) } : { note: "" };
+    return run(() => api.post(`${base}/changes/${c.id}/${ok ? "approve" : "reject"}`, body), ok ? "승인했습니다." : "반려했습니다.").then(reload);
+  };
   return (
     <div className="card">
       <div className="row" style={{ justifyContent: "space-between" }}>
         <h2>응답 변경</h2>
         <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="상태"><option value="pending_approval">승인 대기</option><option value="">전체</option><option value="applied">반영</option><option value="rejected">반려</option></select>
       </div>
-      <p className="muted">마감 후 변경은 여기서 승인해야 반영됩니다. 금액은 요청 시각의 환불 규칙으로 코드가 계산한 값입니다.</p>
+      <p className="muted">마감 후 변경은 여기서 승인해야 반영됩니다. 금액은 요청 시각의 환불 규칙으로 코드가 계산한 값입니다. 맞는 규칙이 없는 건(환불액 미정)은 규칙을 추가하거나 환불액과 사유를 직접 정해야 승인됩니다.</p>
       <Msg m={message} />
       <div className="table-wrap"><table>
         <thead><tr><th>#</th><th>참가자</th><th>변경</th><th>요청</th><th>경로</th><th className="num">부담액</th><th className="num">환불/추가</th><th>규칙</th><th>상태</th><th /></tr></thead>
@@ -167,9 +172,19 @@ function ChangesTab({ base }: { base: string }) {
           <tr key={c.id}>
             <td>{c.id}</td><td>{c.participant_name}</td><td>{c.from_label} → {c.to_label}</td><td>{fmtTime(c.requested_at)}</td><td>{c.source}</td>
             <td className="num">{c.after_deadline ? `${won(c.liability_before)} → ${won(c.liability_after)}` : "마감 전"}</td>
-            <td className="num">{c.refund_amount ? `-${won(c.refund_amount)}` : c.extra_charge ? `+${won(c.extra_charge)}` : "-"}</td>
+            <td className="num">{c.rule_missing && !c.admin_refund_decided ? <span className="pill warn">환불액 미정</span> : c.refund_amount ? `-${won(c.refund_amount)}` : c.extra_charge ? `+${won(c.extra_charge)}` : "-"}</td>
             <td className="muted">{c.rule_text}</td><td><StatusPill status={c.status} /></td>
-            <td>{c.status === "pending_approval" && <div className="row"><button className="small primary" disabled={busy} onClick={() => decide(c, true)}>승인</button><button className="small" disabled={busy} onClick={() => decide(c, false)}>반려</button></div>}</td>
+            <td>{c.status === "pending_approval" && (
+              <div style={{ display: "grid", gap: 4 }}>
+                {c.rule_missing && (
+                  <div className="row">
+                    <input type="number" min={0} placeholder="환불액(원)" aria-label="환불액" style={{ width: 100 }} value={manual[c.id]?.amount ?? ""} onChange={(e) => setManual({ ...manual, [c.id]: { note: manual[c.id]?.note ?? "", amount: e.target.value } })} />
+                    <input placeholder="사유(필수)" aria-label="사유" value={manual[c.id]?.note ?? ""} onChange={(e) => setManual({ ...manual, [c.id]: { amount: manual[c.id]?.amount ?? "", note: e.target.value } })} />
+                  </div>
+                )}
+                <div className="row"><button className="small primary" disabled={busy} onClick={() => decide(c, true)}>승인</button><button className="small" disabled={busy} onClick={() => decide(c, false)}>반려</button></div>
+              </div>
+            )}</td>
           </tr>))}
         </tbody>
       </table></div>

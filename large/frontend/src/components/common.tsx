@@ -12,9 +12,12 @@ export function ModeBanner() {
   const demo = meta.app_mode === "demo";
   return (
     <div className={`banner ${demo ? "" : "prod"}`} role="status">
-      <strong>{demo ? "시연 모드" : "운영 모드"}</strong>
+      {/* 공용 시작 화면은 React 밖(총무봇 hub)이라 일반 링크로 이동 */}
+      <a href="/">← 총무봇 시작 화면</a>
+      <strong>대모임(LARGE) · {demo ? "시연 모드" : "운영 모드"}</strong>
+      {import.meta.env.DEV && <span>· Vite 개발 서버(최종 실행 방식 아님 — 공용 서버는 127.0.0.1:8787)</span>}
       <span>· 이메일: {meta.email_mode === "mock" ? "모의(개발용 수신함에만 기록, 실제 발송 안 함)" : "실제 SMTP 발송"}</span>
-      <span>· LLM: {meta.llm_mode === "mock" ? "모의(규칙 기반)" : "Gemini 실제 연동"}</span>
+      <span>· LLM: {meta.llm_mode === "mock" ? "모의(규칙 기반, API 키 없이 동작)" : "Gemini 실제 연동"}</span>
       {meta.demo_tools && (
         <span>
           · <Link to="/">역할 전환</Link> · <Link to="/dev/inbox">개발용 수신함</Link>

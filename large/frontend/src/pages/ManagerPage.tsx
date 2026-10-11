@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { api, fmtTime, won, type Change, type EventInfo, type SettlementCalc, type Task } from "../api";
 import { Chat, ChoicePill, Msg, Page, StatusPill } from "../components/common";
 import { useAction, useLoad } from "../hooks";
@@ -15,20 +16,21 @@ interface Overview {
 }
 
 export default function ManagerPage() {
-  const { data, error, reload } = useLoad(() => api.get<Overview>("/api/team"));
+  const nav = useNavigate();
+  const { data, error, reload } = useLoad(() => api.get<Overview>("/api/large/team"));
   const { busy, message, run } = useAction();
   const [correction, setCorrection] = useState("");
-  if (error) return <Page narrow><div className="card"><p className="error">{error.message}</p><a href="/manager/login">이메일 인증하기</a></div></Page>;
+  if (error) return <Page narrow><div className="card"><p className="error">{error.message}</p><Link to="/manager/login">이메일 인증하기</Link></div></Page>;
   if (!data) return <Page><p className="muted">불러오는 중…</p></Page>;
   const b = data.billing;
   const open = data.tasks.filter((t) => t.status === "open");
-  const answer = (t: Task, option: string) => run(() => api.post<{ review: { summary: string } }>(`/api/team/tasks/${t.id}/answer`, { option }), (r) => `답변 기록 · ${r.review.summary}`).then(reload);
+  const answer = (t: Task, option: string) => run(() => api.post<{ review: { summary: string } }>(`/api/large/team/tasks/${t.id}/answer`, { option }), (r) => `답변 기록 · ${r.review.summary}`).then(reload);
 
   return (
     <Page>
       <div className="topbar">
         <h1>{data.team.code} {data.team.name} · 담당자 {data.manager.name}</h1>
-        <button onClick={() => api.post("/api/auth/manager/logout").then(() => (window.location.href = "/"))}>로그아웃</button>
+        <button onClick={() => api.post("/api/large/auth/manager/logout").then(() => nav("/"))}>로그아웃</button>
       </div>
       <div className="grid" style={{ marginBottom: 14 }}>
         {(["bus", "car", "absent", "undecided", "none"] as const).map((k) => (
@@ -67,7 +69,7 @@ export default function ManagerPage() {
               <>
                 <p>총무 확정 v{data.confirmed_settlement.version} ({fmtTime(data.confirmed_settlement.confirmed_at)}) · 잔액 {won(Math.abs(data.confirmed_settlement.balance))} {data.confirmed_settlement.balance > 0 ? "추가 납부" : data.confirmed_settlement.balance < 0 ? "추가 환불" : ""}</p>
                 {data.confirmed_settlement.manager_ack_at ? <p className="notice ok">{fmtTime(data.confirmed_settlement.manager_ack_at)} 내역 확인함</p> : (
-                  <button className="primary" disabled={busy} onClick={() => run(() => api.post("/api/team/statement/ack"), "내역을 확인했습니다.").then(reload)}>내역 확인</button>
+                  <button className="primary" disabled={busy} onClick={() => run(() => api.post("/api/large/team/statement/ack"), "내역을 확인했습니다.").then(reload)}>내역 확인</button>
                 )}
               </>
             ) : <p className="muted">총무가 아직 정산을 확정하지 않았습니다. 아래는 현재 계산값입니다.</p>}
@@ -80,11 +82,11 @@ export default function ManagerPage() {
             <h3>정정 요청</h3>
             <div className="row">
               <input style={{ flex: 1 }} value={correction} onChange={(e) => setCorrection(e.target.value)} placeholder="예: 10/3 입금 중 2만원은 다른 팀 몫입니다" aria-label="정정 요청" maxLength={500} />
-              <button disabled={busy || !correction.trim()} onClick={() => run(() => api.post("/api/team/corrections", { text: correction }), "총무에게 정정 요청을 보냈습니다.").then(() => setCorrection(""))}>보내기</button>
+              <button disabled={busy || !correction.trim()} onClick={() => run(() => api.post("/api/large/team/corrections", { text: correction }), "총무에게 정정 요청을 보냈습니다.").then(() => setCorrection(""))}>보내기</button>
             </div>
           </div>
         </div>
-        <Chat base="/api/team/chat" title="Agent 와 확인 대화" examples={["확인 요청 보여줘", "우리 팀 정산 현황", "#12 네 맞아요"]} />
+        <Chat base="/api/large/team/chat" title="Agent 와 확인 대화" examples={["확인 요청 보여줘", "우리 팀 정산 현황", "#12 네 맞아요"]} />
       </div>
 
       <div className="card">
