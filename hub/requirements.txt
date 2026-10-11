@@ -1,0 +1,3 @@
+# 공용 서버 = LARGE 백엔드 의존성 + SMALL 의 Socket Mode(선택)
+-r ../large/backend/requirements.txt
+slack_bolt

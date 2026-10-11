@@ -8,6 +8,8 @@
 ```
 demo/   대시보드 데모 (HTML, 서버 없음)
 app/    실제 앱: Slack 봇, 시트 연동, 에이전트
+large/  대모임(채총): FastAPI + React, 이메일·웹 기반 정산 Agent
+hub/    공용 서버: 소모임(app/server.py)과 대모임을 127.0.0.1:8787 하나로
 docs/   기획안, flowchart, 회의 메모
 ```
 
@@ -16,6 +18,25 @@ docs/   기획안, flowchart, 회의 메모
 ## 데모 실행
 
 `demo/index.html` 을 브라우저로 엽니다. 온라인: https://greatdh84.github.io/chongmubot/demo/
+
+## 공용 서버로 실행 (소모임 + 대모임, 한 주소)
+
+```bash
+python3.11 -m venv .venv && .venv/bin/pip install -r hub/requirements.txt   # 처음 한 번
+(cd large/frontend && npm ci && npm run build)                              # 대모임 화면 빌드
+.venv/bin/python -m hub                                                      # http://127.0.0.1:8787
+```
+
+| 주소 | 내용 |
+|---|---|
+| `/` | 시작하기 → 모임 규모 선택 (`demo/index.html`) |
+| `/demo/…`, `/api/slack/…` 등 | 소모임 — `app/server.py` 를 수정 없이 그대로 연결 |
+| `/large/…`, `/api/large/…` | 대모임 — [large/README.md](large/README.md) |
+
+- **정적 데모**(GitHub Pages·파일로 열기): 서버가 없어 소모임은 데모 데이터로만 동작하고, 대모임은 "공용 서버에서만 열려요" 안내만 보입니다.
+- **공용 서버 실행**: 소모임은 기존과 같고(.env 에 Slack 토큰이 있으면 실제 Slack), 대모임 관리 화면이 `/large/` 에서 열립니다.
+- 기존 `app/.venv/bin/python app/server.py` 도 그대로 동작합니다(소모임만).
+- 구조·경계·합의할 점: [docs/integration-plan.md](docs/integration-plan.md)
 
 ## Slack 연동 (로컬)
 
