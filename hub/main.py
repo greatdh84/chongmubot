@@ -27,6 +27,7 @@ if str(LARGE_BACKEND) not in sys.path:
     sys.path.insert(0, str(LARGE_BACKEND))
 
 from app.config import settings as large_settings  # noqa: E402  (LARGE)
+import app.main as large_main  # noqa: E402
 from app.main import DIST as LARGE_DIST, add_large_ui, configure_large, startup as large_startup  # noqa: E402
 
 from . import small_bridge  # noqa: E402  (SMALL — import 만으로는 Slack 연결 안 함)
@@ -43,6 +44,10 @@ def create_app(large_dist: Path = LARGE_DIST, start_small_socket: bool | None = 
             # app/server.py 를 단독 실행할 때와 같은 동작: SLACK_APP_TOKEN 이 있을 때만 Socket Mode 연결
             small_bridge.small.start_socket()
         yield
+        # 서버 종료 시 LARGE 정리(이메일 스케줄러 스레드 등). 이 함수가 없는 LARGE 버전이면 건너뜀
+        shutdown = getattr(large_main, "shutdown", None)
+        if shutdown:
+            shutdown()
 
     demo = large_settings.is_demo
     app = FastAPI(
@@ -62,7 +67,11 @@ def create_app(large_dist: Path = LARGE_DIST, start_small_socket: bool | None = 
         return {
             "hub": "chongmubot",
             "small": {"api": "/api/*", "ui": "/demo/index.html", "slack_token": bool(s.TOKEN), "socket": dict(s.SOCKET), "llm_key": bool(s.LLM_KEY)},
-            "large": {"api": "/api/large/*", "ui": "/large/", "ui_built": (large_dist / "index.html").exists(), "app_mode": large_settings.app_mode, "email_mode": large_settings.email_mode, "llm_mode": large_settings.llm_mode},
+            "large": {
+                "api": "/api/large/*", "ui": "/large/", "ui_built": (large_dist / "index.html").exists(),
+                "app_mode": large_settings.app_mode, "email_mode": large_settings.email_mode, "llm_mode": large_settings.llm_mode,
+                "email_scheduler": getattr(large_main, "scheduler", None) and {"running": large_main.scheduler.running, "paused": large_main.scheduler.paused},
+            },
         }
 
     @app.get("/small", include_in_schema=False)

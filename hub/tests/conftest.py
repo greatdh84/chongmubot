@@ -8,3 +8,4 @@ os.environ["APP_MODE"] = "demo"
 os.environ["EMAIL_MODE"] = "mock"
 os.environ["LLM_MODE"] = "mock"
 os.environ["HUB_SMALL_SOCKET"] = "off"
+os.environ["EMAIL_SCHEDULER"] = "off"  # 테스트 중 LARGE 발송 스케줄러 스레드를 띄우지 않음
