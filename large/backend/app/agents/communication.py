@@ -1,0 +1,195 @@
+"""소통 Agent: 요청 해석 → 본인·팀 권한 확인 → 관련 기록 조회 → 부족한 정보 질문 → 확인 후 변경 기록.
+
+대화 상태(ChatThread.state)
+- idle                  : 대기
+- awaiting_info         : 정보가 부족해 질문을 보낸 상태(pending 에 파악한 의도 저장)
+- awaiting_confirmation : 갱신 도구 실행 직전 사용자 확인을 기다리는 상태(pending 에 도구·인자 저장)
+상태는 DB 에 저장되므로 사용자가 나중에 돌아와도 이어서 답할 수 있다.
+'네/아니요' 확인 판정과 갱신 실행은 LLM 이 아니라 코드가 한다.
+"""
+from __future__ import annotations
+
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from .. import clock
+from ..adapters.llm import NO, YES, AgentInput, LLMError, MockLLM, get_llm
+from ..models import AgentRun, ChatMessage, ChatThread, Event, Participant
+from ..services.common import add_message, get_or_create_thread
+from .tools import TOOLS, ToolContext, run_tool, tools_for
+
+MAX_STEPS = 5
+LABEL = {"bus": "참석+버스", "car": "참석+자차", "absent": "불참", "undecided": "미정", None: "미응답"}
+
+
+def _won(v: int | None) -> str:
+    return "미확정" if v is None else f"{v:,}원"
+
+
+def _confirm_text(tool: str, dry: dict[str, Any]) -> str:
+    if tool == "request_change":
+        lines = [f"'{dry['from_label']}' → '{dry['to_label']}'(으)로 바꿀까요?"]
+        if dry["after_deadline"]:
+            lines.append(f"- 회비 부담: {_won(dry['fee_before'])} → {_won(dry['fee_after'])}")
+            if dry["refund_amount"]:
+                lines.append(f"- 환불 예정: {_won(dry['refund_amount'])}")
+            if dry["extra_charge"]:
+                lines.append(f"- 추가 납부: {_won(dry['extra_charge'])}")
+            lines.append(f"- 적용 규칙: {dry['rule_text']}")
+            lines.append("- 참석 마감 후 변경이라 총무 승인 후 반영됩니다.")
+        else:
+            lines.append(f"- 회비: {_won(dry['fee_before'])} → {_won(dry['fee_after'])} (마감 전 변경)")
+        lines.append("맞으면 '네', 아니면 '아니요'라고 답해 주세요.")
+        return "\n".join(lines)
+    if tool == "answer_task":
+        return f"확인 요청 #{dry['task_id']}: {dry['question']}\n→ '{dry['option_label']}'(으)로 답할까요? ('네' / '아니요')"
+    if tool == "request_correction":
+        return f"다음 내용으로 총무에게 정정 요청을 보낼까요? ('네' / '아니요')\n“{dry['text']}”"
+    return "진행할까요? ('네' / '아니요')"
+
+
+def _done_text(tool: str, result: dict[str, Any]) -> str:
+    if tool == "request_change":
+        if result["status"] == "applied":
+            return f"'{LABEL[result['to_choice']]}'(으)로 변경했어요. (변경 기록 #{result['change_id']})"
+        return f"변경 요청을 접수했어요(#{result['change_id']}). 총무 승인 후 반영되고, 결과는 이 화면에서 볼 수 있어요."
+    if tool == "answer_task":
+        return f"답변을 기록했어요. 정산 Agent 재검토 결과: {result['review']['summary']}"
+    if tool == "request_correction":
+        return f"총무에게 정정 요청을 전달했어요(과제 #{result['task_id']})."
+    return "처리했어요."
+
+
+def is_yes(text: str) -> bool:
+    return bool(YES.search(text)) and not NO.search(text) and len(text) <= 20
+
+
+def is_no(text: str) -> bool:
+    return bool(NO.search(text)) and len(text) <= 20
+
+
+def _set_state(thread: ChatThread, state: str, pending: dict[str, Any] | None) -> None:
+    thread.state, thread.pending, thread.updated_at = state, pending, clock.now()
+
+
+def handle_message(db: Session, event: Event, actor: Participant, role: str, text: str) -> dict[str, Any]:
+    text = (text or "").strip()[:1000]
+    thread = get_or_create_thread(db, actor, role)
+    user_msg = add_message(db, thread, "user", text)
+    ctx = ToolContext(db=db, event=event, actor=actor, role=role, thread=thread, message_id=user_msg.id)
+    steps: list[dict[str, Any]] = []
+    rules: list[str] = []
+    notes: list[str] = []
+
+    def finish(reply: str, outcome: str) -> dict[str, Any]:
+        msg = add_message(db, thread, "agent", reply, {"steps": steps, "state": thread.state, "rules": rules})
+        db.add(
+            AgentRun(
+                event_id=event.id,
+                agent="communication",
+                trigger=f"{role}_message",
+                thread_id=thread.id,
+                evidence_message_id=user_msg.id,
+                steps=steps,
+                rules=rules,
+                result={"outcome": outcome, "reply_message_id": msg.id, "state": thread.state, "notes": notes},
+                llm_mode=llm.mode,
+            )
+        )
+        return {"thread": serialize_thread(db, thread), "reply": serialize_message(msg)}
+
+    llm = get_llm()
+
+    # 1) 확인 대기 중이면 '네/아니요'는 코드가 판정해 실행·취소한다.
+    if thread.state == "awaiting_confirmation" and thread.pending:
+        tool, args = thread.pending["tool"], thread.pending["args"]
+        if is_yes(text):
+            step = run_tool(ctx, tool, args)
+            steps.append(step)
+            _set_state(thread, "idle", None)
+            if step["ok"]:
+                if step["result"].get("rule"):
+                    rules.append(step["result"]["rule"])
+                return finish(_done_text(tool, step["result"]), "executed")
+            return finish(f"처리하지 못했어요: {step['error']['message']}", "execute_failed")
+        if is_no(text):
+            _set_state(thread, "idle", None)
+            return finish("알겠어요. 요청을 취소했고 아무것도 바꾸지 않았어요.", "cancelled")
+        # 다른 말이면 확인 대기를 풀고 새 요청으로 해석한다.
+        _set_state(thread, "idle", None)
+        notes.append("확인 대기 중 다른 요청이 와서 이전 확인을 취소함")
+
+    history = [
+        {"sender": m.sender, "text": m.text}
+        for m in db.scalars(select(ChatMessage).where(ChatMessage.thread_id == thread.id).order_by(ChatMessage.id.desc()).limit(7))
+    ][::-1][:-1]
+
+    # 2) LLM 이 다음 행동을 고르고, 코드가 검증·실행한다.
+    for _ in range(MAX_STEPS):
+        inp = AgentInput(
+            role=role,
+            message=text,
+            state=thread.state,
+            pending=thread.pending,
+            steps=steps,
+            tools=[t.contract() for t in tools_for(role)],
+            history=history,
+            actor_name=actor.name,
+        )
+        try:
+            action = llm.decide(inp)
+        except LLMError as e:
+            notes.append(f"LLM 호출 실패 → 규칙 기반 대체: {e}")
+            llm = MockLLM()
+            action = llm.decide(inp)
+        kind = action.get("type") if isinstance(action, dict) else None
+
+        if kind == "tool":
+            name, args = action.get("name"), action.get("args") or {}
+            spec = TOOLS.get(name)
+            if spec is not None and spec.mutating:
+                dry = run_tool(ctx, name, args, dry=True)
+                steps.append(dry)
+                if not dry["ok"]:
+                    continue  # 오류를 보고 LLM 이 답변을 고른다
+                if dry["result"].get("rule_text"):
+                    rules.append(dry["result"]["rule_text"])
+                _set_state(thread, "awaiting_confirmation", {"tool": name, "args": dry["args"], "preview": dry["result"]})
+                return finish(_confirm_text(name, dry["result"]), "awaiting_confirmation")
+            steps.append(run_tool(ctx, name, args))
+            continue
+        if kind == "ask":
+            pending = action.get("pending") if isinstance(action.get("pending"), dict) else {}
+            _set_state(thread, "awaiting_info", {k: v for k, v in pending.items() if k in ("intent", "choice", "option")})
+            return finish(str(action.get("text", "조금 더 알려 주세요."))[:1000], "awaiting_info")
+        if kind == "reply":
+            _set_state(thread, "idle", None)
+            return finish(str(action.get("text", ""))[:2000] or "확인했어요.", "replied")
+        notes.append(f"알 수 없는 행동 형식: {str(action)[:200]}")
+        break
+
+    _set_state(thread, "idle", None)
+    return finish("요청을 이해하지 못했어요. 총무에게 직접 문의해 주세요.", "gave_up")
+
+
+def serialize_message(m: ChatMessage) -> dict[str, Any]:
+    meta = m.meta or {}
+    return {
+        "id": m.id,
+        "sender": m.sender,
+        "text": m.text,
+        "created_at": clock.fmt(m.created_at),
+        "tools": [{"tool": s["tool"], "ok": s.get("ok"), "dry_run": s.get("dry_run", False)} for s in meta.get("steps", [])],
+        "rules": meta.get("rules", []),
+    }
+
+
+def serialize_thread(db: Session, thread: ChatThread) -> dict[str, Any]:
+    msgs = db.scalars(select(ChatMessage).where(ChatMessage.thread_id == thread.id).order_by(ChatMessage.id))
+    return {"id": thread.id, "role": thread.role, "state": thread.state, "pending": thread.pending, "messages": [serialize_message(m) for m in msgs]}
+
+
+def thread_for(db: Session, actor: Participant, role: str) -> dict[str, Any]:
+    return serialize_thread(db, get_or_create_thread(db, actor, role))
