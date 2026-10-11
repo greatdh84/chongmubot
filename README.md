@@ -21,11 +21,11 @@ docs/   기획안, flowchart, 회의 메모
 
 > ⚠️ 수업 워크스페이스(약 380명)에 연결됩니다. 시작하기를 누르면 채널이 실제로 만들어지고 초대 알림이 가므로, 테스트할 땐 본인·채총 등 소수만 고르세요.
 
-서버가 꺼져 있으면 데모 멤버로 동작하고, 켜져 있으면 설정 화면의 "워크스페이스 멤버"가 실제 Slack 멤버로 바뀌며 시작 시 채널을 실제로 만들고 초대합니다.
+서버가 꺼져 있으면 데모 멤버로 동작하고, 켜져 있으면 설정 화면의 "워크스페이스 멤버"가 실제 Slack 멤버로 바뀌며 시작 시 채널을 실제로 만들고 초대한 뒤 1단계 공지를 보내고, 대시보드의 "지금 DM 보내기"는 실제 DM으로 나갑니다. 문구는 Claude(`claude-haiku-5-5`)가 성격에 맞게 다시 씁니다.
 
 1. https://api.slack.com/apps → Create New App → From a manifest → 워크스페이스 선택 → [app/slack-manifest.json](app/slack-manifest.json) 붙여넣기
-2. OAuth & Permissions → Bot Token Scopes: `users:read`, `channels:manage`, `channels:read` → Install to Workspace
-3. `.env` 에 `SLACK_BOT_TOKEN=xoxb-…`, `SLACK_OWNER_USER_ID=U…` (Slack 내 프로필 → ⋮ → 멤버 ID 복사)
+2. OAuth & Permissions → Bot Token Scopes: `users:read`, `channels:manage`, `channels:read`, `chat:write`, `chat:write.customize`, `im:write` → Install to Workspace
+3. `.env` 에 `SLACK_BOT_TOKEN=xoxb-…`, `SLACK_OWNER_USER_ID=U…` (Slack 내 프로필 → ⋮ → 멤버 ID 복사), `LLM_API_KEY=sk-ant-…` (없으면 예시 문구 그대로 발송)
 4. `python3 app/server.py` (설치할 패키지 없음, http://127.0.0.1:8787)
 5. `demo/index.html` 을 열면 자동 연결. 다른 주소는 "Slack 연결" 버튼이나 `?api=` 로 지정
 

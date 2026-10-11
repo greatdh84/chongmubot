@@ -9,6 +9,8 @@ API
   GET  /api/slack/members                 워크스페이스 이름 + 사람 멤버 목록
   POST /api/slack/channel  {name, users}  채널 생성 후 users 초대
   POST /api/slack/invite   {channel, users} 기존 채널에 추가 초대
+  POST /api/slack/send     {channel|user, text, persona, situation, name}
+                           Claude 가 성격에 맞게 문구를 다시 쓰고(키 없거나 실패 시 text 그대로) 채널/DM 발송
 """
 import json
 import os
@@ -36,6 +38,8 @@ def load_env():
 load_env()
 TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
 OWNER = os.environ.get("SLACK_OWNER_USER_ID", "")  # 총무 본인의 Slack user ID (U로 시작)
+LLM_KEY = os.environ.get("LLM_API_KEY", "")
+LLM_MODEL = os.environ.get("LLM_MODEL", "claude-haiku-5-5")
 PORT = int(os.environ.get("PORT", "8787"))
 # 데모 페이지가 열리는 곳만 허용 (GitHub Pages, 로컬 서버, file:// 은 Origin 이 "null")
 ALLOWED_ORIGINS = {"https://greatdh84.github.io", "null"}
@@ -100,6 +104,48 @@ def create_channel(name, users):
     return {"channel": ch["id"], "name": ch["name"], "invited": len(users)}
 
 
+# 성격별 말투 지시 + Slack 에 보이는 보낸 사람 이름·아이콘
+PERSONAS = {
+    "active": ("활발", ":laughing:", "밝고 에너지 넘치는 말투. 느낌표와 이모지를 자주 쓴다."),
+    "shy": ("수줍", ":pleading_face:", "소심하고 미안해하는 말투. 말끝을 흐리고(…) 조심스럽게 부탁한다."),
+    "grumpy": ("까칠", ":unamused:", "짧고 건조한 말투. 용건만 말하고 단호하다. 욕설·모욕은 하지 않는다."),
+}
+
+
+def rewrite(text, persona, situation, name):
+    """Claude 로 문구를 상황에 맞게 다시 쓴다. 실패하면 None (호출 측에서 원문 사용)"""
+    if not LLM_KEY:
+        return None
+    label, _, style = PERSONAS.get(persona, PERSONAS["active"])
+    system = (f"너는 모임 회비·참석을 관리하는 Slack 총무봇이다. 성격: {label} — {style}\n"
+              "예시 문구의 사실(이름, 모임명, 금액, 마감)과 단계별 강도를 그대로 지키면서 같은 성격으로 새로 써라. "
+              "한두 문장, Slack 메시지 본문만 출력한다.")
+    body = json.dumps({
+        "model": LLM_MODEL, "max_tokens": 1024, "system": system,
+        "messages": [{"role": "user", "content": f"상황: {situation}\n대상: {name or '전체'}\n예시 문구: {text}"}],
+    }).encode()
+    req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, headers={
+        "x-api-key": LLM_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=30, context=SSL_CTX) as r:
+            out = json.load(r)
+        # 응답 앞에 thinking 블록이 올 수 있어 text 블록만 모음
+        return "".join(b.get("text", "") for b in out.get("content", []) if b.get("type") == "text").strip() or None
+    except Exception as e:
+        print("LLM 실패, 원문 사용:", e)
+        return None
+
+
+def send(data):
+    persona = data.get("persona", "active")
+    label, icon, _ = PERSONAS.get(persona, PERSONAS["active"])
+    text = data.get("text", "")
+    new = rewrite(text, persona, data.get("situation", ""), data.get("name", ""))
+    channel = data.get("channel") or slack("conversations.open", users=data.get("user", ""))["channel"]["id"]
+    slack("chat.postMessage", channel=channel, text=new or text, username=f"총무봇 · {label}", icon_emoji=icon)
+    return {"text": new or text, "llm": bool(new)}
+
+
 class Handler(BaseHTTPRequestHandler):
     def cors(self):
         origin = self.headers.get("Origin", "")
@@ -135,6 +181,7 @@ class Handler(BaseHTTPRequestHandler):
         routes = {
             "/api/slack/channel": lambda: create_channel(data.get("name", ""), data.get("users", [])),
             "/api/slack/invite": lambda: invite(data.get("channel", ""), data.get("users", [])),
+            "/api/slack/send": lambda: send(data),
         }
         self.handle_api(routes.get(self.path, lambda: None))
 
