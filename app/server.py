@@ -14,6 +14,8 @@ API
   POST /api/slack/channel  {name, users}  채널 생성 후 users 초대
   POST /api/slack/invite   {channel, users} 기존 채널에 추가 초대
   POST /api/slack/send     {channel|user, text, persona, situation, name, survey_channel?}
+                           Claude 가 성격대로 처음부터 짧은 메시지 1~3개로 써서 몇 초 간격으로 나눠 보냄
+  POST /api/pay/parse      {text?, images?[dataURL]}  은행 입금 문자·캡처에서 입금자·금액·시각을 읽음
                            Claude 가 성격에 맞게 문구를 다시 쓰고(키 없거나 실패 시 text 그대로) 채널/DM 발송
   POST /api/places/recommend {area, food, prefs, drink}
                            카카오 로컬 검색 결과 중 Claude 가 조건에 맞는 후보를 골라 이유·예상 금액을 붙임
@@ -29,6 +31,7 @@ API
 """
 import json
 import mimetypes
+import random
 import threading
 import time
 import os
@@ -135,6 +138,39 @@ PERSONAS = {
     "shy": ("수줍", ":pleading_face:", "소심하고 미안해하는 말투. 말끝을 흐리고(…) 조심스럽게 부탁한다."),
     "grumpy": ("까칠", ":unamused:", "짧고 건조한 말투. 용건만 말하고 단호하다. 욕설·모욕은 하지 않는다."),
 }
+# 성격별 말버릇과 예시 대화 (처음부터 쓸 때 말투가 일정하게)
+TRAITS = {
+    "active": ("'~요!', '~용', 'ㅎㅎ', 'ㅋㅋ'를 섞고 이모지를 메시지마다 1~3개. 느낌표 많이. 반말은 안 씀.",
+               ['["도형님~ 좋은 아침이에요! ☀️", "회식 장소 투표 아직이시죠? ㅎㅎ", "이모지 하나만 콕! 오늘 6시 마감이에용 🙌"]']),
+    "shy": ("'저기…', '혹시…', '죄송해요'로 시작하는 일이 많고 말끝을 '…'로 흐림. 이모지는 가끔 🥹🙏만.",
+            ['["저기… 도형님…", "혹시 참석 조사… 시간 되실 때 눌러주실 수 있을까요…?", "마감이 오늘 4시라서요… 죄송해요 🙏"]']),
+    "grumpy": ("마침표로 끝나는 짧은 평서문. 존댓말이지만 건조함. 인사·이모지는 거의 없고 써도 😑 정도. 모욕·욕설 금지.",
+               ['["도형님.", "참석 조사 아직입니다.", "오늘 16시 마감. 버튼 하나면 됩니다."]']),
+}
+
+
+def compose(text, persona, situation, name):
+    """전할 내용(사실)을 바탕으로 Claude 가 성격대로 짧은 메시지 1~3개를 처음부터 씀. 실패하면 None"""
+    if not LLM_KEY:
+        return None
+    label, _, style = PERSONAS.get(persona, PERSONAS["active"])
+    traits, examples = TRAITS.get(persona, TRAITS["active"])
+    now = time.localtime()
+    part = "아침" if 5 <= now.tm_hour < 11 else "점심" if now.tm_hour < 14 else "오후" if now.tm_hour < 18 else "저녁" if now.tm_hour < 22 else "밤"
+    system = (f"너는 Slack 모임 총무봇이다. 성격: {label} — {style}\n말버릇: {traits}\n예시(형식 참고, 내용은 따라 하지 말 것): {examples[0]}\n"
+              "규칙:\n- 사실(이름, 모임명, 날짜, 시각, 금액, 계좌, 인원수, 마감)은 '전할 내용'에 있는 그대로만 쓰고 새로 지어내지 않는다.\n"
+              "- [응답하기] 같은 버튼 안내가 있으면 살린다.\n- 상황에 적힌 강도(친절/단호/엄격/버럭/급사과)를 지킨다.\n"
+              "- 실제 사람이 메신저로 보내듯 짧은 메시지 1~3개로 나눈다. 한 메시지는 40자 안팎.\n"
+              f"- 지금은 {part}({now.tm_hour}시)이다. 어울리면 짧은 인사를 붙이되 매번 같은 표현은 피한다.\n"
+              "- 출력은 JSON 문자열 배열만. 예: [\"…\", \"…\"]")
+    try:
+        raw = claude(system, f"상황: {situation}\n받는 사람: {name or '단체방 전체'}\n전할 내용: {text}")
+        msgs = json.loads(raw[raw.find("["): raw.rfind("]") + 1])
+        msgs = [m.strip() for m in msgs if isinstance(m, str) and m.strip()][:3]
+        return msgs or None
+    except Exception as e:
+        print("LLM 실패, 원문 사용:", e)
+        return None
 
 
 def rewrite(text, persona, situation, name):
@@ -153,6 +189,7 @@ def rewrite(text, persona, situation, name):
 
 
 def claude(system, user, max_tokens=1024):
+    """user: 문자열 또는 Anthropic content 블록 목록(이미지 포함)"""
     body = json.dumps({"model": LLM_MODEL, "max_tokens": max_tokens, "system": system,
                        "messages": [{"role": "user", "content": user}]}).encode()
     req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, headers={
@@ -168,18 +205,48 @@ def send(data):
     label, icon, _ = PERSONAS.get(persona, PERSONAS["active"])
     text = data.get("text", "")
     # raw: 확정 공지처럼 문구를 바꾸면 안 되는 메시지
-    new = None if data.get("raw") else rewrite(text, persona, data.get("situation", ""), data.get("name", ""))
-    text = (new or text) + (("\n" + data["extra"]) if data.get("extra") else "")
+    msgs = None if data.get("raw") else compose(text, persona, data.get("situation", ""), data.get("name", ""))
+    llm = bool(msgs)
+    msgs = msgs or [text]
+    if data.get("extra"):
+        msgs[-1] += "\n" + data["extra"]
     channel = data.get("channel") or slack("conversations.open", users=data.get("user", ""))["channel"]["id"]
-    extra = {}
-    if data.get("survey_channel"):  # 참석 조사 독촉: 메시지에 [응답하기] 버튼을 달아 바로 입력창을 열 수 있게
-        extra["blocks"] = json.dumps([
-            {"type": "section", "text": {"type": "mrkdwn", "text": text}},
-            {"type": "actions", "elements": [{"type": "button", "action_id": "survey_open", "style": "primary",
-                                              "text": {"type": "plain_text", "text": "📝 응답하기"}, "value": data["survey_channel"]}]},
-        ], ensure_ascii=False)
-    slack("chat.postMessage", channel=channel, text=text, username=f"총무봇 · {label}", icon_emoji=icon, **extra)
-    return {"text": text, "llm": bool(new)}
+    for i, m in enumerate(msgs):
+        if i:
+            time.sleep(random.uniform(1.2, 2.6))  # 사람이 이어서 치는 것처럼 간격
+        extra = {}
+        if data.get("survey_channel") and i == len(msgs) - 1:  # 마지막 메시지에 [응답하기] 버튼
+            extra["blocks"] = json.dumps([
+                {"type": "section", "text": {"type": "mrkdwn", "text": m}},
+                {"type": "actions", "elements": [{"type": "button", "action_id": "survey_open", "style": "primary",
+                                                  "text": {"type": "plain_text", "text": "📝 응답하기"}, "value": data["survey_channel"]}]},
+            ], ensure_ascii=False)
+        slack("chat.postMessage", channel=channel, text=m, username=f"총무봇 · {label}", icon_emoji=icon, **extra)
+    return {"text": " / ".join(msgs), "parts": len(msgs), "llm": llm}
+
+
+def pay_parse(data):
+    """은행 입금 문자(텍스트)나 캡처(이미지)에서 입금 건을 읽음 → [{name, amount, at}]"""
+    if not LLM_KEY:
+        raise SlackError("no_llm_key")
+    content = []
+    for url in (data.get("images") or [])[:4]:
+        head, _, b64 = url.partition(",")
+        mt = head[5:head.find(";")] if head.startswith("data:") else "image/jpeg"
+        content.append({"type": "image", "source": {"type": "base64", "media_type": mt, "data": b64}})
+    if data.get("text"):
+        content.append({"type": "text", "text": "은행 문자:\n" + data["text"][:6000]})
+    if not content:
+        raise SlackError("bad_request")
+    content.append({"type": "text", "text": "위 은행 문자·화면에서 '입금' 건만 찾아라. 출금·결제는 빼라. 화면에 보이는 것만 쓰고 지어내지 마라. "
+                                            '출력은 JSON 배열만: [{"name": "입금자명", "amount": 정수(원), "at": "MM/DD HH:MM 또는 빈 문자열"}]'})
+    raw = claude("너는 은행 입금 내역을 정확하게 옮겨 적는 도우미다.", content)
+    try:
+        rows = json.loads(raw[raw.find("["): raw.rfind("]") + 1])
+    except Exception:
+        rows = []
+    return {"rows": [{"name": str(r.get("name", "")).strip(), "amount": int(r.get("amount") or 0), "at": str(r.get("at") or "")}
+                     for r in rows if isinstance(r, dict) and r.get("amount")]}
 
 
 # ---------- 회식 장소 추천 (카카오 로컬 + Claude) ----------
@@ -471,6 +538,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/slack/thread": lambda: thread_reply(data),
             "/api/survey/start": lambda: survey_start(data),
             "/api/slack/cancel": lambda: cancel_meeting(data),
+            "/api/pay/parse": lambda: pay_parse(data),
             "/api/places/recommend": lambda: recommend(data),
         }
         self.handle_api(routes.get(self.path, lambda: None))
