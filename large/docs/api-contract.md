@@ -154,6 +154,15 @@
 - 총무 승인 시 ① 규칙을 추가하고 승인 → 규칙으로 계산, 또는 ② `refund_amount`(0~환불 대상액)와 사유 `note` 를 직접 입력 → `admin_refund_decided=1`. 둘 다 없으면 `409 REFUND_RULE_MISSING`.
 - 승인 전에는 `pending_approval`·열린 과제로 정산 확정이 막히고, 혹시 결정 없이 반영된 이전 데이터가 있으면 정산 blocker("임시 0원으로 남은 변경")로 막힙니다.
 
+## 12. 이메일 발송 스케줄러
+- GET `/api/large/admin/events/{id}/emails/scheduler` → `{configured, running, paused, enabled, interval_seconds, runs, last_run_at, last_result, last_error, email_mode}`
+- POST 같은 경로 `{enabled: bool}` → 이 프로세스의 일시정지·재개. 설정으로 꺼진 채 시작했으면 `409 SCHEDULER_NOT_STARTED`
+- 이메일 작업 상태에 `sending`(선점됨)이 추가. `claimed_at`, `claimed_by`(호스트:PID:manual|scheduler) 기록. 10분 넘게 `sending` 이면 `failed`+확인 메모(자동 재발송 없음)
+- `/api/large/meta.scheduler = {enabled, interval_seconds}`
+
+## 13. Agent 실행 기록의 판단 주체
+`agent_runs.result.decisions[] = {by, action, after_steps}` — `by`: `gemini:<모델>`(실제 LLM), `mock`(규칙 기반 설정), `mock_fallback`(LLM 실패·형식 오류 후 대체), `code`('네/아니요' 판정). `steps[]` 는 코드가 실행한 도구와 결과. `result.llm.fallback` 에 대체 사유. 채팅 메시지 `llm` 필드에 같은 요약. 정산 처리 실행(`agent='settlement'`)은 `llm_mode='rule'` — LLM 을 쓰지 않음.
+
 ## 11. 공용 서버(hub)와의 경계
 - LARGE 는 `app.main.configure_large(app)`(API·오류 처리·CSRF 미들웨어)와 `add_large_ui(app)`(`/large/` 정적 화면, 내부 경로 새로고침 시 index.html)를 내보냅니다. hub 가 이 둘을 붙입니다.
 - `/api/large/*` 의 없는 경로는 LARGE 가 404 로 끝냅니다(SMALL 로 넘어가지 않음).
