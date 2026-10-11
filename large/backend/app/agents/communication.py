@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import clock
-from ..adapters.llm import NO, YES, AgentInput, LLMError, MockLLM, get_llm
+from ..adapters.llm import NO, YES, AgentInput, LLMError, MockLLM, get_llm, validate_action
 from ..models import AgentRun, ChatMessage, ChatThread, Event, Participant
 from ..services.common import add_message, get_or_create_thread
 from .tools import TOOLS, ToolContext, run_tool, tools_for
@@ -82,12 +82,25 @@ def handle_message(db: Session, event: Event, actor: Participant, role: str, tex
     thread = get_or_create_thread(db, actor, role)
     user_msg = add_message(db, thread, "user", text)
     ctx = ToolContext(db=db, event=event, actor=actor, role=role, thread=thread, message_id=user_msg.id)
-    steps: list[dict[str, Any]] = []
+    steps: list[dict[str, Any]] = []  # 코드가 실행한 도구와 결과
+    decisions: list[dict[str, Any]] = []  # 누가(LLM/규칙/코드) 어떤 행동을 골랐는지
     rules: list[str] = []
     notes: list[str] = []
+    fallback: dict[str, str] = {}  # 실제 LLM 이 실패해 규칙 기반으로 대체된 경우 사유
+
+    def llm_info() -> dict[str, Any]:
+        configured = get_llm().mode
+        used = sorted({d["by"].split(":")[0] for d in decisions})
+        return {
+            "configured": configured,
+            "used": used,  # gemini / mock / mock_fallback / code
+            "model": next((d["by"].split(":", 1)[1] for d in decisions if d["by"].startswith("gemini:")), ""),
+            "fallback": fallback.get("reason", ""),
+        }
 
     def finish(reply: str, outcome: str) -> dict[str, Any]:
-        msg = add_message(db, thread, "agent", reply, {"steps": steps, "state": thread.state, "rules": rules})
+        info = llm_info()
+        msg = add_message(db, thread, "agent", reply, {"steps": steps, "state": thread.state, "rules": rules, "llm": info, "decisions": decisions})
         if thread.state == "awaiting_confirmation" and thread.pending:
             # '네'는 바로 이 확인 질문에만 묶인다. 사이에 다른 메시지(새 확인 요청 알림 등)가 끼면 다시 묻는다.
             thread.pending = {**thread.pending, "asked_message_id": msg.id}
@@ -100,8 +113,8 @@ def handle_message(db: Session, event: Event, actor: Participant, role: str, tex
                 evidence_message_id=user_msg.id,
                 steps=steps,
                 rules=rules,
-                result={"outcome": outcome, "reply_message_id": msg.id, "state": thread.state, "notes": notes},
-                llm_mode=llm.mode,
+                result={"outcome": outcome, "reply_message_id": msg.id, "state": thread.state, "notes": notes, "decisions": decisions, "llm": info},
+                llm_mode=("+".join(info["used"]) or info["configured"])[:20],
             )
         )
         return {"thread": serialize_thread(db, thread), "reply": serialize_message(msg)}
@@ -111,6 +124,7 @@ def handle_message(db: Session, event: Event, actor: Participant, role: str, tex
     # 1) 확인 대기 중이면 '네/아니요'는 코드가 판정해 실행·취소한다.
     if thread.state == "awaiting_confirmation" and thread.pending:
         tool, args = thread.pending["tool"], thread.pending["args"]
+        decisions.append({"by": "code", "action": {"type": "confirmation_check", "tool": tool, "yes": is_yes(text), "no": is_no(text)}, "after_steps": 0})
         last_before = db.scalar(
             select(ChatMessage.id).where(ChatMessage.thread_id == thread.id, ChatMessage.id < user_msg.id).order_by(ChatMessage.id.desc()).limit(1)
         )
@@ -156,13 +170,19 @@ def handle_message(db: Session, event: Event, actor: Participant, role: str, tex
             history=history,
             actor_name=actor.name,
         )
+        tool_names = {t["name"] for t in inp.tools}
         try:
-            action = llm.decide(inp)
+            action = validate_action(llm.decide(inp), tool_names)
+            by = f"gemini:{getattr(llm, 'last_model', '')}" if llm.mode == "gemini" else ("mock_fallback" if fallback else "mock")
         except LLMError as e:
-            notes.append(f"LLM 호출 실패 → 규칙 기반 대체: {e}")
+            # 실제 LLM 실패·형식 오류 → 이 턴의 나머지는 규칙 기반으로. 잘못된 출력은 실행하지 않는다.
+            fallback["reason"] = str(e)[:200]
+            notes.append(f"LLM 실패 → 규칙 기반 대체: {e}")
             llm = MockLLM()
-            action = llm.decide(inp)
-        kind = action.get("type") if isinstance(action, dict) else None
+            action = validate_action(llm.decide(inp), tool_names)
+            by = "mock_fallback"
+        decisions.append({"by": by, "action": action, "after_steps": len(steps)})  # 이 판단 전에 실행된 도구 수(순서 복원용)
+        kind = action["type"]
 
         if kind == "tool":
             name, args = action.get("name"), action.get("args") or {}
@@ -185,7 +205,6 @@ def handle_message(db: Session, event: Event, actor: Participant, role: str, tex
         if kind == "reply":
             _set_state(thread, "idle", None)
             return finish(str(action.get("text", ""))[:2000] or "확인했어요.", "replied")
-        notes.append(f"알 수 없는 행동 형식: {str(action)[:200]}")
         break
 
     _set_state(thread, "idle", None)
@@ -201,6 +220,7 @@ def serialize_message(m: ChatMessage) -> dict[str, Any]:
         "created_at": clock.fmt(m.created_at),
         "tools": [{"tool": s["tool"], "ok": s.get("ok"), "dry_run": s.get("dry_run", False)} for s in meta.get("steps", [])],
         "rules": meta.get("rules", []),
+        "llm": meta.get("llm"),
     }
 
 

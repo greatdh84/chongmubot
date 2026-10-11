@@ -46,7 +46,7 @@ class LLM(Protocol):
 
 # ------------------------------------------------------------------ 규칙 기반 모의 LLM
 
-CHANGE_WORDS = re.compile(r"변경|바꿔|바꾸|바뀌|수정|취소|참석할|갈게|갈께|갑니다|못 ?가|안 ?가")
+CHANGE_WORDS = re.compile(r"변경|바꿔|바꾸|바뀌|수정|취소|참석할|갈게|갈께|갑니다|못 ?가|안 ?가|못 ?타|못 ?탈|안 ?타|안 ?탈")
 STATUS_WORDS = re.compile(r"현재|내 ?응답|상태|조회|확인|뭐로|어떻게 ?되")
 FEE_WORDS = re.compile(r"회비|얼마|금액|환불|돈|납부")
 YES = re.compile(r"^\s*(네|예|응|넵|넹|맞아|맞습니다|맞아요|좋아|좋아요|그래|그렇게 해|진행해|ㅇㅇ|yes|ok)", re.I)
@@ -67,7 +67,7 @@ def parse_choice(text: str) -> str | None:
         return "absent"
     if re.search(r"미정|모르겠|아직|고민", t):
         return "undecided"
-    if "버스" in t and not re.search(r"버스(를|는)?(취소|안타|안탈|말고)", t):
+    if "버스" in t and not re.search(r"버스(를|는|도|가)?(취소|안타|안탈|못타|못탈|말고|안|못)", t):
         return "bus"
     return None
 
@@ -198,20 +198,59 @@ class MockLLM:
         return {"type": "reply", "text": "팀 응답·청구 현황 확인, 확인 요청 답변, 명세 정정 요청을 도와드려요. 예) '우리 팀 정산 현황', '확인 요청 보여줘'"}
 
 
+# ------------------------------------------------------------------ 행동 형식 검증
+
+ACTION_TYPES = ("tool", "ask", "reply")
+
+
+def validate_action(action: Any, tool_names: set[str]) -> dict[str, Any]:
+    """LLM 출력이 행동 계약을 지키는지 검사. 어기면 LLMError → 실행하지 않고 규칙 기반으로 대체한다.
+    도구 '인자'의 세부 검사(필수값·enum·권한)는 도구 실행 단계(run_tool)가 맡는다."""
+    if not isinstance(action, dict) or action.get("type") not in ACTION_TYPES:
+        raise LLMError(f"행동 형식 오류: {str(action)[:120]}")
+    if action["type"] == "tool":
+        if action.get("name") not in tool_names:
+            raise LLMError(f"없는 도구 선택: {str(action.get('name'))[:60]}")
+        if not isinstance(action.get("args", {}), dict):
+            raise LLMError("도구 인자가 객체가 아님")
+        return {"type": "tool", "name": action["name"], "args": action.get("args") or {}}
+    text = action.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise LLMError(f"{action['type']} 에 text 가 없음")
+    out = {"type": action["type"], "text": text.strip()[:1000]}
+    if action["type"] == "ask":
+        out["pending"] = action.get("pending") if isinstance(action.get("pending"), dict) else {}
+    return out
+
+
 # ------------------------------------------------------------------ Gemini (실제 연동)
 
-SYSTEM_PROMPT = """너는 회사 워크숍 총무를 돕는 '소통 Agent'다. 사용자는 {role}이다.
-규칙:
-- 금액은 직접 계산하지 말고 도구 결과의 숫자만 인용한다.
-- 사용자 본인(또는 담당자의 자기 팀) 데이터만 다룬다. 다른 사람의 변경 요청은 거절한다.
-- 응답 변경·과제 답변·정정 요청 같은 갱신 도구는 호출만 하면 된다. 실제 반영 전 확인 질문은 시스템이 한다.
-- 정보가 부족하면 type=ask 로 짧게 묻고 pending 에 지금까지 파악한 의도를 넣는다.
-- 반드시 JSON 한 개만 출력한다: {{"type":"tool","name":..,"args":{{..}}}} | {{"type":"ask","text":..,"pending":{{..}}}} | {{"type":"reply","text":..}}
+SYSTEM_PROMPT = """너는 회사 워크숍(대모임) 총무를 돕는 '소통 Agent'다. 지금 대화 상대는 {role} {name}님이다.
+너의 일: 요청 해석 → 필요한 기록 조회 도구 선택 → 정보가 부족하면 짧게 질문 → 갱신 도구 호출 → 결과 안내.
+
+규칙
+- 금액·환불액은 절대 직접 계산하거나 지어내지 않는다. 도구 결과(tool_results_this_turn)의 숫자만 인용한다.
+- 본인(담당자라면 자기 팀) 데이터만 다룬다. 다른 사람의 응답 변경 요청은 target 에 그 사람 이름을 넣어 preview_change 로 확인하면 시스템이 거절한다.
+- 갱신 도구(mutating=true)는 호출만 한다. 반영 전 사용자 확인 질문과 '네/아니요' 판정은 시스템 코드가 한다. 너는 확인 문구를 만들지 않는다.
+- 같은 조회 도구를 같은 인자로 두 번 부르지 않는다. 결과가 이미 있으면 그것으로 답한다.
+- 선택지(choice)는 bus(참석+버스), car(참석+자차), absent(불참), undecided(미정) 중 하나다.
+  "버스 안 탈래요"처럼 자차인지 불참인지 모호하면 추측하지 말고 type=ask 로 물어본다.
+- 질문할 때 pending 에 지금까지 파악한 의도를 넣는다. 예: {{"intent":"change"}}.
+- conversation_state 가 awaiting_info 이면 pending 의 의도에 이어서 user_message 를 해석한다(대화 재개).
+- 담당자의 확인 요청 답변은 list_open_tasks 로 과제 번호를 확인한 뒤 answer_task(task_id, option) 로 한다. 어떤 과제인지 모호하면 묻는다.
+
+출력: JSON 객체 하나만.
+  {{"type":"tool","name":"<도구 이름>","args":{{...}}}}
+  {{"type":"ask","text":"<질문>","pending":{{"intent":"change"}}}}
+  {{"type":"reply","text":"<답변>"}}
 """
 
 
 class GeminiLLM:
     mode = "gemini"
+
+    def __init__(self) -> None:
+        self.last_model = ""
 
     def decide(self, inp: AgentInput) -> dict[str, Any]:
         prompt = {
@@ -222,8 +261,9 @@ class GeminiLLM:
             "tool_results_this_turn": inp.steps,
             "user_message": inp.message,
         }
+        role = "참가자" if inp.role == "participant" else "팀 담당자"
         body = {
-            "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT.format(role="참가자" if inp.role == "participant" else "팀 담당자")}]},
+            "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT.format(role=role, name=inp.actor_name)}]},
             "contents": [{"role": "user", "parts": [{"text": json.dumps(prompt, ensure_ascii=False)}]}],
             "generationConfig": {"responseMimeType": "application/json", "temperature": 0.1},
         }
@@ -234,21 +274,23 @@ class GeminiLLM:
                     f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                     headers={"x-goog-api-key": settings.gemini_api_key},  # 키를 URL 에 넣지 않음
                     json=body,
-                    timeout=20,
+                    timeout=30,
                 )
             except httpx.HTTPError as e:
-                last_err = type(e).__name__
+                last_err = f"{model}: {type(e).__name__}"
                 continue
-            if r.status_code in (404, 429, 503):  # 계정 미지원·한도 소진·과부하 → 다음 모델
+            if r.status_code in (404, 429, 500, 503):  # 계정 미지원·한도 소진·서버 오류 → 다음 모델
                 last_err = f"{model}: HTTP {r.status_code}"
                 continue
             if r.status_code != 200:
                 raise LLMError(f"{model}: HTTP {r.status_code}")
             try:
-                text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-                action = json.loads(text)
-            except (KeyError, IndexError, ValueError) as e:
+                parts = r.json()["candidates"][0]["content"]["parts"]
+                text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
+                action = json.loads(text[text.find("{"): text.rfind("}") + 1])
+            except (KeyError, IndexError, ValueError, TypeError) as e:
                 raise LLMError(f"{model}: 응답 형식 오류 {type(e).__name__}") from None
+            self.last_model = model
             return action
         raise LLMError(f"사용 가능한 Gemini 모델 없음 ({last_err})")
 

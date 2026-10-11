@@ -99,7 +99,10 @@ def test_llm_cannot_use_tools_of_other_roles_or_targets(db, monkeypatch):
     monkeypatch.setattr(communication, "get_llm", lambda: EagerLLM({"type": "tool", "name": "list_open_tasks", "args": {}}))
     out = say(db, w, p, "아무 말")
     run = db.query(AgentRun).order_by(AgentRun.id.desc()).first()
-    assert run.steps[0]["ok"] is False and run.steps[0]["error"]["code"] == "FORBIDDEN"
+    # 역할에 없는 도구는 실행 전에 거절되고, 이 턴은 규칙 기반으로 대체됐다고 기록된다
+    assert "없는 도구" in run.result["llm"]["fallback"]
+    assert run.result["decisions"][0]["by"] == "mock_fallback"
+    assert all(s["tool"] != "list_open_tasks" for s in run.steps)
     monkeypatch.setattr(communication, "get_llm", lambda: EagerLLM({"type": "tool", "name": "request_change", "args": {"choice": "absent", "target": w.members[1][1].name}}))
     out = say(db, w, p, "아무 말")
     assert out["thread"]["state"] == "idle" and db.query(ChangeLog).count() == 0
@@ -161,3 +164,20 @@ def test_agent_runs_record_steps_and_rules(db):
     say(db, w, p, "자차로 바꿀게요")
     run = db.query(AgentRun).filter_by(agent="communication").order_by(AgentRun.id.desc()).first()
     assert run.evidence_message_id is not None and run.steps and run.rules
+
+
+def test_presentation_dialogue_mock(db):
+    """발표 주 장면 대사(모의 LLM): 모호한 요청 → 되묻기 → 재개 → 코드 금액 확인 → 네 → 총무 승인 대기."""
+    w = make_world(db, size=2)
+    p = w.members[0][1]
+    clock.freeze(NOW - timedelta(days=3))
+    responses.submit_change(db, w.event, p, "bus", source="web", actor="t")
+    clock.freeze(NOW + timedelta(days=3, hours=2))  # 참석·입금 마감 후
+    db.commit()
+    out = say(db, w, p, "저 이번에 버스는 못 탈 것 같아요")
+    assert out["thread"]["state"] == "awaiting_info" and "자차" in out["reply"]["text"] and "불참" in out["reply"]["text"]
+    out = say(db, w, p, "아예 못 가요")
+    assert out["thread"]["state"] == "awaiting_confirmation" and "10,000원" in out["reply"]["text"]
+    say(db, w, p, "네")
+    ch = db.query(ChangeLog).filter_by(after_deadline=True).one()
+    assert (ch.to_choice, ch.status, ch.refund_amount) == ("absent", "pending_approval", 10000)
