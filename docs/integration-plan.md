@@ -86,6 +86,12 @@ python3.11 -m venv .venv && .venv/bin/pip install -r hub/requirements.txt
 ```
 기존 `app/.venv/bin/python app/server.py` 도 그대로 동작합니다(SMALL 단독, LARGE 없음).
 
+## 6-1. 서버 수명 주기 (2026-10-12 추가)
+- 시작: LARGE `startup()` — DB 준비, 총무 계정, (설정 시) LARGE 이메일 발송 스케줄러 스레드. SMALL Socket Mode 는 `SLACK_APP_TOKEN` 이 있을 때만.
+- 종료: LARGE `shutdown()` 으로 스케줄러 스레드 정리(LARGE 가 이 함수를 갖고 있을 때만 호출).
+- `/api/hub` 에 LARGE 스케줄러 상태(running/paused) 표시.
+- **프로세스는 1개로 실행**합니다(`python -m hub` 기본). 여러 워커로 띄우면 각 워커가 스케줄러를 갖습니다 — LARGE 는 DB 선점으로 같은 메일을 두 번 보내지 않지만, SMALL 의 Socket Mode·브라우저 타이머는 여러 프로세스를 고려하지 않았습니다.
+
 ## 7. 합의할 사항
 1. 대모임 블록의 '열기'가 떠나기 전 `S.screen`/`S.size` 를 시작 화면 상태로 돌리는 것(§3-4) — 괜찮은지, 아니면 공용 부분에 `#start` 같은 복귀 신호를 도총이 넣을지
 2. `/small/` 을 지금처럼 `/demo/index.html` 로 보낼지, demo 의 `SERVED` 판정에 `/small/` 을 추가해 그 주소에서 직접 열지(도총 영역 한 줄)
