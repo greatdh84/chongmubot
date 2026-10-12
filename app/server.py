@@ -22,13 +22,15 @@ API
                            카카오 로컬 검색 결과 중 Claude 가 조건에 맞는 후보를 골라 이유·예상 금액을 붙임
   GET  /api/places/search?q=  카카오맵 가게 검색 (직접 추가용 자동완성)
   GET  /api/places/nearby?x=&y=&r=  지도에서 클릭한 지점의 가장 가까운 음식점
-  POST /api/slack/poll     {channel, title, options, deadline}  이모지 투표 메시지 + 번호 이모지 미리 달기
-  POST /api/slack/thread   {channel, ts, text}  메시지 아래 스레드 댓글 (투표 마감 안내)
-  POST /api/survey/start   {channel, title, text, questions}  [응답하기] 버튼이 달린 참석 조사 메시지
+  POST /api/slack/poll     {channel, title, options, deadline, persona?}  이모지 투표 메시지 + 번호 이모지 미리 달기
+  POST /api/slack/thread   {channel, ts, text, persona?}  메시지 아래 스레드 댓글 (투표 마감 안내)
+  POST /api/survey/start   {channel, title, text, questions, persona?}  [응답하기] 버튼이 달린 참석 조사 메시지
   GET  /api/survey?channel=  참석 조사 질문과 사람별 응답
   GET  /api/socket         응답 받기(Socket Mode) 연결 상태
-  POST /api/slack/cancel   {channel, text}  모임 취소 안내, 참석 조사 기록 삭제 (채널은 그대로 둠)
+  POST /api/slack/cancel   {channel, text, persona?}  모임 취소 안내, 참석 조사 기록 삭제 (채널은 그대로 둠)
   GET  /api/slack/poll?channel=&ts=  번호 이모지별 투표자 (봇 반응 제외)
+  POST /api/meet           {channel, persona, info, names}  단체방 대화에 쓸 모임 정보·이름 (대시보드가 바뀔 때마다 보냄)
+  GET  /api/chat?channel=  단체방 대화 처리 기록 (질문 대답·시트 반영·총무 확인 필요)
 """
 import json
 import mimetypes
@@ -135,14 +137,15 @@ def create_channel(name, users):
 
 # 성격별 말투 지시 + Slack 에 보이는 보낸 사람 이름·아이콘
 PERSONAS = {
-    "active": ("극E", ":laughing:", "텐션 최고의 극외향 말투. 밝고 에너지 넘치며 느낌표와 이모지를 자주 쓴다."),
-    "shy": ("수줍", ":pleading_face:", "소심하고 미안해하는 말투. 말끝을 흐리고(…) 조심스럽게 부탁한다."),
+    "active": ("영크크", ":laughing:", "텐션 최고의 극외향 말투. 밝고 에너지 넘치며 느낌표와 이모지를 자주 쓴다."),
+    "shy": ("구남친", ":pleading_face:", "헤어진 지 꽤 됐는데 아직 못 잊은 사람처럼, 새벽에 잠 못 들고 머뭇거리며 연락한다. "
+            "겉으로는 안부·추억·핑계를 대지만 진짜 용건은 언제나 참석 여부와 회비 입금이다."),
     "oldie": ("부장님", ":older_man:", "50대 초반 부장님. 푸근하고 정이 많지만 잔소리가 많다. 존댓말과 반말을 섞어 쓴다. 화나면 영화 '타짜'의 곽철용으로 돌변한다."),
-    "strict": ("엄격", ":face_with_monocle:", "원칙과 기한을 중시하는 공식적인 말투. 정중하지만 단호하고 예외를 두지 않는다. 비꼬기·모욕은 하지 않는다."),
+    "strict": ("맑눈광", ":face_with_monocle:", "원칙과 기한을 중시하는 공식적인 말투. 정중하지만 단호하고 예외를 두지 않는다. 비꼬기·모욕은 하지 않는다."),
 }
 # 그림 아이콘을 쓰는 성격: Slack 은 공개 주소의 그림만 쓸 수 있어 GitHub Pages 에 올라간 파일을 씀.
 # 그 주소가 아직 안 열리면(올리기 전) 위의 이모지 아이콘으로 보냄
-PERSONA_IMG = {"oldie": "assets/bujang.jpg"}
+PERSONA_IMG = {"oldie": "assets/bujang.jpg", "shy": "assets/exbf.jpg", "strict": "assets/mnk.jpg"}
 ASSET_BASE = os.environ.get("PUBLIC_ASSET_BASE", "https://greatdh84.github.io/chongmubot/demo/")
 _IMG_OK = {}  # url → (열리는지, 확인 시각)
 
@@ -170,8 +173,11 @@ def persona_icon(persona, emoji):
 TRAITS = {
     "active": ("'~요!', '~용', 'ㅎㅎ', 'ㅋㅋ'를 섞고 이모지를 메시지마다 1~3개. 느낌표 많이, 텐션 최고. 반말은 안 씀.",
                ['["도형님~ 좋은 아침이에요! ☀️", "회식 장소 투표 아직이시죠? ㅎㅎ", "이모지 하나만 콕! 오늘 6시 마감이에용 🙌"]']),
-    "shy": ("'저기…', '혹시…', '죄송해요'로 시작하는 일이 많고 말끝을 '…'로 흐림. 이모지는 가끔 🥹🙏만.",
-            ['["저기… 도형님…", "혹시 참석 조사… 시간 되실 때 눌러주실 수 있을까요…?", "마감이 오늘 4시라서요… 죄송해요 🙏"]']),
+    "shy": ("'○○님' + 존댓말. 문장을 끝맺지 못하고 흐린다. 마침표 대신 '…'이나 줄바꿈으로 짧은 줄을 여러 번 끊는다. "
+            "'갑자기', '그냥', '문득', '혹시', '잠이 안 와서'로 연락 이유를 얼버무린다. 이모지는 거의 안 쓰고 써도 'ㅎ', 'ㅋㅋ' 정도. "
+            "'술 좀 마셨어요', '잠이 안 와서요' 같은 새벽 핑계를 쓴다. 가끔 오타를 하나 섞어 살짝 취한 느낌을 낸다(예: 회비→회뷔, 입금→입긍). "
+            "한 메시지는 3~4줄 이내. 모임명·날짜·금액·계좌·마감일은 정확하게 쓰고 여기엔 오타를 넣지 않는다.",
+            ['["도형님… 자요?\\n갑자기 생각나서요\\n10월 팀 회식… 오실 수 있어요?"]']),
     "oldie": ("존댓말과 반말을 섞음('~해요', '~했지?', '~해라', '~하자고'). 개인 DM에선 상대를 '○○씨'라고 부르고 반말 비중이 높고, "
               "단체방에선 '여러분~'이라고 부르고 존댓말 비중이 높음. '허허', '^^', '~~', '..'를 즐겨 쓰고 이모지는 거의 안 씀. "
               "전할 내용에 '○○님'이 있으면 '○○씨'로 바꿔 부름. 욕설·인신공격·실제 위협은 하지 않음.",
@@ -198,6 +204,61 @@ OLDIE_MOODS = {
     "sorry": ("버럭한 뒤 부장님으로 돌아와 멋쩍게 사과한다. 짧게. 영화나 캐릭터 이름은 꺼내지 않는다.",
               '["허허.. 내가 좀 흥분했네~", "미안미안^^ 편할 때 눌러 줘요~~"]'),
 }
+# 구남친(새벽 연락) 강도별 레퍼토리 묶음. 서버가 매번 몇 개만 골라 예시로 줌 (받는 사람별로 최근에 쓴 건 빼고)
+EXBF_MOODS = {
+    "soft": "새벽 연락형(첫 연락·참석 확인) 또는 안부 위장형(회비·정산 요청)",
+    "firm": "추억 소환형 / 핑계형 / 미련·후회형 중 하나",
+    "last": "읽씹 후 연타형. '자요?'를 단독으로 반복해 시작해도 된다. 마감일을 꼭 넣는다",
+    "burst": "읽씹 후 연타형을 더 짧게, 한두 단어씩 여러 번 끊어서. 마지막에 '…근데 ○○은 잊지 말아주세요'처럼 용건",
+    "sorry": "'미안해요 그냥 잊어주세요', 'ㅋㅋ 제가 왜 이러죠'처럼 물러서는 척하다가 용건 한 줄",
+}
+EXBF_LINES = {
+    "soft": ["{이름}님… 자요?\n갑자기 생각나서요\n{날짜} {모임명}… 오실 수 있어요?", "자요?\n뭐 해요\n그냥… {모임명} 오시나 해서",
+             "{이름}님… 자요?\n술 좀 마셨어요\n근데 {모임명}은 진심으로 물어보는 거예요", "아 실수로 보냈네요…\n근데 온 김에 참석 여부만…",
+             "자요?\n그냥 잘 지내나 궁금해서요\n아 그리고… {금액}원이요", "별일 없죠?\n지난 {모임명} 정산이요…\n{은행} {계좌번호} ({예금주})"],
+    "firm": ["자요?\n오늘 {장소} 지나가다가… {이름}님 생각났어요", "우리 지난번 갔던 거기…\n이번에도 거기예요",
+             "그때 {이름}님이 시켰던 거…\n이번에도 드실 거예요?", "자요?\n{이름}님 그 영수증… 아직 저한테 있어요",
+             "잠이 안 와서요…\n혹시 그때 그 식당 이름 기억나요?\n아 그리고 회비…", "계좌번호 안 바꿨어요…\n그대로예요. {은행} {계좌번호}",
+             "자요?\n제가 지난번에 너무 급하게 물어봤던 것 같아요…", "저 많이 변했어요…\n이번엔 정산 금방 끝내요",
+             "요즘 {이름}님처럼 제때 입금해주는 사람이 없더라고요…", "{이름}님만한 사람 없더라고요…\n{금액}원만요"],
+    "last": ["자요?", "자요…?", "바빠요?", "답장 안 해도 돼요…", "…", "{마감일}까지만 기다릴게요"],
+    "burst": ["자요?", "자요…?", "바빠요?", "…", "미안해요 그냥 잊어주세요", "…근데 {금액}원은 잊지 말아주세요"],
+    "sorry": ["미안해요 그냥 잊어주세요", "ㅋㅋ 제가 왜 이러죠", "…근데 {금액}원은 잊지 말아주세요"],
+}
+EXBF_DONE = ["확인했어요… 고마워요\n이제 자도 되겠네요 ㅎ", "이제 연락 안 할게요", "…다음 모임 때 또 연락해도 돼요?"]
+# 받는 사람별 '오늘 첫 연락' 날짜와 최근에 보낸 문장 (구남친: 첫 메시지는 '자요?', 같은 문장 반복 금지). 서버를 끄면 사라짐
+EXBF_DAY, EXBF_SENT = {}, {}
+
+
+def exbf_extra(key, mood, group, name):
+    today = time.strftime("%Y-%m-%d")
+    with RECENT_LOCK:
+        first = EXBF_DAY.get(key) != today
+        sent = list(EXBF_SENT.get(key, []))
+    who = "다들" if group or not name else f"{name}님"
+    pool = EXBF_LINES.get(mood, EXBF_LINES["soft"])
+    picks = random.sample(pool, min(len(pool), 3))
+    out = (f"이번 레퍼토리: {EXBF_MOODS.get(mood, EXBF_MOODS['soft'])}\n"
+           f"참고 대사(골라서 상황에 맞게 변형, 그대로 베끼지 말 것): {json.dumps(picks, ensure_ascii=False)}\n")
+    if first:
+        out += f"- 오늘 이 {'단체방' if group else '사람'}에게 보내는 첫 메시지다. 첫 메시지는 반드시 '{who}… 자요?'로 시작한다(오타 '쟈요?', '자여?'나 단독 '자요?'로 변주 가능). 용건은 다음 줄에 돌려 말한다.\n"
+    else:
+        out += "- 오늘 이미 연락했다. '자요?'로 다시 시작해도 되지만 다른 방식(안부·추억·핑계)도 좋다.\n"
+    if group:
+        out += "- 단체방이면 특정인 이름 대신 '다들'·'여러분'으로 부르고, 인원수만 말한다.\n"
+    if sent:
+        out += f"- 이 {'단체방' if group else '사람'}에게 이미 보낸 문장(반복 금지, '자요?'만 예외): {json.dumps(sent[-8:], ensure_ascii=False)}\n"
+    return out
+
+
+def exbf_record(key, msgs):
+    with RECENT_LOCK:
+        EXBF_DAY[key] = time.strftime("%Y-%m-%d")
+        lst = EXBF_SENT.setdefault(key, [])
+        lst.extend(m for m in msgs if m.strip() not in ("자요?", "자요…?"))
+        del lst[:-12]
+
+
 # 곽철용 대사: 버럭 때 서버가 하나를 골라 줌 (받는 사람별로 최근에 쓴 건 빼고)
 KWAK_LINES = [
     "나 깡패 아니다. 나도 적금 붓고 보험 들고 살고 그런다. 나도 순정이 있다. 너희들이 이런 식으로 답 안 하고 그러면 그때는 깡패가 되는 거야!",
@@ -295,19 +356,27 @@ def compose(text, persona, situation, name, mood="", kind="", phase="", group=Fa
         if facts:
             body = (f"전할 사실(이 문장은 말투를 무시하고 사실만 뽑아 쓸 것): {facts}\n"
                     f"참고 정보(어울리면 한 번만 자연스럽게, 아니면 빼기): {hint_text(hint, group, mood)}")
+    if persona == "shy":
+        extra = exbf_extra(key, mood, group, name)
+        length = "3~4줄 이내(줄바꿈으로 짧게 끊기)"
+        if facts:
+            body = f"전할 사실(말투는 무시하고 사실만 뽑아 쓸 것): {facts}"
     system = (f"너는 Slack 모임 총무봇이다. 성격: {label} — {style}\n말버릇: {traits}\n{extra}예시(형식 참고, 내용은 따라 하지 말 것): {examples[0]}\n"
               "규칙:\n- 사실(이름, 모임명, 날짜, 시각, 금액, 계좌, 인원수, 마감)은 받은 내용에 있는 그대로만 쓰고 새로 지어내지 않는다.\n"
               "- [응답하기] 같은 버튼 안내가 있으면 살린다.\n"
               f"- 강도 {mood}(soft=친절, firm=단호, last=엄격, burst=버럭, sorry=급사과)를 지킨다. 상황·강도를 설명하는 단어(예: '단호하게')는 본문에 쓰지 않는다.\n"
-              f"- 실제 사람이 메신저로 보내듯 짧은 메시지 1~3개로 나눈다. 한 메시지는 {length}.\n"
-              + (f"- 지금은 {part}({now.tm_hour}시)이다. 어울리면 짧은 인사를 붙이되 매번 같은 표현은 피한다.\n" if mood not in ("last", "burst")
+              f"- 실제 사람이 메신저로 보내듯 짧은 메시지 {'1~5' if persona == 'shy' and mood in ('last', 'burst') else '1~3'}개로 나눈다. 한 메시지는 {length}.\n"
+              + ("- 지금은 새벽(잠 못 드는 시간)이라는 설정으로 쓴다. 인사는 붙이지 않는다.\n" if persona == "shy"
+                 else f"- 지금은 {part}({now.tm_hour}시)이다. 어울리면 짧은 인사를 붙이되 매번 같은 표현은 피한다.\n" if mood not in ("last", "burst")
                  else "- 인사·안부는 붙이지 않고 바로 본론으로 들어간다.\n") +
               "- 출력은 JSON 문자열 배열만. 예: [\"…\", \"…\"]")
     where = "단체방 전체" if group or not name else name
     try:
         raw = claude(system, f"상황: {situation}\n받는 사람: {where}\n{body}")
         msgs = json.loads(raw[raw.find("["): raw.rfind("]") + 1])
-        msgs = [m.strip() for m in msgs if isinstance(m, str) and m.strip()][:3]
+        msgs = [m.strip() for m in msgs if isinstance(m, str) and m.strip()][:5 if persona == "shy" else 3]
+        if msgs and persona == "shy":
+            exbf_record(key, msgs)
         return msgs or None
     except Exception as e:
         print("LLM 실패, 원문 사용:", e)
@@ -329,10 +398,12 @@ def rewrite(text, persona, situation, name):
         return None
 
 
-def claude(system, user, max_tokens=1024):
-    """user: 문자열 또는 Anthropic content 블록 목록(이미지 포함)"""
-    body = json.dumps({"model": LLM_MODEL, "max_tokens": max_tokens, "system": system,
-                       "messages": [{"role": "user", "content": user}]}).encode()
+def claude(system, user, max_tokens=1024, schema=None):
+    """user: 문자열 또는 Anthropic content 블록 목록(이미지 포함). schema 를 주면 그 JSON 형식으로만 답함(구조화 출력)"""
+    req_body = {"model": LLM_MODEL, "max_tokens": max_tokens, "system": system, "messages": [{"role": "user", "content": user}]}
+    if schema:
+        req_body["output_config"] = {"format": {"type": "json_schema", "schema": schema}}
+    body = json.dumps(req_body).encode()
     req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, headers={
         "x-api-key": LLM_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"})
     with urllib.request.urlopen(req, timeout=60, context=SSL_CTX) as r:
@@ -477,6 +548,14 @@ def bot_user():
     return BOT_USER["id"]
 
 
+def sender(persona, fallback_name, fallback_emoji):
+    """투표·참석 조사·취소 안내도 성격 이름과 아이콘(부장님은 사진)으로. persona 가 없으면 예전 이름"""
+    if persona in PERSONAS:
+        label, icon, _ = PERSONAS[persona]
+        return {"username": f"총무봇 · {label}", **persona_icon(persona, icon)}
+    return {"username": fallback_name, "icon_emoji": fallback_emoji}
+
+
 def poll_create(data):
     """options: [{label, extra, url}] (날짜·장소 공용). 예전 형식 places: [{name, memo, url}] 도 받음"""
     opts = data.get("options") or [{"label": p.get("name", ""), "extra": p.get("memo", ""), "url": p.get("url", "")}
@@ -492,7 +571,7 @@ def poll_create(data):
     if data.get("deadline"):
         lines += ["", f"⏰ 투표 마감: {data['deadline']}"]
     r = slack("chat.postMessage", channel=data["channel"], text="\n".join(lines),
-              username="총무봇 · 투표", icon_emoji=":ballot_box_with_ballot:", unfurl_links="false")
+              unfurl_links="false", **sender(data.get("persona"), "총무봇 · 투표", ":ballot_box_with_ballot:"))
     for i in range(len(opts)):
         slack("reactions.add", channel=data["channel"], timestamp=r["ts"], name=NUM_EMOJI[i])
     return {"ts": r["ts"], "channel": data["channel"]}
@@ -501,7 +580,7 @@ def poll_create(data):
 def thread_reply(data):
     """투표 메시지 아래 스레드 댓글 (마감 안내 등). Slack 은 이모지를 막을 수 없어 안내로 대신함"""
     slack("chat.postMessage", channel=data["channel"], thread_ts=data["ts"], text=data.get("text", ""),
-          reply_broadcast="false", username="총무봇 · 투표", icon_emoji=":ballot_box_with_ballot:")
+          reply_broadcast="false", **sender(data.get("persona"), "총무봇 · 투표", ":ballot_box_with_ballot:"))
     return {"ok": True}
 
 
@@ -542,11 +621,12 @@ def survey_start(data):
                                           "text": {"type": "plain_text", "text": "📝 응답하기"}, "value": ch}]},
     ]
     r = slack("chat.postMessage", channel=ch, text=data.get("text") or "참석 조사", blocks=json.dumps(blocks, ensure_ascii=False),
-              username="총무봇 · 참석 조사", icon_emoji=":memo:")
+              **sender(data.get("persona"), "총무봇 · 참석 조사", ":memo:"))
     with LOCK:
         db = survey_load()
         old = db.get(ch, {})
-        db[ch] = {"title": data.get("title", "참석 조사"), "questions": qs, "ts": r["ts"], "users": old.get("users", {})}
+        db[ch] = {"title": data.get("title", "참석 조사"), "questions": qs, "ts": r["ts"], "users": old.get("users", {}),
+                  "persona": data.get("persona", "")}  # 응답 고맙다는 DM 도 같은 성격으로
         survey_save(db)
     return {"ts": r["ts"], "socket": SOCKET["connected"]}
 
@@ -619,11 +699,20 @@ def start_socket():
             ans["_at"] = time.strftime("%m/%d %H:%M")
             sv.setdefault("users", {})[uid] = ans
             survey_save(db)
+            persona = sv.get("persona", "")
         summary = " · ".join(f"{k} {v}" for k, v in ans.items() if not k.startswith("_"))
         # 사람 ID로 바로 보내면 Slack 알림 방으로 가므로, 총무봇 DM 방을 열어서 보냄
         dm = client.conversations_open(users=uid)["channel"]["id"]
-        client.chat_postMessage(channel=dm, text=f"응답 고마워요! 🙌\n{summary}\n바뀌면 [응답하기]를 다시 눌러 고칠 수 있어요.",
-                                username="총무봇 · 참석 조사", icon_emoji=":memo:")
+        text = (f"{random.choice(EXBF_DONE)}\n{summary}" if persona == "shy"
+                else f"응답 고마워요! 🙌\n{summary}\n바뀌면 [응답하기]를 다시 눌러 고칠 수 있어요.")
+        client.chat_postMessage(channel=dm, text=text, **sender(persona, "총무봇 · 참석 조사", ":memo:"))
+
+    @app.event("message")
+    def on_message(event, client):
+        # 사람이 단체방에 쓴 새 메시지만 (수정·입장 알림·봇 메시지·DM 은 제외)
+        if event.get("subtype") or event.get("bot_id") or event.get("channel_type") == "im" or event.get("user") == bot_user():
+            return
+        chat_handle(event.get("channel", ""), event.get("user", ""), event.get("text", ""), event.get("ts"), event.get("thread_ts"), client)
 
     def run():
         try:
@@ -641,12 +730,170 @@ def cancel_meeting(data):
     if not ch:
         raise SlackError("bad_request")
     slack("chat.postMessage", channel=ch, text=data.get("text") or "이번 모임은 취소되었습니다.",
-          username="총무봇", icon_emoji=":frog:")
+          **sender(data.get("persona"), "총무봇", ":frog:"))
     with LOCK:
         db = survey_load()
         if db.pop(ch, None) is not None:
             survey_save(db)
     return {"ok": True}
+
+
+# ---------- 단체방 대화 (질문 대답 · 자연어로 시트 갱신) ----------
+# 대시보드가 모임 정보를 /api/meet 로 보내 두면, 그 채널의 메시지를 Claude 가 보고
+# 질문엔 성격대로 대답하고, 본인 정보 변경("2차는 빠질게요")은 참석 조사 응답(survey.json)에 바로 반영.
+# 대시보드는 5초마다 응답을 읽어 시트에 반영하고, /api/chat 으로 대화 기록을 가져감
+MEET_FILE = DATA / "meet.json"
+CHAT = {}        # 채널 → 최근 대화 처리 기록 (서버를 끄면 사라짐)
+LAST_SEEN = {}   # (채널, 사람) → 마지막 처리 시각 (연달아 말할 때 속도 제한)
+HISTORY = {}     # 채널 → 최근 대화 [(이름, 말)] (봇 대답 포함, 잡담이 이어지게)
+STREAK = {}      # 채널 → 잡담이 연달아 오간 횟수 (2번 넘으면 본론으로 끌고 옴)
+
+
+def meet_load():
+    try:
+        return json.loads(MEET_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def meet_save(data):
+    """{channel, persona, info:{...}, names:{slackId: 부를 이름}, todo:{slackId: 아직 안 한 일}}"""
+    ch = data.get("channel", "")
+    if not ch:
+        raise SlackError("bad_request")
+    with LOCK:
+        db = meet_load()
+        db[ch] = {"persona": data.get("persona", "active"), "info": data.get("info", {}), "names": data.get("names", {}),
+                  "todo": data.get("todo", {}),
+                  "at": time.strftime("%m/%d %H:%M")}
+        DATA.mkdir(exist_ok=True)
+        MEET_FILE.write_text(json.dumps(db, ensure_ascii=False, indent=1), encoding="utf-8")
+    return {"ok": True}
+
+
+def chat_events(ch):
+    return {"events": CHAT.get(ch, [])}
+
+
+def valid_value(q, v):
+    """조사 항목 형식에 맞는 값만 통과. 안 맞으면 None"""
+    v = str(v).strip()
+    typ = q.get("type", "text")
+    if typ == "ox":
+        return {"O": "O", "X": "X", "예": "O", "아니요": "X"}.get(v.upper() if len(v) == 1 else v)
+    if typ == "select":
+        opts = [o.strip() for o in q.get("options", "").split(",") if o.strip()]
+        return v if v in opts else None
+    if typ == "number":
+        return v if v.isdigit() else None
+    return v[:40] or None
+
+
+CHAT_SCHEMA = {  # 구조화 출력: 따옴표가 섞여도 항상 올바른 JSON 으로 받음
+    "type": "object",
+    "properties": {
+        "kind": {"type": "string", "enum": ["question", "update", "clarify", "other", "chat", "ignore"]},
+        "updates": {"type": "array", "items": {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}},
+                                               "required": ["key", "value"], "additionalProperties": False}},
+        "reply": {"type": "string"},
+        "owner_note": {"type": "string"},
+    },
+    "required": ["kind", "updates", "reply", "owner_note"],
+    "additionalProperties": False,
+}
+
+
+def chat_think(meet, sv, uid, name, text, history, streak):
+    """Claude 에게 최근 대화와 새 메시지를 보여 주고 {kind, updates, reply, owner_note} 를 받음"""
+    persona = meet.get("persona", "active")
+    label, _, style = PERSONAS.get(persona, PERSONAS["active"])
+    traits, examples = TRAITS.get(persona, TRAITS["active"])
+    tone = f"\n평소 말투: {OLDIE_MOODS['soft'][0]}" if persona == "oldie" else ""
+    qs = sv.get("questions", []) if sv else []
+    fields = [f"{q['key']}({q.get('type')}: {'O 또는 X' if q.get('type') == 'ox' else q.get('options') or '자유 입력'})" for q in qs]
+    prev = (sv or {}).get("users", {}).get(uid, {})
+    steer = ("이번엔 본론으로 끌고 온다: 맞장구 한마디 뒤에 말한 사람이 아직 안 한 일을 권하거나(있으면), 모임 날짜·장소로 마무리한다."
+             if streak >= 2 else "아직은 본론을 서두르지 말고 성격대로 잡담을 받아 주고, 대화가 이어지게 가볍게 되물어도 된다.")
+    system = (
+        f"너는 Slack 모임 단체방에 같이 있는 총무봇이다. 단체방 사람들과 수다도 떠는 분위기 메이커다. 성격: {label} — {style}\n말버릇: {traits}{tone}\n"
+        f"말투 예시(형식만 참고): {examples[0]}\n\n"
+        f"오늘은 {time.strftime('%m/%d')}({'월화수목금토일'[time.localtime().tm_wday]}). 날짜는 모임 정보에 적힌 그대로 쓰고 '오늘·내일'로 바꿔 말하지 않는다.\n"
+        f"모임 정보(이것만 사실로 쓴다): {json.dumps(meet.get('info', {}), ensure_ascii=False)}\n"
+        f"참석 조사 항목: {', '.join(fields) if fields else '(아직 참석 조사 전이라 기록할 항목 없음)'}\n"
+        f"말한 사람의 지금 기록: {json.dumps({k: v for k, v in prev.items() if not k.startswith('_')}, ensure_ascii=False) or '없음'}\n"
+        f"말한 사람이 아직 안 한 일: {meet.get('todo', {}).get(uid) or '없음'}\n\n"
+        "단체방의 새 메시지 하나를 보고 아래 중 하나로 판단한다. 웬만한 말에는 끼어든다.\n"
+        "- question: 모임에 대한 질문(장소·시간·회비·마감·다른 후보 등). 모임 정보로 답한다. 정보에 없으면 지어내지 말고 총무에게 물어보겠다고 답하고 owner_note 에 질문을 적는다.\n"
+        "- update: 말한 사람 '본인'의 참석 조사 항목이 바뀌는 말(예: 30분 늦어요 → 도착 시간, 2차는 빠질게요 → 2차 X, 술은 못 마셔요 → 음주 여부 X, 못 가요 → 참석 불참). "
+        "updates 에 [{key: 항목, value: 값}] 을 항목 형식에 맞춰 넣는다. 참석 조사 항목이 없으면 update 대신 question 으로 보고 [응답하기]가 열리면 알려 달라고 답한다.\n"
+        "- clarify: 본인 변경 같지만 애매함(예: 아마 갈 듯?). 시트는 바꾸지 말고 무엇으로 적을지 되묻는다.\n"
+        "- other: 다른 사람에 대한 말(예: 민수 못 온대요)이나 총무가 결정할 일. 시트는 바꾸지 않고 총무에게 전하겠다고 답하고 owner_note 에 적는다. "
+        "투표하겠다는 말(예: 전 오이도횟집이요)은 봇이 대신 투표할 수 없으니 위 투표 메시지에서 그 번호 이모지를 눌러 달라고 안내한다(kind 는 question).\n"
+        f"- chat: 인사·잡담·농담·감탄·혼잣말처럼 모임과 직접 상관없는 말. {steer}\n"
+        "- ignore: 'ㅋㅋ'·'넵'·'ㅇㅇ'·이모티콘'만' 있는 아주 짧은 반응, 또는 특정한 다른 사람에게만 하는 말(예: 지민아 어제 그거 봤어?). 대답하지 않는다(reply 빈 문자열). "
+        "'ㅋㅋㅋ 다음에 같이 가요'처럼 웃음 뒤에 말이 이어지면 ignore 가 아니다.\n"
+        "규칙: 정산 금액·계좌 같은 개인 금액은 단체방에서 말하지 않고 '개인 DM으로 확인해 달라'고 한다. reply 는 성격 말투로 1~2문장, 70자 안팎, "
+        "말한 사람을 부를 땐 이름을 쓴다. 최근 대화에서 봇이 이미 한 말을 그대로 반복하지 않는다. update 면 무엇으로 적었는지 reply 에 짧게 말한다.")
+    convo = "\n".join(f"{who}: {t}" for who, t in history[-10:]) or "(없음)"
+    raw = claude(system, f"최근 단체방 대화(오래된 것부터):\n{convo}\n\n새 메시지 — {name}: {text}", max_tokens=1500, schema=CHAT_SCHEMA)
+    r = json.loads(raw)
+    r["updates"] = {u["key"]: u["value"] for u in r.get("updates", []) if u.get("key")}
+    return r
+
+
+def chat_handle(ch, uid, text, ts, thread_ts, client):
+    """단체방 메시지 하나 처리. 봇이 만든 모임 채널(meet.json 에 있는 채널)에서만"""
+    meet = meet_load().get(ch)
+    if not meet or not text.strip() or not LLM_KEY:
+        if not meet:
+            print(f"단체방 메시지 무시 ({ch}: 대시보드가 모임 정보를 아직 안 보낸 채널)")
+        return
+    name = meet.get("names", {}).get(uid) or "참가자"
+    hist = HISTORY.setdefault(ch, [])
+    now = time.time()
+    if now - LAST_SEEN.get((ch, uid), 0) < 3:  # 같은 사람이 3초 안에 연달아 보낸 건 대화 기록에만 남김
+        hist.append((name, text[:200]))
+        return
+    LAST_SEEN[(ch, uid)] = now
+    sv = survey_get(ch)
+    try:
+        r = chat_think(meet, sv if sv.get("questions") else None, uid, name, text, hist, STREAK.get(ch, 0))
+    except Exception as e:
+        print("대화 판단 실패:", e)
+        hist.append((name, text[:200]))
+        return
+    hist.append((name, text[:200]))
+    kind, reply = r.get("kind", "ignore"), (r.get("reply") or "").strip()
+    STREAK[ch] = STREAK.get(ch, 0) + 1 if kind == "chat" else 0  # 잡담이 몇 번 오갔는지 (2번 넘으면 본론으로)
+    applied = {}
+    if kind == "update" and sv.get("questions"):
+        qmap = {q["key"]: q for q in sv["questions"]}
+        for k, v in (r.get("updates") or {}).items():
+            val = valid_value(qmap[k], v) if k in qmap else None
+            if val is not None:
+                applied[k] = val
+        if applied:
+            with LOCK:
+                db = survey_load()
+                u = db.setdefault(ch, {"questions": [], "users": {}}).setdefault("users", {}).setdefault(uid, {})
+                u.update(applied)
+                u["_at"] = time.strftime("%m/%d %H:%M:%S")
+                u["_src"] = "chat"
+                u["_said"] = text[:80]
+                survey_save(db)
+        else:
+            kind = "clarify" if reply else "ignore"
+    ev = {"at": time.strftime("%H:%M"), "uid": uid, "name": name, "text": text[:120], "kind": kind,
+          "applied": applied, "reply": reply if kind != "ignore" else "", "owner": (r.get("owner_note") or "").strip()}
+    print(f"단체방 대화 · {name}: {text[:40]!r} → {kind} {applied or ''}")
+    CHAT.setdefault(ch, []).insert(0, ev)
+    del CHAT[ch][30:]
+    if kind != "ignore" and reply:
+        # 단체방에 바로 대답 (스레드 댓글 X). 사람이 스레드 안에서 말했을 때만 그 스레드에
+        client.chat_postMessage(channel=ch, text=reply, **({"thread_ts": thread_ts} if thread_ts else {}),
+                                **sender(meet.get("persona"), "총무봇", ":frog:"))
+        hist.append((f"총무봇({PERSONAS.get(meet.get('persona'), PERSONAS['active'])[0]})", reply))
+    del hist[:-20]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -683,6 +930,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/socket": lambda: dict(SOCKET),
             "/api/survey": lambda: survey_get(q.get("channel", "")),
             "/api/slack/poll": lambda: poll_tally(q.get("channel", ""), q.get("ts", "")),
+            "/api/chat": lambda: chat_events(q.get("channel", "")),
             "/api/places/nearby": lambda: {"places": kakao_search("", size=1, near=(
                 q.get("x", ""), q.get("y", ""), max(5, min(500, int(float(q.get("r", "30")))))))},
             "/api/places/search": lambda: {"places": kakao_search(q.get("q", ""), size=8) if q.get("q", "").strip() else []},
@@ -703,6 +951,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/slack/thread": lambda: thread_reply(data),
             "/api/survey/start": lambda: survey_start(data),
             "/api/slack/cancel": lambda: cancel_meeting(data),
+            "/api/meet": lambda: meet_save(data),
             "/api/pay/parse": lambda: pay_parse(data),
             "/api/receipt/parse": lambda: receipt_parse(data),
             "/api/places/recommend": lambda: recommend(data),
