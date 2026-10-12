@@ -858,6 +858,14 @@ function defaults(){
     vote:defaultVote(), dinner:defaultDinner() // 회식 템플릿: 장소 투표 · 일정·정산 옵션
   };
 }
+// 화면을 그리다 오류가 나면 빈 화면 대신 오류 내용과 초기화 버튼을 보여 줌
+window.addEventListener('error', e => {
+  const app = document.getElementById('app');
+  if (!app || app.children.length) return;
+  app.innerHTML = `<div style="max-width:640px;margin:60px auto;padding:20px;font:14px/1.6 sans-serif">
+    <b>화면을 그리는 중 오류가 났어요</b><pre style="white-space:pre-wrap;background:#fff3f3;padding:12px;border-radius:8px">${String(e.message).replace(/</g, '&lt;')}\n줄 ${e.lineno}:${e.colno}</pre>
+    <button onclick="if(confirm('저장된 데모 상태를 지우고 처음부터 시작할까요?')){localStorage.removeItem('chongmubot-demo-v3');location.reload()}">저장 상태 지우고 다시 시작</button></div>`;
+});
 let S;
 try { S = Object.assign(defaults(), JSON.parse(localStorage.getItem(KEY) || 'null') || {}); } catch(e){ S = defaults(); }
 if (S.started && !S.size) S.size = 'small'; // 규모 선택 도입 전 저장된 데모는 소모임으로
@@ -1392,10 +1400,9 @@ function dinnerPersonRow(p, ph){
   let body = '';
   if (open){
     if (pending){
-      const dm = dmMsg(p), btn = ph === 'survey' ? '\n[ 📝 응답하기 ]' : '';
-      body = `<div class="stage-lb" style="margin-bottom:8px">개인 DM 미리보기 · ${dm.label}</div>${bubble(dm.text + btn, dm.mood, dm.k === 'burst')}
-        ${p.dmPlan && !p.dmPlan.done ? `<div class="row" style="margin-top:10px"><span class="tag b">개인 DM 반복 중 · ${DM_TONES[p.dmPlan.tone]} · ${p.dmPlan.sent}/${p.dmPlan.max}회 · 다음 <b data-due="${p.dmPlan.next}">…</b></span><button class="btn sm" data-act="dmStop" data-id="${p.id}">멈추기</button></div>`
-          : `<div class="row" style="margin-top:10px"><button class="btn sm primary" data-act="phaseDm" data-id="${p.id}">개인 DM 보내기…</button><span class="small muted">강도와 빈도를 정해서 보내요. 자동으로는 단체방에만 독촉해요${p.sdm ? ` · 지금까지 ${p.sdm}번 보냄` : ''}</span></div>`}`;
+      // 메시지 미리보기는 빼고 개인 DM 보내기(강도·빈도 창)만 둠
+      body = `${p.dmPlan && !p.dmPlan.done ? `<div class="row"><span class="tag b">개인 DM 반복 중 · ${DM_TONES[p.dmPlan.tone]} · ${p.dmPlan.sent}/${p.dmPlan.max}회 · 다음 <b data-due="${p.dmPlan.next}">…</b></span><button class="btn sm" data-act="dmStop" data-id="${p.id}">멈추기</button></div>`
+          : `<div class="row"><button class="btn sm primary" data-act="phaseDm" data-id="${p.id}">개인 DM 보내기…</button><span class="small muted">강도와 빈도를 정해서 보내요. 자동으로는 단체방에만 독촉해요${p.sdm ? ` · 지금까지 ${p.sdm}번 보냄` : ''}</span></div>`}`;
     } else body = ph === 'settle' ? (() => { const r = dinnerSettle().rows[p.id];
       return r ? `<div class="stage-lb" style="margin-bottom:8px">${S.settle.sent ? '보낸 정산 DM' : '정산 DM 미리보기'}</div>${bubble(settleDmText(p, r), '', false)}` : '<p class="small muted" style="margin:0">참석하지 않아 정산 대상이 아니에요.</p>'; })()
       : `<p class="small muted" style="margin:0">${ph === 'plan' ? (['date', 'place'].some(isOpen) ? '투표를 마쳐서 독촉 대상이 아니에요.' : '투표가 끝났어요.')
@@ -1517,8 +1524,17 @@ function surveyStats(){
     r1:att.filter(p => f(p, '1차') !== 'X').length, r2:att.filter(p => f(p, '2차') === 'O').length, nodrink:att.filter(p => f(p, '음주 여부') === 'X').length,
     paid:att.filter(p => p.pay === '입금').length};
 }
+// 부장님 성격일 때 공지 맺음말 (돔바는 11~3월만)
+const bujangBye = () => { const cold = [10, 11, 0, 1, 2].includes(new Date().getMonth());
+  const l = ['술 먹고 내일 지각하면 안돼~~ 안 봐도 비디오야~', '집에 갈 땐 조심히들 들어가고~', ...(cold ? ['추우니 돔바 하나 걸치고 나오세요~'] : [])];
+  return l[Math.floor(Math.random() * l.length)]; };
 function finalNoticeText(markNo){
   const t = surveyStats(), d = decidedValue('date'), pl = decidedValue('place');
+  if (S.persona === 'oldie') return [`📋 자자자~ 주목! 참석 조사 마감했습니다 허허`, `👥 1차 ${t.r1}명 · 2차 ${t.r2}명${t.nodrink ? ` (술 안 드시는 분 ${t.nodrink}명)` : ''}${t.r2 ? ' · 2차까지 달리는 거지?^^' : ''}`,
+    `📅 ${d ? d.label : '-'} · 📍 ${pl ? pl.label : '-'}`,
+    S.dinner.baseFee.on ? `💰 기본회비 ${t.paid}/${t.att}명 입금 확인` : '',
+    markNo && t.nores ? `답 없던 ${t.nores}명은 불참으로 적었어~` : '',
+    `늦거나 못 오게 되면 총무한테 꼭 말해 줘요~~ ${bujangBye()}`].filter(Boolean).join('\n');
   return [`📋 참석 조사가 마감됐어요!`, `👥 1차 ${t.r1}명 · 2차 ${t.r2}명${t.nodrink ? ` (술 안 드시는 분 ${t.nodrink}명)` : ''}`,
     `📅 ${d ? d.label : '-'} · 📍 ${pl ? pl.label : '-'}`,
     S.dinner.baseFee.on ? `💰 기본회비 ${t.paid}/${t.att}명 입금 확인` : '',
@@ -1599,6 +1615,8 @@ function settleCard(d, pl){
 }
 function settleDoneText(){
   const c = dinnerSettle();
+  if (S.persona === 'oldie') return [`✅ 허허 ${S.event.name} 정산 깔끔하게 끝났습니다^^`, `총 ${won(c.total)} · ${c.att.length}명 참석${c.refund ? ` · 기본회비 남은 ${won(c.refund)}은 돌려줬어요` : ''}`,
+    '다들 고생 많았어요~ 다음 회식은 뭘 먹어야 맛있게 먹었다고 소문이 날지 또 고민해 보자고~ 허허'].join('\n');
   return [`✅ ${S.event.name} 정산이 끝났어요!`, `총 ${won(c.total)} · ${c.att.length}명 참석${c.refund ? ` · 기본회비 남은 ${won(c.refund)}은 돌려드렸어요` : ''}`, '모두 고생 많으셨어요. 다음 모임에서 봬요! 🙌'].join('\n');
 }
 
@@ -2514,7 +2532,9 @@ document.addEventListener('click', e => {
           if (live && MEM[p.id].slackId) await slackSend({user:MEM[p.id].slackId, name:shortName(p.id)}, {text, label:'정산 안내 DM', mood:''}, S.persona, `${MEM[p.id].name}님께 정산 안내 DM`, {raw:true});
           else log('소통', `${p.id === 'me' ? '총무' : MEM[p.id].name}님께 정산 DM (데모): ${c.rows[p.id].owe ? won(c.rows[p.id].owe) : c.rows[p.id].refund ? '환급 ' + won(c.rows[p.id].refund) : '0원'}`);
         }
-        const g = `💸 ${S.event.name} 정산 금액을 각자 DM으로 보내드렸어요! 확인하고 ${fmtDeadline(dl)}까지 보내 주세요 🙏`;
+        const g = S.persona === 'oldie'
+          ? `💸 허허 여러분~ ${S.event.name} 정산 금액은 각자 DM으로 보냈어요^^\n확인하고 ${fmtDeadline(dl)}까지 보내 줘요~~ 정산은 깔끔하게 하자고! 이거 다 여러분 위해서 하는 거야~`
+          : `💸 ${S.event.name} 정산 금액을 각자 DM으로 보내드렸어요! 확인하고 ${fmtDeadline(dl)}까지 보내 주세요 🙏`;
         if (live) await slackSend({channel:S.slackChannel}, {text:g, label:'정산 안내', mood:''}, S.persona, '정산 안내 (단체방)', {raw:true});
         else log('소통', `#${S.channel} 정산 안내 (데모)`);
         toast('정산 DM을 보냈어요'); render();
