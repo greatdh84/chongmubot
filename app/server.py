@@ -140,6 +140,32 @@ PERSONAS = {
     "oldie": ("부장님", ":older_man:", "50대 초반 부장님. 푸근하고 정이 많지만 잔소리가 많다. 존댓말과 반말을 섞어 쓴다. 화나면 영화 '타짜'의 곽철용으로 돌변한다."),
     "strict": ("엄격", ":face_with_monocle:", "원칙과 기한을 중시하는 공식적인 말투. 정중하지만 단호하고 예외를 두지 않는다. 비꼬기·모욕은 하지 않는다."),
 }
+# 그림 아이콘을 쓰는 성격: Slack 은 공개 주소의 그림만 쓸 수 있어 GitHub Pages 에 올라간 파일을 씀.
+# 그 주소가 아직 안 열리면(올리기 전) 위의 이모지 아이콘으로 보냄
+PERSONA_IMG = {"oldie": "assets/bujang.jpg"}
+ASSET_BASE = os.environ.get("PUBLIC_ASSET_BASE", "https://greatdh84.github.io/chongmubot/demo/")
+_IMG_OK = {}  # url → (열리는지, 확인 시각)
+
+
+def persona_icon(persona, emoji):
+    """chat.postMessage 아이콘 인자: 그림이 공개돼 있으면 icon_url, 아니면 icon_emoji"""
+    path = PERSONA_IMG.get(persona)
+    if path:
+        url = ASSET_BASE + path
+        ok, at = _IMG_OK.get(url, (False, 0))
+        if time.time() - at > 600:  # 10분마다 다시 확인
+            try:
+                req = urllib.request.Request(url, method="HEAD")
+                with urllib.request.urlopen(req, timeout=5, context=SSL_CTX) as r:
+                    ok = r.status == 200 and r.headers.get("Content-Type", "").startswith("image/")
+            except Exception:
+                ok = False
+            _IMG_OK[url] = (ok, time.time())
+        if ok:
+            return {"icon_url": url}
+    return {"icon_emoji": emoji}
+
+
 # 성격별 말버릇과 예시 대화 (처음부터 쓸 때 말투가 일정하게)
 TRAITS = {
     "active": ("'~요!', '~용', 'ㅎㅎ', 'ㅋㅋ'를 섞고 이모지를 메시지마다 1~3개. 느낌표 많이, 텐션 최고. 반말은 안 씀.",
@@ -338,7 +364,7 @@ def send(data):
                 {"type": "actions", "elements": [{"type": "button", "action_id": "survey_open", "style": "primary",
                                                   "text": {"type": "plain_text", "text": "📝 응답하기"}, "value": data["survey_channel"]}]},
             ], ensure_ascii=False)
-        slack("chat.postMessage", channel=channel, text=m, username=f"총무봇 · {label}", icon_emoji=icon, **extra)
+        slack("chat.postMessage", channel=channel, text=m, username=f"총무봇 · {label}", **persona_icon(persona, icon), **extra)
     return {"text": " / ".join(msgs), "parts": len(msgs), "llm": llm}
 
 

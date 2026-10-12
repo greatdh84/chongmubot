@@ -112,6 +112,7 @@ label.f{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:0
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.pic{width:1.25em;height:1.25em;border-radius:50%;object-fit:cover;vertical-align:-.3em} /* 성격 아이콘이 그림일 때 (부장님) */
 .tpls{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .tpls .opt{text-align:center}
 .tpls .opt .ic{font-size:22px;display:block}
@@ -475,7 +476,7 @@ const KEYWORDS = [
 ];
 
 const PERSONAS = {
-  active:{label:'극E', ic:'😆'}, shy:{label:'수줍', ic:'🥺'}, oldie:{label:'부장님', ic:'👴'}, strict:{label:'엄격', ic:'🧐'}
+  active:{label:'극E', ic:'😆'}, shy:{label:'수줍', ic:'🥺'}, oldie:{label:'부장님', ic:'<img class="pic" src="assets/bujang.jpg" alt="">'}, strict:{label:'엄격', ic:'🧐'}
 };
 const STRATEGIES = {
   consistent:{label:'초지일관', ic:'➖', desc:'처음부터 끝까지 같은 말투'},
