@@ -536,10 +536,10 @@ const LINES = {
     sorry:['앗 아까는 제가 너무 흥분했네요 😅 {name}님 천천히 답 주세요~ 🌸','ㅎㅎ 농담이에요~ 💕 편하실 때 알려주세요!']
   },
   shy:{
-    g:'다들… 자요?\n그냥… {event} 하려고요\n참석이랑 회비({fee})… {deadline}까지만 알려줘요',
-    dm0:'{name}님… 자요?\n갑자기 생각나서요\n{event}… 오실 수 있어요?',
+    g:'자요?\n그냥… {event} 하려고요\n참석이랑 회비({fee})… {deadline}까지만 알려줘요',
+    dm0:'자요?\n갑자기 생각나서요\n{event}… 오실 수 있어요?',
     dl0:'자요?\n오늘이 마감이라서요…\n{event} 오시는지만…',
-    dm1:'{name}님… 자요?\n제가 지난번에 너무 급하게 물어봤던 것 같아요…\n{deadline}까지만 알려줘요',
+    dm1:'자요?\n제가 지난번에 너무 급하게 물어봤던 것 같아요…\n{deadline}까지만 알려줘요',
     dl2:'자요?\n자요…?\n오늘 {dtime}까지만 기다릴게요',
     burst:['자요?\n바빠요?\n답장 안 해도 돼요…','…\n{name}님만한 사람 없더라고요…'],
     sorry:['미안해요 그냥 잊어주세요\nㅋㅋ 제가 왜 이러죠','아 실수로 보냈네요…']
@@ -572,7 +572,7 @@ const VOTE_LINES = {
     burst:'{name}님!!!!! {what} 투표!!! 이모지 하나!!! 왜 안 누르세요!!! 😤😤'
   },
   shy:{
-    soft:'{name}님… 자요?\n그냥… {what} 투표 하셨나 해서요\n{deadline}까지예요',
+    soft:'자요?\n그냥… {what} 투표 하셨나 해서요\n{deadline}까지예요',
     firm:'자요?\n우리 지난번 갔던 거기… 기억나요?\n{what} 투표만 눌러줘요',
     last:'자요?\n자요…?\n오늘 {dtime}에 {what} 투표 끝나요…',
     burst:'…\n{deadline}까지만 기다릴게요\n{what} 투표…'
@@ -597,7 +597,7 @@ const SETTLE_GROUP = {
     last:'정산 마감 임박!! ⏰ 아직 {n}분이에요! {dtime}까지 꼭 부탁드려요!!',
     burst:['아직!!! {n}분!!! 정산!!! 부탁드려요!!! 😤😤', '{n}분!!! DM 읽으신 거 다 보여요!!! 👀🔥'],
     sorry:['앗 흥분했네요 😅 {n}분 편하실 때 보내주세요~ 🌸', 'ㅎㅎ 농담이에요~ 💕 {n}분 천천히 부탁드려요!']},
-  shy:{soft:'다들… 자요?\n정산 금액 DM으로 보냈어요…\n아직 {n}분이요… ({deadline})',
+  shy:{soft:'자요?\n정산 금액 DM으로 보냈어요…\n아직 {n}분이요… ({deadline})',
     firm:'저 많이 변했어요…\n이번엔 정산 금방 끝내요\n{n}분만…',
     last:'자요?\n오늘 {dtime}까지예요…\n아직 {n}분…',
     burst:['자요?\n자요…?\n{n}분…', '답장 안 해도 돼요…\n…근데 정산은 잊지 말아주세요'],
@@ -616,7 +616,7 @@ const SETTLE_DM = {
   active:{soft:'{name}님~ {event} 정산 {amount} 아직이에요! 😆 {account}로 보내주시면 돼요~ (마감 {deadline})',
     firm:'{name}님! 정산 {amount} 부탁드려요 🙏 {account} · {deadline}까지예요!', last:'{name}님!! 오늘 {dtime} 정산 마감이에요 ⏰ {amount} → {account}',
     burst:'{name}님!!!!! 정산 {amount}!!! 지금!!! 부탁드려요!!! 😤 {account}'},
-  shy:{soft:'{name}님… 자요?\n그냥 잘 지내나 궁금해서요\n아 그리고… {amount}이요 ({account})',
+  shy:{soft:'자요?\n그냥 잘 지내나 궁금해서요\n아 그리고… {amount}이요 ({account})',
     firm:'{name}님만한 사람 없더라고요…\n{amount}만요… {account}', last:'자요?\n{deadline}까지만 기다릴게요\n{amount}… {account}',
     burst:'…근데 {amount}은 잊지 말아주세요\n{account}'},
   oldie:{soft:'허허 {name}씨~ {event} 정산 {amount} 아직이지?^^ {account}로 보내 주면 돼요~~ (마감 {deadline})',
@@ -632,7 +632,7 @@ const VOTE_GROUP = {
     last:'투표 마감 임박!! ⏰ 아직 {n}명이에요! {dtime}까지 안 하시면 다수결로 정할게요!',
     burst:['아직!!! {n}명!!! 이모지!!! 하나만!!! 눌러주세요!!! 😤😤', '{n}분!!! 투표 메시지 보신 거 다 알아요!!! 👀🔥'],
     sorry:['앗 너무 흥분했네요 😅 {n}분 천천히 눌러주세요~ 🌸', 'ㅎㅎ 농담이에요~ 💕 {n}분 편하실 때 투표 부탁드려요!']},
-  shy:{soft:'다들… 자요?\n그냥… {what} 투표 아직 {n}분이라서요\n위에 이모지 하나만…',
+  shy:{soft:'자요?\n그냥… {what} 투표 아직 {n}분이라서요\n위에 이모지 하나만…',
     firm:'우리 지난번 갔던 거기…\n이번에도 투표로 정해요\n아직 {n}분이요… ({deadline})',
     last:'자요?\n오늘 {dtime}에 투표 끝나요…\n{n}분…',
     burst:['자요?\n자요…?\n{n}분…', '답장 안 해도 돼요…\n…근데 투표는 해주세요'],
@@ -655,7 +655,7 @@ const SURVEY_GROUP = {
     last:'마감 임박!! ⏰ 아직 {n}명이에요! {dtime}까지 꼭 [응답하기] 부탁드려요!!',
     burst:['아직!!! {n}명!!! 왜!!! 답이!!! 없으세요!!! 😤😤', '{n}분!!! 메시지 읽으신 거 다 보여요!!! 👀🔥'],
     sorry:['앗 방금 너무 흥분했네요 😅 {n}분 천천히 눌러주세요~ 🌸', 'ㅎㅎ 농담이에요~ 💕 {n}분 편하실 때 부탁드려요!']},
-  shy:{soft:'다들… 자요?\n갑자기 생각나서요\n참석 조사 아직 {n}분… [응답하기] 한 번만…',
+  shy:{soft:'자요?\n갑자기 생각나서요\n참석 조사 아직 {n}분… [응답하기] 한 번만…',
     firm:'자요?\n제가 지난번에 너무 급하게 물어봤던 것 같아요…\n{n}분 남았어요 ({deadline})',
     last:'자요?\n오늘 {dtime}에 참석 조사 끝나요…\n아직 {n}분…',
     burst:['자요?\n자요…?\n{n}분…', '답장 안 해도 돼요…\n…근데 [응답하기]는 눌러주세요'],
@@ -676,8 +676,8 @@ const SURVEY_DM = {
   active:{soft:'{name}님~ {event} 오시나요? 😆 [응답하기] 눌러서 참석이랑 1·2차만 알려주세요! (마감 {deadline})',
     firm:'{name}님! 참석 조사 아직이세요 🙏 버튼 하나면 끝나요~ {deadline} 마감이에요!', last:'{name}님!! 오늘 {dtime} 마감이에요 ⏰ 꼭 [응답하기] 부탁드려요!',
     burst:'{name}님!!!!! 왜!!! 답이!!! 없으세요!!! 😤😤 지금 당장 [응답하기]!!!'},
-  shy:{soft:'{name}님… 자요?\n갑자기 생각나서요\n{event}… 오실 수 있어요? [응답하기]로…',
-    firm:'{name}님… 자요?\n술 좀 마셨어요\n근데 {event}은 진심으로 물어보는 거예요', last:'자요?\n자요…?\n오늘 {dtime}까지만 기다릴게요',
+  shy:{soft:'자요?\n갑자기 생각나서요\n{event}… 오실 수 있어요? [응답하기]로…',
+    firm:'자요?\n술 좀 마셨어요\n근데 {event}은 진심으로 물어보는 거예요', last:'자요?\n자요…?\n오늘 {dtime}까지만 기다릴게요',
     burst:'…\n바빠요?\n[응답하기]만 눌러줘요'},
   oldie:{soft:'허허 {name}씨~ {event} 오는 거지?^^ [응답하기] 눌러서 참석이랑 1·2차만 알려 줘요~~ (마감 {deadline})',
     firm:'{name}씨, 참석 조사 아직이네~ 버튼 하나면 끝나잖아. {deadline}까지 눌러라~', last:'{name}씨. 오늘 {dtime} 마감이다. 답 없으면 불참으로 적는다.',
@@ -746,7 +746,13 @@ function ctxFor(id){
   return {name: id ? shortName(id) : '서준', event: e.name, fee: won(+e.fee||0), deadline: fmtDeadline(e.deadline),
           dtime: (() => { const d = new Date(e.deadline); return isNaN(d) ? '' : `${d.getHours()}시`; })()};
 }
-const fill = (tpl, c) => tpl.replace(/\{(\w+)\}/g, (_, k) => c[k] ?? '');
+// 사람 수를 '분'으로 셀 때는 고유어로 (3분 → 세분. 숫자로 쓰면 '3분(시간)'과 헷갈림)
+function nativeCount(n){
+  n = +n; if (!(n >= 1 && n < 100)) return String(n);
+  const one = ['', '한', '두', '세', '네', '다섯', '여섯', '일곱', '여덟', '아홉'], ten = ['', '열', '스물', '서른', '마흔', '쉰', '예순', '일흔', '여든', '아흔'];
+  return n === 20 ? '스무' : ten[Math.floor(n / 10)] + one[n % 10];
+}
+const fill = (tpl, c) => tpl.replace(/\{n\}분/g, () => c.n != null ? nativeCount(c.n) + '분' : '{n}분').replace(/\{(\w+)\}/g, (_, k) => c[k] ?? '');
 
 // 투표 독촉 순서 (전략별). 3번 보내면 총무에게 이관
 function voteSequence(persona, strategy, ctx, seed){
