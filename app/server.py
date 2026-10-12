@@ -13,7 +13,7 @@ API
   GET  /api/slack/members                 워크스페이스 이름 + 사람 멤버 목록
   POST /api/slack/channel  {name, users}  채널 생성 후 users 초대
   POST /api/slack/invite   {channel, users} 기존 채널에 추가 초대
-  POST /api/slack/send     {channel|user, text, persona, situation, name, survey_channel?}
+  POST /api/slack/send     {channel|user, text, persona, situation, name, mood?, kind?, phase?, facts?, hint?, survey_channel?}
                            Claude 가 성격대로 처음부터 짧은 메시지 1~3개로 써서 몇 초 간격으로 나눠 보냄
   POST /api/pay/parse      {text?, images?[dataURL]}  은행 입금 문자·캡처에서 입금자·금액·시각을 읽음
   POST /api/receipt/parse  {images[dataURL]}  영수증에서 최종 결제 금액과 가게 이름을 읽음
@@ -135,37 +135,177 @@ def create_channel(name, users):
 
 # 성격별 말투 지시 + Slack 에 보이는 보낸 사람 이름·아이콘
 PERSONAS = {
-    "active": ("활발", ":laughing:", "밝고 에너지 넘치는 말투. 느낌표와 이모지를 자주 쓴다."),
+    "active": ("극E", ":laughing:", "텐션 최고의 극외향 말투. 밝고 에너지 넘치며 느낌표와 이모지를 자주 쓴다."),
     "shy": ("수줍", ":pleading_face:", "소심하고 미안해하는 말투. 말끝을 흐리고(…) 조심스럽게 부탁한다."),
-    "grumpy": ("까칠", ":unamused:", "짧고 건조한 말투. 용건만 말하고 단호하다. 욕설·모욕은 하지 않는다."),
+    "oldie": ("부장님", ":older_man:", "50대 초반 부장님. 푸근하고 정이 많지만 잔소리가 많다. 존댓말과 반말을 섞어 쓴다. 화나면 영화 '타짜'의 곽철용으로 돌변한다."),
+    "strict": ("엄격", ":face_with_monocle:", "원칙과 기한을 중시하는 공식적인 말투. 정중하지만 단호하고 예외를 두지 않는다. 비꼬기·모욕은 하지 않는다."),
 }
+# 그림 아이콘을 쓰는 성격: Slack 은 공개 주소의 그림만 쓸 수 있어 GitHub Pages 에 올라간 파일을 씀.
+# 그 주소가 아직 안 열리면(올리기 전) 위의 이모지 아이콘으로 보냄
+PERSONA_IMG = {"oldie": "assets/bujang.jpg"}
+ASSET_BASE = os.environ.get("PUBLIC_ASSET_BASE", "https://greatdh84.github.io/chongmubot/demo/")
+_IMG_OK = {}  # url → (열리는지, 확인 시각)
+
+
+def persona_icon(persona, emoji):
+    """chat.postMessage 아이콘 인자: 그림이 공개돼 있으면 icon_url, 아니면 icon_emoji"""
+    path = PERSONA_IMG.get(persona)
+    if path:
+        url = ASSET_BASE + path
+        ok, at = _IMG_OK.get(url, (False, 0))
+        if time.time() - at > 600:  # 10분마다 다시 확인
+            try:
+                req = urllib.request.Request(url, method="HEAD")
+                with urllib.request.urlopen(req, timeout=5, context=SSL_CTX) as r:
+                    ok = r.status == 200 and r.headers.get("Content-Type", "").startswith("image/")
+            except Exception:
+                ok = False
+            _IMG_OK[url] = (ok, time.time())
+        if ok:
+            return {"icon_url": url}
+    return {"icon_emoji": emoji}
+
+
 # 성격별 말버릇과 예시 대화 (처음부터 쓸 때 말투가 일정하게)
 TRAITS = {
-    "active": ("'~요!', '~용', 'ㅎㅎ', 'ㅋㅋ'를 섞고 이모지를 메시지마다 1~3개. 느낌표 많이. 반말은 안 씀.",
+    "active": ("'~요!', '~용', 'ㅎㅎ', 'ㅋㅋ'를 섞고 이모지를 메시지마다 1~3개. 느낌표 많이, 텐션 최고. 반말은 안 씀.",
                ['["도형님~ 좋은 아침이에요! ☀️", "회식 장소 투표 아직이시죠? ㅎㅎ", "이모지 하나만 콕! 오늘 6시 마감이에용 🙌"]']),
     "shy": ("'저기…', '혹시…', '죄송해요'로 시작하는 일이 많고 말끝을 '…'로 흐림. 이모지는 가끔 🥹🙏만.",
             ['["저기… 도형님…", "혹시 참석 조사… 시간 되실 때 눌러주실 수 있을까요…?", "마감이 오늘 4시라서요… 죄송해요 🙏"]']),
-    "grumpy": ("마침표로 끝나는 짧은 평서문. 존댓말이지만 건조함. 인사·이모지는 거의 없고 써도 😑 정도. 모욕·욕설 금지.",
-               ['["도형님.", "참석 조사 아직입니다.", "오늘 16시 마감. 버튼 하나면 됩니다."]']),
+    "oldie": ("존댓말과 반말을 섞음('~해요', '~했지?', '~해라', '~하자고'). 개인 DM에선 상대를 '○○씨'라고 부르고 반말 비중이 높고, "
+              "단체방에선 '여러분~'이라고 부르고 존댓말 비중이 높음. '허허', '^^', '~~', '..'를 즐겨 쓰고 이모지는 거의 안 씀. "
+              "전할 내용에 '○○님'이 있으면 '○○씨'로 바꿔 부름. 욕설·인신공격·실제 위협은 하지 않음.",
+              ['["허허 도형씨 좋은 아침~^^", "회식 장소 투표 아직이지? 이모지 하나만 꾹 눌러 줘요~~", "오늘 6시 마감이야.."]']),
+    "strict": ("'~하십시오', '~바랍니다'로 끝나는 공식적인 존댓말. 기한·원칙을 분명히 말하고 이모지는 쓰지 않음. 비꼬기·모욕 금지.",
+               ['["도형님, 참석 조사 회신이 확인되지 않았습니다.", "오늘 16시까지 [응답하기]로 회신해 주십시오.", "기한을 지켜 주시기 바랍니다."]']),
 }
 
 
-def compose(text, persona, situation, name):
-    """전할 내용(사실)을 바탕으로 Claude 가 성격대로 짧은 메시지 1~3개를 처음부터 씀. 실패하면 None"""
+# 부장님(50대 초반) 강도별 말투와 예시. 버럭은 곽철용 모드
+OLDIE_MOODS = {
+    "soft": ("푸근하고 다정한 부장님. 존댓말 위주에 반말을 살짝 섞는다.",
+             '["허허 도형씨~ 잘 지내지?^^", "참석 조사 아직이던데, [응답하기] 한 번만 눌러 줘요~~", "오늘 4시 마감이야.."]'),
+    "firm": ("잔소리하는 부장님. 반말 비중이 늘고('~해라', '~하자고') 웃음기는 조금만 남긴다.",
+             '["도형씨, 투표 아직이네~", "이모지 하나 누르는 거 금방이잖아. 오늘 6시까지 해라~"]'),
+    "last": ("웃음기를 뺀 진지한 부장님. 짧고 묵직하게. '허허', '^^', '~~'는 쓰지 않는다.",
+             '["도형씨.", "오늘 6시 마감이다.", "안 하면 다수결로 간다."]'),
+    "burst": ("영화 '타짜'의 곽철용으로 돌변한다. 아래 '이번 대사'를 살려서 상황(투표·참석 응답·입금)에 맞게 단어만 바꾸고, "
+              "전할 사실의 핵심(마감 등)도 한 번은 넣는다. 개인 DM이면 '너희들·니네'를 상대 이름으로 바꾼다. "
+              "단체방이어도 '여러분~', 존댓말, '허허', '^^', '~~'는 쓰지 않고 끝까지 곽철용의 낮고 무거운 반말로 말한다. "
+              "대사 뒤에는 마감 같은 핵심 사실 한 가지만 짧게 붙이고 길게 늘어놓지 않는다. "
+              "욕설·인신공격·실제 위협은 하지 않고 영화 대사 패러디 수준에서 멈춘다.",
+              '["나 깡패 아니다.", "나도 적금 붓고 보험 들고 살고 그런다. 나도 순정이 있다.", "도형씨가 이런 식으로 투표 안 하고 그러면.. 그때는 깡패가 되는 거야! 오늘 6시까지다."]'),
+    "sorry": ("버럭한 뒤 부장님으로 돌아와 멋쩍게 사과한다. 짧게. 영화나 캐릭터 이름은 꺼내지 않는다.",
+              '["허허.. 내가 좀 흥분했네~", "미안미안^^ 편할 때 눌러 줘요~~"]'),
+}
+# 곽철용 대사: 버럭 때 서버가 하나를 골라 줌 (받는 사람별로 최근에 쓴 건 빼고)
+KWAK_LINES = [
+    "나 깡패 아니다. 나도 적금 붓고 보험 들고 살고 그런다. 나도 순정이 있다. 너희들이 이런 식으로 답 안 하고 그러면 그때는 깡패가 되는 거야!",
+    "니네하고 나하고 아주 전생에 인연이 깊구나. 이 바닥 좁다. 대답 좀 해라.",
+    "어이 젊은 친구, 신사답게 대답해.",
+    "시흥대교는 무너졌냐. 왜 아무 소식이 없어!",
+]
+# 예시 문구 단계 키 → 강도 (화면의 LINES 는 g·dm0·dl0·dm1·dl2 를 씀)
+MOOD_OF = {"g": "soft", "dm0": "soft", "dl0": "soft", "dm1": "firm", "dl2": "last"}
+# 부장님 유행어: (문구, 조건). 조건이 맞는 것 중 절반 확률로 하나만 골라 Claude 에게 줌 (Claude 가 고르면 매번 같은 것만 씀)
+OLDIE_PHRASES = [
+    ("뭘 먹어야 맛있게 먹었다고 소문이 날까~", lambda c: c["kind"] == "dinner" and c["phase"] in ("plan", "survey") and c["mood"] == "soft"),
+    ("술 먹고 내일 지각하면 안돼~~ 안 봐도 비디오야~", lambda c: c["phase"] in ("plan", "survey", "event") and c["mood"] in ("soft", "firm")),
+    ("{who} 시계 밥 좀 줘라", lambda c: c["mood"] in ("firm", "last")),
+    ("지방방송 끄세요~~", lambda c: c["group"] and c["mood"] in ("soft", "firm")),
+    ("회식 끝나고 하드 하나 먹을까~~?", lambda c: c["kind"] == "dinner" and c["phase"] in ("plan", "survey", "event") and c["mood"] in ("soft", "sorry")),
+    ("추우니 돔바 하나 걸치고 나오세요", lambda c: c["month"] in (11, 12, 1, 2, 3) and c["phase"] in ("plan", "survey", "event") and c["mood"] == "soft"),
+    ("나 때는 여기 다 논밭이었어", lambda c: c["mood"] == "soft"),
+    ("자자자~ 주목!", lambda c: c["group"] and c["mood"] in ("soft", "firm")),
+    ("이거 다 여러분 위해서 하는 거야~", lambda c: c["mood"] == "firm"),
+    ("바쁘다 바빠 현대사회~", lambda c: c["mood"] in ("soft", "firm", "sorry")),
+    ("일단 고! 생각은 나중에~", lambda c: c["phase"] in ("plan", "survey") and c["mood"] in ("soft", "firm")),
+    ("막내는 고기 굽는 거 아니다, 다 같이 굽자~", lambda c: c["kind"] == "dinner" and c["phase"] in ("plan", "survey", "event") and c["mood"] == "soft"),
+    ("집에 갈 땐 조심히들 들어가고~", lambda c: c["phase"] in ("survey", "event") and c["mood"] == "soft"),
+]
+# 부장님 잡담 소재: 친절·단호·급사과일 때 하나를 줘서 어울리면 한 줄 (문장이 매번 달라지게)
+OLDIE_TOPICS = ["주말 골프", "등산", "건강검진 결과", "주식", "트로트", "라떼는~", "사모님", "다이어트", "허리 디스크", "아침 조기축구"]
+# 받는 사람(채널·사용자)별 최근에 쓴 유행어·대사·소재. 서버를 끄면 사라짐
+RECENT = {}
+RECENT_LOCK = threading.Lock()
+
+
+def pick_fresh(key, cands):
+    """후보 중 이 받는 사람에게 최근 5번 안에 안 쓴 것을 하나 골라 기록. 모두 썼으면 아무거나"""
+    with RECENT_LOCK:
+        used = RECENT.setdefault(key, [])
+        fresh = [c for c in cands if c not in used] or cands
+        choice = random.choice(fresh)
+        used.append(choice)
+        del used[:-5]
+    return choice
+
+
+def oldie_phrase(key, mood, kind, phase, group, name):
+    c = {"mood": mood, "kind": kind, "phase": phase, "group": group, "month": time.localtime().tm_mon}
+    cands = [t for t, ok in OLDIE_PHRASES if ok(c)]
+    if not cands or random.random() < 0.5:
+        return ""
+    return pick_fresh(key, cands).replace("{who}", "다들" if group or not name else f"{name}씨,")
+
+
+def hint_text(hint, group, mood):
+    """화면이 보낸 상황 정보(마감 시각·몇 번째 연락·남은 인원)를 Claude 가 쓸 수 있는 문장으로"""
+    hint = hint or {}
+    out = []
+    now = time.localtime()
+    out.append(f"오늘은 {'월화수목금토일'[now.tm_wday]}요일")
+    try:
+        dl = time.mktime(time.strptime(hint["deadline_at"][:16], "%Y-%m-%dT%H:%M"))
+        left = int((dl - time.time()) // 60)
+        out.append(f"마감까지 {left // 1440}일 남음" if left >= 1440 else f"마감까지 {left // 60}시간 {left % 60}분 남음" if left >= 60
+                   else f"마감까지 {left}분 남음" if left >= 0 else "마감이 이미 지남")
+    except (KeyError, TypeError, ValueError):
+        pass
+    if hint.get("nth"):
+        out.append(f"이 {'단체방' if group else '사람'}에게 {hint['nth']}번째 연락")
+    # 다 주면 전부 나열하므로 버럭·엄격은 1개, 나머지는 1~2개만 무작위로
+    return " · ".join(random.sample(out, min(len(out), 1 if mood in ("last", "burst") else random.choice((1, 2)))))
+
+
+def compose(text, persona, situation, name, mood="", kind="", phase="", group=False, facts="", hint=None, key=""):
+    """전할 내용(사실)을 바탕으로 Claude 가 성격대로 짧은 메시지 1~3개를 처음부터 씀. 실패하면 None
+    facts 가 있으면(부장님) 완성 문장 대신 사실만 넘겨 매번 새로 쓰게 함. key 는 반복 막기용 받는 사람"""
     if not LLM_KEY:
         return None
     label, _, style = PERSONAS.get(persona, PERSONAS["active"])
     traits, examples = TRAITS.get(persona, TRAITS["active"])
+    mood = MOOD_OF.get(mood, mood if mood in OLDIE_MOODS else "soft")
     now = time.localtime()
     part = "아침" if 5 <= now.tm_hour < 11 else "점심" if now.tm_hour < 14 else "오후" if now.tm_hour < 18 else "저녁" if now.tm_hour < 22 else "밤"
-    system = (f"너는 Slack 모임 총무봇이다. 성격: {label} — {style}\n말버릇: {traits}\n예시(형식 참고, 내용은 따라 하지 말 것): {examples[0]}\n"
-              "규칙:\n- 사실(이름, 모임명, 날짜, 시각, 금액, 계좌, 인원수, 마감)은 '전할 내용'에 있는 그대로만 쓰고 새로 지어내지 않는다.\n"
-              "- [응답하기] 같은 버튼 안내가 있으면 살린다.\n- 상황에 적힌 강도(친절/단호/엄격/버럭/급사과)를 지킨다.\n"
-              "- 실제 사람이 메신저로 보내듯 짧은 메시지 1~3개로 나눈다. 한 메시지는 40자 안팎.\n"
-              f"- 지금은 {part}({now.tm_hour}시)이다. 어울리면 짧은 인사를 붙이되 매번 같은 표현은 피한다.\n"
+    extra, length, body = "", "40자 안팎", f"전할 내용: {text}"
+    if persona == "oldie":
+        how, ex = OLDIE_MOODS[mood]
+        examples = [ex]
+        extra = f"이번 말투: {how}\n"
+        if mood == "burst":
+            extra += f"이번 대사(꼭 살릴 것): {pick_fresh(key + ':kwak', KWAK_LINES)}\n"
+            length = "70자 안팎(곽철용 대사는 중간에 끊지 않음)"
+        phrase = oldie_phrase(key, mood, kind, phase, group, name)
+        if phrase:
+            extra += f"이번에 넣을 말버릇(어색하지 않으면 꼭 한 번 그대로 넣기): {phrase}\n"
+        if mood in ("soft", "firm", "sorry"):
+            extra += (f"잡담 소재(가능하면 반 줄로 가볍게 한 번. 예: '주말에 골프 쳤더니 허리가 아주..'): {pick_fresh(key + ':topic', OLDIE_TOPICS)}\n"
+                      "'허허', '^^', '~~', 반말 한두 마디 중 두 가지 이상은 꼭 드러나게 한다. 전할 사실의 딱딱한 문체(~십시오, ~입니다)는 따라 하지 않는다.\n")
+        if facts:
+            body = (f"전할 사실(이 문장은 말투를 무시하고 사실만 뽑아 쓸 것): {facts}\n"
+                    f"참고 정보(어울리면 한 번만 자연스럽게, 아니면 빼기): {hint_text(hint, group, mood)}")
+    system = (f"너는 Slack 모임 총무봇이다. 성격: {label} — {style}\n말버릇: {traits}\n{extra}예시(형식 참고, 내용은 따라 하지 말 것): {examples[0]}\n"
+              "규칙:\n- 사실(이름, 모임명, 날짜, 시각, 금액, 계좌, 인원수, 마감)은 받은 내용에 있는 그대로만 쓰고 새로 지어내지 않는다.\n"
+              "- [응답하기] 같은 버튼 안내가 있으면 살린다.\n"
+              f"- 강도 {mood}(soft=친절, firm=단호, last=엄격, burst=버럭, sorry=급사과)를 지킨다. 상황·강도를 설명하는 단어(예: '단호하게')는 본문에 쓰지 않는다.\n"
+              f"- 실제 사람이 메신저로 보내듯 짧은 메시지 1~3개로 나눈다. 한 메시지는 {length}.\n"
+              + (f"- 지금은 {part}({now.tm_hour}시)이다. 어울리면 짧은 인사를 붙이되 매번 같은 표현은 피한다.\n" if mood not in ("last", "burst")
+                 else "- 인사·안부는 붙이지 않고 바로 본론으로 들어간다.\n") +
               "- 출력은 JSON 문자열 배열만. 예: [\"…\", \"…\"]")
+    where = "단체방 전체" if group or not name else name
     try:
-        raw = claude(system, f"상황: {situation}\n받는 사람: {name or '단체방 전체'}\n전할 내용: {text}")
+        raw = claude(system, f"상황: {situation}\n받는 사람: {where}\n{body}")
         msgs = json.loads(raw[raw.find("["): raw.rfind("]") + 1])
         msgs = [m.strip() for m in msgs if isinstance(m, str) and m.strip()][:3]
         return msgs or None
@@ -206,7 +346,9 @@ def send(data):
     label, icon, _ = PERSONAS.get(persona, PERSONAS["active"])
     text = data.get("text", "")
     # raw: 확정 공지처럼 문구를 바꾸면 안 되는 메시지
-    msgs = None if data.get("raw") else compose(text, persona, data.get("situation", ""), data.get("name", ""))
+    msgs = None if data.get("raw") else compose(text, persona, data.get("situation", ""), data.get("name", ""),
+                                                data.get("mood", ""), data.get("kind", ""), data.get("phase", ""), bool(data.get("channel")),
+                                                data.get("facts", ""), data.get("hint"), data.get("channel") or data.get("user", ""))
     llm = bool(msgs)
     msgs = msgs or [text]
     if data.get("extra"):
@@ -222,7 +364,7 @@ def send(data):
                 {"type": "actions", "elements": [{"type": "button", "action_id": "survey_open", "style": "primary",
                                                   "text": {"type": "plain_text", "text": "📝 응답하기"}, "value": data["survey_channel"]}]},
             ], ensure_ascii=False)
-        slack("chat.postMessage", channel=channel, text=m, username=f"총무봇 · {label}", icon_emoji=icon, **extra)
+        slack("chat.postMessage", channel=channel, text=m, username=f"총무봇 · {label}", **persona_icon(persona, icon), **extra)
     return {"text": " / ".join(msgs), "parts": len(msgs), "llm": llm}
 
 
