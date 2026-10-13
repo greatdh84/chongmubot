@@ -1072,7 +1072,7 @@ function renderStart(){
 
 /* ---------- 1) 총무 설정창 ---------- */
 function renderSetup(){
-  if (!S.size) return renderSizePick();
+  if (!S.size) S.size = 'small'; // 규모 선택 화면은 쓰지 않음: 바로 모임 종류 선택(워크샵 카드 = 대모임)
   if (S.size === 'large') return LARGE.render($('#app'));
   renderSmallSetup();
 }
@@ -1125,7 +1125,7 @@ const LARGE = {
     }[LARGE.server] || '';
     el.innerHTML = `
     <header class="top"><div class="top-in">
-      <button class="btn ghost sm" data-act="${S.started ? 'goDash' : 'changeSize'}">← ${S.started ? '대시보드' : '모임 규모'}</button>
+      <button class="btn ghost sm" data-act="${S.started ? 'goDash' : 'changeSize'}">← ${S.started ? '대시보드' : '모임 종류'}</button>
       <div class="brand"><span class="logo">🐸</span>대모임 총무봇</div>
     </div></header>
     <main class="page"><div class="card" style="max-width:880px;margin:24px auto 0">
@@ -1184,7 +1184,7 @@ function renderSmallSetup(){
   const s = S, e = s.event, sec = freqSec(s.freq);
   $('#app').innerHTML = `
   <header class="top"><div class="top-in">
-    <button class="btn ghost sm" data-act="${S.started ? 'goDash' : 'changeSize'}">← ${S.started ? '대시보드' : '모임 규모'}</button>
+    <button class="btn ghost sm" data-act="${S.started ? 'goDash' : 'changeSize'}">← ${S.started ? '대시보드' : '시작화면'}</button>
     <div class="brand"><span class="logo"><img src="assets/logo.jpg" alt=""></span>도총 & 채총</div>
     <div class="grow"></div>
     <span class="hitl">HITL 1</span>
@@ -2593,7 +2593,7 @@ document.addEventListener('click', e => {
     case 'goStart': S.screen = 'start'; closeDrawer(); break;
     case 'goSetup': S.screen = 'setup'; closeDrawer(); window.scrollTo(0, 0); break;
     case 'pickSize': S.size = d.val; window.scrollTo(0, 0); break;
-    case 'changeSize': S.size = null; window.scrollTo(0, 0); break;
+    case 'changeSize': if (S.size === 'large') S.size = 'small'; else S.screen = 'start'; window.scrollTo(0, 0); break; // 대모임 → 모임 종류, 소모임 → 시작화면
     case 'goDash':
       if (!S.started){ S.started = true; seedRun(); toast('데모 모임(가평 MT)을 불러왔어요'); }
       S.screen = 'dash'; window.scrollTo(0, 0); break;
