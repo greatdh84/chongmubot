@@ -97,7 +97,8 @@ def configure_large(app: FastAPI) -> None:
         return {
             "system": "large",
             "app_mode": settings.app_mode,
-            "email_mode": settings.email_mode,
+            "email_mode": settings.email_mode,  # 이전 이름(호환)
+            "notify_mode": settings.email_mode,  # mock | slack
             "llm_mode": settings.llm_mode,
             "demo_tools": settings.is_demo,
             "scheduler": {"enabled": scheduler.running and not scheduler.paused, "interval_seconds": scheduler.interval},

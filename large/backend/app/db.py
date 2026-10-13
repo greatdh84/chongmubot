@@ -64,6 +64,10 @@ _COLUMN_UPGRADES = {
 
 def _add_missing_columns() -> None:
     with engine.begin() as conn:
+        have = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(participants)")}
+        if have and "slack_id" not in have:
+            # 이메일 연락 시절의 DB: 참가자 표 구조(연락처·유일성 조건)가 달라 자동으로 고칠 수 없다
+            raise RuntimeError("이전 버전(이메일) DB 입니다. 연락이 Slack 으로 바뀌어 다시 만들어야 합니다: cd large/backend && ../../.venv/bin/python -m app.seed --reset")
         for table, cols in _COLUMN_UPGRADES.items():
             have = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
             for col, ddl in cols.items():

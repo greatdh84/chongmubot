@@ -1,4 +1,10 @@
-"""이메일 발송 작업: 생성(중복 방지 키) → 발송 직전 재검사 → 발송/연기/건너뜀/재시도.
+"""알림(Slack DM) 발송 작업: 생성(중복 방지 키) → 발송 직전 재검사 → 발송/연기/건너뜀/재시도.
+(모듈·테이블 이름 emails/email_jobs 는 이전 버전 호환을 위해 그대로 둔다. 받는 주소 to_email = Slack ID)
+
+누구에게 보내나
+- 참가자 개인: 인원조사 초대(invite), 미응답 독촉(attend_reminder)
+- 팀 담당자만: 회비 입금 독촉(payment_reminder), 정산 Agent 확인 요청(confirm_request), 인증코드(manager_code),
+  행사 후 환불 안내(refund_notice), 추가 납부 안내(extra_notice) — 회비는 담당자가 팀 단위로 걷고 돌려주므로 개인에게는 보내지 않는다.
 
 - 하루 최대 횟수: 수신자별 settings.daily_limit (인증코드 메일 제외). 넘으면 다음날 발송 가능 시각으로 연기.
 - 전송 금지 시간: settings.quiet_start_hour ~ quiet_end_hour(KST). 그 사이면 허용 시각으로 연기.
@@ -25,6 +31,7 @@ from ..models import ConfirmTask, EmailJob, Event, Participant, Response, Team
 from . import invites
 from .common import active_manager, audit
 
+LABELS = {"bus": "참석+버스", "car": "참석+자차", "absent": "불참", "undecided": "미정", None: "미응답"}
 QUIET_EXEMPT = {"manager_code"}  # 사용자가 직접 요청한 인증코드는 즉시 발송
 # 이 과제가 열려 있으면 '이미 낸 돈이 아직 확인 중'일 수 있어 입금 독촉을 보내지 않는다.
 DEPOSIT_TASK_KINDS = ("unknown_depositor", "ambiguous_depositor", "unclear_deposit", "possible_duplicate")
@@ -50,7 +57,7 @@ def enqueue_invites(db: Session, event: Event, participant_ids: list[int] | None
         q = q.where(Participant.id.in_(participant_ids))
     created = 0
     for p in db.scalars(q):
-        _, new = _enqueue(db, dedupe_key=f"invite:{p.id}:initial", event_id=event.id, kind="invite", participant_id=p.id, team_id=p.team_id, to_email=p.email)
+        _, new = _enqueue(db, dedupe_key=f"invite:{p.id}:initial", event_id=event.id, kind="invite", participant_id=p.id, team_id=p.team_id, to_email=p.slack_id)
         created += new
     return {"created": created}
 
@@ -63,7 +70,7 @@ def enqueue_reissue(db: Session, event: Event, participant: Participant) -> Emai
         kind="invite",
         participant_id=participant.id,
         team_id=participant.team_id,
-        to_email=participant.email,
+        to_email=participant.slack_id,
     )
     return job
 
@@ -79,7 +86,7 @@ def enqueue_attend_reminders(db: Session, event: Event) -> dict:
     created = 0
     for p in db.scalars(select(Participant).where(Participant.event_id == event.id)):
         if _unanswered(db, p.id):
-            _, new = _enqueue(db, dedupe_key=f"attend:{p.id}:{day}", event_id=event.id, kind="attend_reminder", participant_id=p.id, team_id=p.team_id, to_email=p.email)
+            _, new = _enqueue(db, dedupe_key=f"attend:{p.id}:{day}", event_id=event.id, kind="attend_reminder", participant_id=p.id, team_id=p.team_id, to_email=p.slack_id)
             created += new
     return {"created": created}
 
@@ -98,7 +105,7 @@ def enqueue_payment_reminders(db: Session, event: Event) -> dict:
             no_manager += 1
             continue
         p = db.get(Participant, mgr.participant_id)
-        _, new = _enqueue(db, dedupe_key=f"payment:{team.id}:{day}", event_id=event.id, kind="payment_reminder", participant_id=p.id, team_id=team.id, to_email=p.email)
+        _, new = _enqueue(db, dedupe_key=f"payment:{team.id}:{day}", event_id=event.id, kind="payment_reminder", participant_id=p.id, team_id=team.id, to_email=p.slack_id)
         created += new
     return {"created": created, "teams_without_manager": no_manager}
 
@@ -110,12 +117,41 @@ def enqueue_confirm_request(db: Session, task: ConfirmTask) -> EmailJob | None:
     if mgr is None:
         return None
     p = db.get(Participant, mgr.participant_id)
-    job, _ = _enqueue(db, dedupe_key=f"confirm:{task.id}", event_id=task.event_id, kind="confirm_request", participant_id=p.id, team_id=task.team_id, task_id=task.id, to_email=p.email)
+    job, _ = _enqueue(db, dedupe_key=f"confirm:{task.id}", event_id=task.event_id, kind="confirm_request", participant_id=p.id, team_id=task.team_id, task_id=task.id, to_email=p.slack_id)
     return job
 
 
+def enqueue_settlement_notices(db: Session, event: Event, kind: str, team_ids: list[int] | None = None) -> dict:
+    """행사 후 정산: 추가 환불(잔액<0) 팀 담당자에게 환불 안내, 추가 납부(잔액>0) 팀 담당자에게 추가 납부 안내.
+    개인에게는 보내지 않는다(회비는 팀 단위). 확인 과제가 남은 팀은 보내지 않는다."""
+    from .settlement import compute_team
+
+    assert kind in ("refund_notice", "extra_notice")
+    created = no_manager = blocked = 0
+    teams = []
+    q = select(Team).where(Team.event_id == event.id)
+    if team_ids:
+        q = q.where(Team.id.in_(team_ids))
+    for team in db.scalars(q.order_by(Team.code)):
+        calc = compute_team(db, event, team)
+        if (kind == "refund_notice" and calc["balance"] >= 0) or (kind == "extra_notice" and calc["balance"] <= 0):
+            continue
+        if calc["blockers"]:
+            blocked += 1
+            continue
+        mgr = active_manager(db, team.id)
+        if mgr is None:
+            no_manager += 1
+            continue
+        p = db.get(Participant, mgr.participant_id)
+        _, new = _enqueue(db, dedupe_key=f"{kind}:{team.id}:{calc['balance']}", event_id=event.id, kind=kind, participant_id=p.id, team_id=team.id, to_email=p.slack_id)
+        created += new
+        teams.append({"team": team.name, "manager": p.name, "amount": abs(calc["balance"])})
+    return {"created": created, "teams": teams, "teams_without_manager": no_manager, "teams_blocked": blocked}
+
+
 def send_manager_code(db: Session, participant: Participant, code_id: int, code: str) -> EmailJob:
-    job, _ = _enqueue(db, dedupe_key=f"manager_code:{code_id}", event_id=participant.event_id, kind="manager_code", participant_id=participant.id, team_id=participant.team_id, to_email=participant.email)
+    job, _ = _enqueue(db, dedupe_key=f"manager_code:{code_id}", event_id=participant.event_id, kind="manager_code", participant_id=participant.id, team_id=participant.team_id, to_email=participant.slack_id)
     _dispatch_one(db, job, clock.now(), code=code)
     return job
 
@@ -144,6 +180,12 @@ def _recheck(db: Session, job: EmailJob) -> str | None:
         )
         if waiting:
             return "입금 확인 대기 중인 과제가 있음"
+    elif job.kind in ("refund_notice", "extra_notice"):
+        from .settlement import compute_team
+
+        calc = compute_team(db, event, db.get(Team, job.team_id))
+        if (job.kind == "refund_notice" and calc["balance"] >= 0) or (job.kind == "extra_notice" and calc["balance"] <= 0):
+            return "정산 잔액이 바뀌어 보낼 필요 없음"
     elif job.kind == "confirm_request":
         task = db.get(ConfirmTask, job.task_id)
         if task is None or task.status != "open":
@@ -161,33 +203,52 @@ def _render(db: Session, job: EmailJob, code: str | None = None) -> tuple[str, s
     pay_deadline = clock.kst(event.payment_deadline).strftime("%m월 %d일 %H:%M")
     manager_url = f"{settings.public_base_url}/manager/login"
     if job.kind in ("invite", "attend_reminder"):
-        link = invites.link(invites.issue(db, p))  # 발송 시점에 새 토큰 발급(원문은 메일에만 존재)
+        link = invites.link(invites.issue(db, p))  # 발송 시점에 새 토큰 발급(원문은 DM 에만 존재)
         head = "참석 여부를 알려주세요" if job.kind == "invite" else "아직 참석 응답이 없어요"
         body = (
-            f"{p.name}님, 안녕하세요.\n\n[{event.name}] {head}.\n"
-            f"아래 개인 링크에서 참석+버스 / 참석+자차 / 불참 / 미정 중 하나를 골라 '제출'을 눌러 주세요.\n\n"
-            f"{link}\n\n"
-            f"- 참석 응답 마감: {deadline}\n- 이 링크는 본인 전용입니다. 다른 사람과 공유하지 마세요.\n"
-            f"- 마감 후 변경은 총무 승인과 환불 규칙에 따라 처리됩니다."
+            f"{p.name}님, 안녕하세요. [{event.name}] {head}.\n"
+            f"아래 개인 링크에서 참석+버스 / 참석+자차 / 불참 / 미정 중 하나를 골라 '제출'을 눌러 주세요.\n"
+            f"{link}\n"
+            f"• 참석 응답 마감: {deadline}\n• 이 링크는 본인 전용입니다. 다른 사람과 공유하지 마세요.\n"
+            f"• 회비는 팀 담당자가 팀 단위로 걷습니다. 마감 후 변경은 총무 승인과 환불 규칙에 따라 처리됩니다."
         )
         return f"[{event.name}] {head}", body
+    team = db.get(Team, job.team_id) if job.team_id else None
     if job.kind == "payment_reminder":
-        team = db.get(Team, job.team_id)
         body = (
-            f"{p.name}님, [{event.name}] {team.name} 담당자로 안내드립니다.\n\n"
-            f"팀 회비 정산에 아직 납부할 금액이 남아 있습니다. 팀 입금 마감: {pay_deadline}\n"
-            f"금액과 명세는 메일에 적지 않습니다. 아래 담당자 화면에서 이메일 인증 후 확인해 주세요.\n\n{manager_url}"
+            f"{p.name}님, [{event.name}] {team.name} 담당자로 안내드립니다.\n"
+            f"팀 회비에 아직 납부할 금액이 남아 있습니다. 팀 입금 마감: {pay_deadline}\n"
+            f"팀원별 명세는 담당자 화면에서 확인해 주세요(Slack ID 로 인증): {manager_url}"
         )
         return f"[{event.name}] {team.name} 회비 입금 안내", body
     if job.kind == "confirm_request":
         body = (
-            f"{p.name}님, [{event.name}] 정산 Agent 가 확인을 요청했습니다.\n\n"
-            f"질문 내용은 담당자 화면의 '확인 요청'에서 볼 수 있습니다. 답변해 주시면 정산안에 반영됩니다.\n\n{manager_url}"
+            f"{p.name}님, [{event.name}] 정산 Agent 가 {team.name} 입금 확인을 요청했습니다.\n"
+            f"담당자 화면의 '확인 요청'에서 질문을 보고 답해 주시면 정산 보고서에 반영됩니다.\n{manager_url}"
         )
         return f"[{event.name}] 회비 확인 요청이 도착했습니다", body
     if job.kind == "manager_code":
-        body = f"담당자 화면 인증코드: {code}\n10분 동안 유효합니다. 본인이 요청하지 않았다면 이 메일을 무시하세요."
+        body = f"담당자 화면 인증코드: {code}\n10분 동안 유효합니다. 본인이 요청하지 않았다면 무시하세요."
         return f"[{event.name}] 담당자 인증코드", body
+    if job.kind in ("refund_notice", "extra_notice"):
+        from .settlement import compute_team
+
+        calc = compute_team(db, event, team)
+        lines = []
+        for l in calc["lines"]:
+            for c in l["changes"]:
+                if c["status"] == "applied" and (c["refund_amount"] or c["extra_charge"]):
+                    amt = f"환불 {c['refund_amount']:,}원" if c["refund_amount"] else f"추가 {c['extra_charge']:,}원"
+                    lines.append(f"  - {l['name']}: {LABELS.get(c['from'], '미응답')} → {LABELS.get(c['to'], c['to'])}, {amt}")
+        detail = "\n".join(lines[:15]) or "  - (변동 없음: 청구액 대비 입금 차이)"
+        if job.kind == "refund_notice":
+            head = f"{team.name} 회비 정산 결과, 총무가 담당자님께 {abs(calc['balance']):,}원을 돌려드릴 예정입니다."
+            tail = "받으실 계좌가 팀 입금 계좌와 다르면 총무에게 알려 주세요. 팀원에게는 담당자님이 나눠 주시면 됩니다."
+        else:
+            head = f"{team.name} 회비 정산 결과, {calc['balance']:,}원을 추가로 걷어 입금해 주세요."
+            tail = f"입금 안내: {event.account_note}"
+        body = f"{p.name}님, [{event.name}] 행사가 끝나 정산 보고서를 확정했습니다.\n{head}\n변동 내역:\n{detail}\n{tail}\n명세: {manager_url}"
+        return f"[{event.name}] {team.name} 회비 {'환불' if job.kind == 'refund_notice' else '추가 납부'} 안내", body
     raise ValueError(job.kind)
 
 
@@ -315,4 +376,4 @@ def dispatch_due(db: Session, event: Event, now: datetime | None = None, limit: 
         if ids or reclaimed:
             audit(db, event.id, f"system:{source}", "emails_dispatched", detail=counts | ({"reclaimed": reclaimed} if reclaimed else {}))
             db.commit()
-        return {"processed": len(ids), **counts, "email_mode": settings.email_mode, "source": source}
+        return {"processed": len(ids), **counts, "notify_mode": settings.email_mode, "source": source}

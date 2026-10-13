@@ -20,11 +20,11 @@ export function AppHeader() {
         {meta && (
           <span className="modes" role="status" aria-label="실행 모드">
             <span className={`pill ${demo ? "warn" : "ok"}`}>{demo ? "시연 모드" : "운영 모드"}</span>
-            <span className="pill" title={meta.email_mode === "mock" ? "실제로 보내지 않고 개발용 수신함에만 기록" : "SMTP 로 실제 발송"}>이메일 {meta.email_mode === "mock" ? "모의" : "실제"}</span>
-            <span className={`pill ${meta.llm_mode === "gemini" ? "ai" : ""}`} title={meta.llm_mode === "gemini" ? "Gemini 가 요청 해석·도구 선택. 실패하면 규칙 기반으로 대체(메시지에 표시)" : "API 키 없이 규칙 기반으로 요청 해석"}>
-              LLM {meta.llm_mode === "gemini" ? "Gemini" : "모의(규칙)"}
+            <span className={`pill ${meta.notify_mode === "slack" ? "ok" : ""}`} title={meta.notify_mode === "mock" ? "실제로 보내지 않고 개발용 수신함에만 기록" : "소모임과 같은 Slack 봇으로 실제 DM 발송"}>Slack DM {meta.notify_mode === "mock" ? "모의" : "실제"}</span>
+            <span className={`pill ${meta.llm_mode !== "mock" ? "ai" : ""}`} title={meta.llm_mode !== "mock" ? "LLM 이 요청 해석·도구 선택. 실패하면 규칙 기반으로 대체(메시지에 표시)" : "API 키 없이 규칙 기반으로 요청 해석"}>
+              LLM {meta.llm_mode === "claude" ? "Claude" : meta.llm_mode === "gemini" ? "Gemini" : "모의(규칙)"}
             </span>
-            {meta.scheduler && <span className="pill" title="이메일 발송 큐 자동 실행">발송 스케줄러 {meta.scheduler.enabled ? `켜짐·${meta.scheduler.interval_seconds}초` : "꺼짐"}</span>}
+            {meta.scheduler && <span className="pill" title="Slack DM 발송 큐 자동 실행">발송 스케줄러 {meta.scheduler.enabled ? `켜짐·${meta.scheduler.interval_seconds}초` : "꺼짐"}</span>}
             {import.meta.env.DEV && <span className="pill bad" title="최종 실행은 공용 서버 127.0.0.1:8787">Vite 개발 서버</span>}
             {meta.demo_tools && <Link className="pill" to="/">역할 전환</Link>}
             {meta.demo_tools && <Link className="pill" to="/dev/inbox">개발용 수신함</Link>}
@@ -69,7 +69,7 @@ export function StatusPill({ status }: { status: string }) {
 const STATE_LABEL: Record<string, string> = { idle: "", awaiting_info: "Agent 가 추가 정보를 기다리는 중", awaiting_confirmation: "확인(네/아니요)을 기다리는 중" };
 
 /** Agent 채팅. 대화 상태는 서버에 저장되어 나중에 돌아와도 이어진다. */
-export function Chat({ base, title, examples }: { base: string; title: string; examples: string[] }) {
+export function Chat({ base, title, examples, chips, subtitle, onReply, className }: { base: string; title: string; examples: string[]; chips?: string[]; subtitle?: ReactNode; onReply?: () => void; className?: string }) {
   const [thread, setThread] = useState<ChatThread | null>(null);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -91,6 +91,7 @@ export function Chat({ base, title, examples }: { base: string; title: string; e
       const out = await api.post<{ thread: ChatThread }>(base, { text: msg });
       setThread(out.thread);
       setText("");
+      onReply?.();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -103,8 +104,9 @@ export function Chat({ base, title, examples }: { base: string; title: string; e
   };
 
   return (
-    <div className="card chat" aria-label={title}>
+    <div className={`card chat ${className ?? ""}`} aria-label={title}>
       <h2>{title}</h2>
+      {subtitle && <div className="muted" style={{ marginTop: -6, marginBottom: 6 }}>{subtitle}</div>}
       <div className="log" ref={logRef}>
         {thread?.messages.length === 0 && <p className="muted">예: {examples.map((x) => `“${x}”`).join(", ")}</p>}
         {thread?.messages.map((m) => (
@@ -132,8 +134,11 @@ export function Chat({ base, title, examples }: { base: string; title: string; e
           <button disabled={busy} onClick={() => send("아니요")}>아니요</button>
         </div>
       )}
+      {chips && chips.length > 0 && (
+        <div className="chips">{chips.map((c) => <button key={c} type="button" className="small" disabled={busy} onClick={() => send(c)}>{c}</button>)}</div>
+      )}
       <form onSubmit={submit}>
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="메시지 입력" aria-label="메시지" maxLength={1000} />
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder={busy ? "Agent 가 보고서를 보는 중…" : "메시지 입력"} aria-label="메시지" maxLength={1000} />
         <button className="primary" disabled={busy}>보내기</button>
       </form>
       {error && <p className="error">{error}</p>}
@@ -150,6 +155,7 @@ function LlmBadge({ llm }: { llm: ChatMessage["llm"] }) {
   if (!llm) return null;
   const parts: JSX.Element[] = [];
   if (llm.used.includes("gemini")) parts.push(<span key="g" className="pill ai">AI 판단: Gemini{llm.model ? ` (${llm.model})` : ""}</span>);
+  if (llm.used.includes("claude")) parts.push(<span key="cl" className="pill ai">AI 판단: Claude{llm.model ? ` (${llm.model})` : ""}</span>);
   if (llm.used.includes("mock")) parts.push(<span key="m" className="pill">규칙 기반 해석(모의)</span>);
   if (llm.used.includes("mock_fallback")) parts.push(<span key="f" className="pill bad" title={llm.fallback}>⚠ LLM 실패 → 규칙 기반 대체</span>);
   if (llm.used.includes("code")) parts.push(<span key="c" className="pill ok">코드가 확인 응답 판정</span>);

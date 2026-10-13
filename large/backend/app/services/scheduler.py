@@ -21,7 +21,7 @@ from .. import clock
 from ..config import settings
 from ..db import SessionLocal
 from ..models import Event
-from . import emails
+from . import emails, report
 
 log = logging.getLogger("app.scheduler")
 
@@ -65,6 +65,10 @@ class EmailScheduler:
         try:
             with SessionLocal() as db:
                 for ev in db.scalars(select(Event).where(Event.mode == "large")).all():
+                    # 마감이 지났으면 기준표(참석 마감 응답·납부 마감 청구표)를 저장하고 보고서를 갱신
+                    if report.ensure_checkpoints(db, ev, now):
+                        report.refresh(db, ev, "scheduler_checkpoint", now)
+                        db.commit()
                     r = emails.dispatch_due(db, ev, now=now, source="scheduler")
                     if r["processed"]:
                         result[str(ev.id)] = r

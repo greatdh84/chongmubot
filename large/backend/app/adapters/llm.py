@@ -6,7 +6,9 @@
   {"type": "reply", "text": "<최종 답변>"}
 
 LLM_MODE=mock  : 규칙 기반 MockLLM (외부 키 불필요, 결정적)
-LLM_MODE=gemini: Gemini REST 호출. 실패하면 MockLLM 으로 대체하고 그 사실을 실행 기록에 남긴다.
+LLM_MODE=claude: Claude(소모임과 같은 LLM_API_KEY, 기본 claude-haiku-5-5) 호출
+LLM_MODE=gemini: Gemini REST 호출
+실제 LLM 이 실패하거나 형식이 틀리면 MockLLM 으로 대체하고 그 사실을 실행 기록에 남긴다.
 """
 from __future__ import annotations
 
@@ -24,7 +26,7 @@ LABEL = {"bus": "참석+버스", "car": "참석+자차", "absent": "불참", "un
 
 @dataclass
 class AgentInput:
-    role: str  # participant | manager
+    role: str  # participant | manager | admin
     message: str
     state: str
     pending: dict[str, Any] | None
@@ -32,6 +34,7 @@ class AgentInput:
     tools: list[dict[str, Any]]  # 사용할 수 있는 도구 계약
     history: list[dict[str, str]] = field(default_factory=list)
     actor_name: str = ""
+    context: dict[str, Any] = field(default_factory=dict)  # 총무 Agent: 부서 목록·보고서 단계
 
 
 class LLMError(Exception):
@@ -98,6 +101,8 @@ class MockLLM:
     mode = "mock"
 
     def decide(self, inp: AgentInput) -> dict[str, Any]:
+        if inp.role == "admin":
+            return admin_mock(inp)
         return self._participant(inp) if inp.role == "participant" else self._manager(inp)
 
     # 참가자: 상태 조회 / 회비 문의 / 변경 요청
@@ -198,6 +203,132 @@ class MockLLM:
         return {"type": "reply", "text": "팀 응답·청구 현황 확인, 확인 요청 답변, 명세 정정 요청을 도와드려요. 예) '우리 팀 정산 현황', '확인 요청 보여줘'"}
 
 
+# ------------------------------------------------------------------ 총무 Agent 규칙 기반 해석
+
+A_NOTIFY = re.compile(r"알림|안내|연락|보내|발송|DM|디엠|메시지", re.I)
+A_EXTRA = re.compile(r"추가 ?(회비|납부|금|로|요금|비용)?|더 ?내|덜 ?낸|더 ?걷|미납|부족")
+A_REFUND = re.compile(r"환불|돌려|반환|초과 ?납부|더 ?낸 ?팀")
+A_CHECK = re.compile(r"확인 ?필요|확인할|막힌|막혀|남은 ?일|문제|이상|걸리")
+A_PENDING = re.compile(r"승인 ?대기|승인할")
+A_UNRESOLVED = re.compile(r"미응답|미확정|응답 ?안|미정")
+A_CHANGED = re.compile(r"지난 ?(보고서|버전)|새로|최근|달라진|바뀐 ?(것|점|부분)|업데이트|갱신")
+A_DAY = re.compile(r"당일")
+A_SUMMARY = re.compile(r"요약|현황|전체|보고서|정산|얼마|총액|합계|상태|어떻게")
+A_PERSON = re.compile(r"([가-힣]{2,4})\s*(?:님|씨)")
+A_LIST_WORDS = re.compile(r"누구|명단|목록|사람|대상|알려|보여")
+
+
+def _a_team(inp: AgentInput) -> str | None:
+    text = inp.message.replace(" ", "").upper()
+    teams = inp.context.get("teams", [])
+    for t in sorted(teams, key=lambda t: -len(t["name"])):
+        name = t["name"].replace(" ", "").upper()
+        if name in text or (len(name) > 2 and name.removesuffix("팀") in text):
+            return t["name"]
+    m = re.search(r"T\d{2}", text)
+    return m.group(0) if m else None
+
+
+def _a_reply(inp: AgentInput) -> dict[str, Any]:
+    last = inp.steps[-1]
+    if not last["ok"]:
+        return {"type": "reply", "text": last["error"]["message"]}
+    r, tool = last["result"], last["tool"]
+    if tool == "get_report_summary":
+        ts, pc = r["team_status"], r["people_counts"]
+        billed = f"청구 {_won(r['billed_total'])} → " if r["billed_total"] is not None else ""
+        return {"type": "reply", "text": (
+            f"정산 보고서 v{r['report_version']} ({r['stage']})\n"
+            f"인원 {r['headcount']}명 중 참석 {r['attending']}명 · {r['teams']}개 부서\n"
+            f"회비: {billed}최종 {_won(r['final_total'])}, 확정 입금 {_won(r['received_total'])}\n"
+            f"추가 납부 {ts['extra']}개 부서 {_won(r['extra_total'])} · 환불 {ts['refund']}개 부서 {_won(r['refund_total'])} · 확인 필요 {ts['check']}개 부서 · 정산 완료 {ts['done']}개 부서\n"
+            f"사람별: 추가 납부 {pc['extra']}명, 환불 {pc['refund']}명, 승인 대기 {pc['pending']}명, 환불액 미정 {pc['rule_missing']}명, 응답 미확정 {pc['unresolved']}명 (당일 변동 {r['on_event_day_changes']}명)"
+        )}
+    if tool in ("get_department", "list_people"):
+        t = r.get("team")
+        people = r["people"]
+        head = []
+        if t:
+            gap = ""
+            if t["payment_gap"]:
+                gap = f" · 청구 대비 입금 {'부족' if t['payment_gap'] > 0 else '초과'} {_won(abs(t['payment_gap']))}"
+            head.append(
+                f"{t['name']}({t['code']}) · 담당자 {t['manager'] or '미지정'} · {t['attending']}/{t['headcount']}명 참석\n"
+                f"청구 {_won(t['billed'])} → 최종 {_won(t['final_fee'])}, 확정 입금 {_won(t['received'])}{gap}\n"
+                f"정산 잔액 {_won(abs(t['balance']))} ({t['status_label']})"
+            )
+            if t["blockers"]:
+                head.append("확인할 것: " + "; ".join(t["blockers"]))
+        label = r.get("kind_label", "변동")
+        if tool == "list_people" and r["kind"] != "all":
+            title = f"{label} 대상 {r['count']}명" + ("" if t else " (전체 부서)")
+        else:
+            title = f"변동이 있는 사람 {len(people)}명"
+        rows = [f"- {p['name']}{'' if t else ' (' + p['team'] + ')'}: {p['kind_label']} {_won(p['amount']) if p['amount'] else ''} — {' / '.join(p['changes']) or '변경 기록 없음'}" for p in people]
+        body = "\n".join([*head, title + (":" if rows else ""), *rows])
+        if t and tool == "list_people" and r["kind"] in ("extra", "refund"):
+            body += f"\n※ 회비는 팀 단위라 {'추가 납부는' if r['kind'] == 'extra' else '환불은'} 담당자 {t['manager'] or '(미지정)'}님에게 안내합니다. '{t['name']} 담당자에게 안내 보내줘'라고 하면 보낼게요."
+        return {"type": "reply", "text": body}
+    if tool == "list_teams":
+        rows = [f"- {t['name']}({t['code']}) · 담당자 {t['manager'] or '미지정'} · {_won(abs(t['balance']))}" + (f" · {'; '.join(t['blockers'])}" if t["status"] == "check" else "") for t in r["teams"]]
+        total = f", 합계 {_won(r['total'])}" if r["status"] in ("extra", "refund") else ""
+        return {"type": "reply", "text": f"{r['status_label']} 부서 {r['count']}곳{total}" + (":\n" + "\n".join(rows) if rows else "")}
+    if tool == "find_person":
+        rows = []
+        for p in r["people"]:
+            x = f"- {p['name']} ({p['team']}): 현재 {LABEL[p['choice']]}, 회비 {_won(p['fee'])}"
+            if p["in_report"]:
+                ip = p["in_report"]
+                x += f" · 보고서: {ip['kind_label']} {_won(ip['amount']) if ip['amount'] else ''} — {' / '.join(ip['changes'])}"
+            rows.append(x)
+        return {"type": "reply", "text": ("동명이인이 있어요.\n" if r["count"] > 1 else "") + "\n".join(rows)}
+    if tool == "what_changed":
+        if r.get("first"):
+            return {"type": "reply", "text": f"보고서 v{r['report_version']} 이 첫 버전이라 비교할 이전 버전이 없어요."}
+        rows = [f"- {t['name']}: {(_won(abs(t['before']['balance'])) + ' ' + t['before']['status']) if t['before'] else '새 부서'} → {_won(abs(t['after']['balance']))} {t['after']['status']}" for t in r["teams"]]
+        rows += [f"+ {p['name']}({p['team']}) {p['kind']} {_won(p['amount'])}" for p in r["people_added"]]
+        rows += [f"− {p['name']}({p['team']}) {p['kind']} 해소" for p in r["people_removed"]]
+        return {"type": "reply", "text": f"보고서 v{r['report_version']}(계기: {r['trigger']}) 에서 바뀐 것:\n" + ("\n".join(rows) or "달라진 것이 없어요.")}
+    return {"type": "reply", "text": "확인했어요."}
+
+
+def admin_mock(inp: AgentInput) -> dict[str, Any]:
+    if inp.steps:
+        return _a_reply(inp)
+    msg = inp.message
+    team = _a_team(inp)
+    args: dict[str, Any] = {"team": team} if team else {}
+    refund, extra = bool(A_REFUND.search(msg)), bool(A_EXTRA.search(msg)) and not A_REFUND.search(msg)
+    if A_NOTIFY.search(msg) and (refund or extra or "담당자" in msg):
+        if not (refund or extra):
+            return {"type": "ask", "text": "환불 안내와 추가 납부 안내 중 어떤 것을 보낼까요?", "pending": {"intent": "notify"}}
+        return {"type": "tool", "name": "notify_managers", "args": {**args, "kind": "refund" if refund else "extra"}}
+    if inp.state == "awaiting_info" and (inp.pending or {}).get("intent") == "notify" and (refund or extra):
+        return {"type": "tool", "name": "notify_managers", "args": {**args, "kind": "refund" if refund else "extra"}}
+    person = A_PERSON.search(msg + " ")
+    if person and not team and person.group(1) not in ("담당자", "팀장", "총무"):
+        return {"type": "tool", "name": "find_person", "args": {"name": person.group(1)}}
+    if A_CHANGED.search(msg) and not (refund or extra):
+        return {"type": "tool", "name": "what_changed", "args": {}}
+    day = bool(A_DAY.search(msg))
+    kind = "extra" if extra else "refund" if refund else "pending" if A_PENDING.search(msg) else "unresolved" if A_UNRESOLVED.search(msg) else None
+    if kind is None and A_CHECK.search(msg):
+        if team:
+            return {"type": "tool", "name": "get_department", "args": args}
+        return {"type": "tool", "name": "list_teams", "args": {"status": "check"}}
+    if kind or day:
+        if team or A_LIST_WORDS.search(msg) and ("사람" in msg or "자" in msg or "명" in msg or day):
+            return {"type": "tool", "name": "list_people", "args": {**args, "kind": kind or "all", **({"on_event_day": True} if day else {})}}
+        if kind in ("extra", "refund"):
+            return {"type": "tool", "name": "list_teams", "args": {"status": kind}}
+        return {"type": "tool", "name": "list_people", "args": {"kind": kind}}
+    if team:
+        return {"type": "tool", "name": "get_department", "args": args}
+    if A_SUMMARY.search(msg):
+        return {"type": "tool", "name": "get_report_summary", "args": {}}
+    return {"type": "reply", "text": "정산 보고서에 대해 물어봐 주세요. 예) '경영지원팀의 추가 회비 납부자를 알려줘', '환불할 부서 목록', '확인 필요한 부서', '당일 변동 있던 사람', '지난 보고서 이후 바뀐 것', '환불 대상 담당자에게 안내 보내줘'"}
+
+
 # ------------------------------------------------------------------ 행동 형식 검증
 
 ACTION_TYPES = ("tool", "ask", "reply")
@@ -246,6 +377,70 @@ SYSTEM_PROMPT = """너는 회사 워크숍(대모임) 총무를 돕는 '소통 A
 """
 
 
+ADMIN_PROMPT = """너는 회사 워크숍(대모임, 300명·부서별 팀) 총무를 돕는 '총무 Agent'다. 총무의 질문을 정산 보고서 조회로 바꿔 답한다.
+보고서는 코드가 계산한다: 납부 마감 때 저장한 부서별 청구표 + 그 뒤의 변동 기록(마감 후 변경·당일 변동·입금 배정·환불 지급).
+규칙
+- 금액·인원은 절대 직접 계산하거나 지어내지 않는다. tool_results_this_turn 의 숫자만 인용한다.
+- 부서 이름은 context.teams 에서 고른다. 모호하면 type=ask 로 묻는다.
+- notify_managers 는 호출만 한다. 대상 확인 질문과 '네' 판정·발송은 시스템 코드가 한다.
+- 회비는 팀 단위: 추가 납부·환불은 개인이 아니라 그 부서 팀 담당자에게 안내된다는 점을 답변에 반영한다.
+- 같은 조회를 같은 인자로 두 번 부르지 않는다. 결과가 있으면 한국어로 짧고 구체적으로(이름·금액·사유) 답한다.
+출력: JSON 객체 하나만. {"type":"tool","name":...,"args":{...}} | {"type":"ask","text":...} | {"type":"reply","text":...}
+"""
+
+
+def _prompt_parts(inp: AgentInput) -> tuple[str, dict[str, Any]]:
+    payload = {
+        "tools": inp.tools,
+        "conversation_state": inp.state,
+        "pending": inp.pending,
+        "recent_history": inp.history[-6:],
+        "tool_results_this_turn": inp.steps,
+        "user_message": inp.message,
+    }
+    if inp.role == "admin":
+        return ADMIN_PROMPT, payload | {"context": inp.context}
+    role = "참가자" if inp.role == "participant" else "팀 담당자"
+    return SYSTEM_PROMPT.format(role=role, name=inp.actor_name), payload
+
+
+def _parse_action(text: str) -> dict[str, Any]:
+    try:
+        return json.loads(text[text.find("{"): text.rfind("}") + 1])
+    except (ValueError, TypeError) as e:
+        raise LLMError(f"응답 형식 오류 {type(e).__name__}") from None
+
+
+class ClaudeLLM:
+    """Claude Messages API. 소모임(app/server.py)과 같은 키(LLM_API_KEY)·같은 모델 계열을 쓴다."""
+
+    mode = "claude"
+
+    def __init__(self) -> None:
+        self.last_model = ""
+
+    def decide(self, inp: AgentInput) -> dict[str, Any]:
+        system, payload = _prompt_parts(inp)
+        try:
+            r = httpx.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": settings.claude_api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                json={"model": settings.claude_model, "max_tokens": 800, "temperature": 0.1, "system": system,
+                      "messages": [{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]},
+                timeout=30,
+            )
+        except httpx.HTTPError as e:
+            raise LLMError(f"Claude 연결 오류: {type(e).__name__}") from None
+        if r.status_code != 200:
+            raise LLMError(f"Claude HTTP {r.status_code}")
+        try:
+            text = "".join(b.get("text", "") for b in r.json()["content"] if b.get("type") == "text")
+        except (KeyError, ValueError, TypeError) as e:
+            raise LLMError(f"Claude 응답 형식 오류 {type(e).__name__}") from None
+        self.last_model = settings.claude_model
+        return _parse_action(text)
+
+
 class GeminiLLM:
     mode = "gemini"
 
@@ -253,17 +448,9 @@ class GeminiLLM:
         self.last_model = ""
 
     def decide(self, inp: AgentInput) -> dict[str, Any]:
-        prompt = {
-            "tools": inp.tools,
-            "conversation_state": inp.state,
-            "pending": inp.pending,
-            "recent_history": inp.history[-6:],
-            "tool_results_this_turn": inp.steps,
-            "user_message": inp.message,
-        }
-        role = "참가자" if inp.role == "participant" else "팀 담당자"
+        system, prompt = _prompt_parts(inp)
         body = {
-            "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT.format(role=role, name=inp.actor_name)}]},
+            "systemInstruction": {"parts": [{"text": system}]},
             "contents": [{"role": "user", "parts": [{"text": json.dumps(prompt, ensure_ascii=False)}]}],
             "generationConfig": {"responseMimeType": "application/json", "temperature": 0.1},
         }
@@ -296,4 +483,6 @@ class GeminiLLM:
 
 
 def get_llm() -> LLM:
+    if settings.llm_mode == "claude":
+        return ClaudeLLM()
     return GeminiLLM() if settings.llm_mode == "gemini" else MockLLM()

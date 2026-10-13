@@ -5,7 +5,7 @@ import { Msg, Page, useMeta } from "../components/common";
 import { useAction } from "../hooks";
 
 interface CastMember { role: "participant" | "manager"; participant_id: number; name: string; team: string; label: string }
-interface People { cast: CastMember[]; managers: { participant_id: number; name: string; team: string }[]; participants: { participant_id: number; name: string; team: string; email: string; has_change: boolean }[] }
+interface People { cast: CastMember[]; managers: { participant_id: number; name: string; team: string }[]; participants: { participant_id: number; name: string; team: string; slack_id: string; has_change: boolean }[] }
 
 export default function Home() {
   const meta = useMeta();
@@ -16,9 +16,9 @@ export default function Home() {
         <h2>들어가기</h2>
         <div className="grid">
           <Link className="btn primary" to="/admin/login">총무 로그인</Link>
-          <Link className="btn" to="/manager/login">팀 담당자 (이메일 인증)</Link>
+          <Link className="btn" to="/manager/login">팀 담당자 (Slack 인증)</Link>
         </div>
-        <p className="muted">참가자는 이메일로 받은 <b>개인 초대 링크</b>로 들어옵니다. 링크는 본인 전용이며, 열기만 해서는 아무 응답도 바뀌지 않습니다.</p>
+        <p className="muted">참가자는 Slack DM 으로 받은 <b>개인 초대 링크</b>로 들어옵니다. 링크는 본인 전용이며, 열기만 해서는 아무 응답도 바뀌지 않습니다.</p>
       </div>
       {meta?.demo_tools && <DemoSwitch />}
     </Page>
@@ -47,7 +47,7 @@ function DemoSwitch() {
   return (
     <div className="card">
       <h2>시연용 역할 전환 <span className="pill warn">시연 모드 전용</span></h2>
-      <p className="muted">실제 흐름(초대 메일 링크, 담당자 이메일 인증)을 건너뛰는 단축 기능입니다. 실제 흐름은 <Link to="/dev/inbox">개발용 수신함</Link>의 메일 링크로 확인하세요.</p>
+      <p className="muted">실제 흐름(초대 DM 링크, 담당자 Slack 인증)을 건너뛰는 단축 기능입니다. 실제 흐름은 <Link to="/dev/inbox">개발용 수신함</Link>의 DM 링크로 확인하세요.</p>
       <div className="row" style={{ marginBottom: 8 }}>
         <button className="primary" disabled={busy} onClick={() => go("admin", null, "/admin")}>총무로 보기</button>
       </div>

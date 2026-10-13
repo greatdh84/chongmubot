@@ -93,8 +93,8 @@ def handle_message(db: Session, event: Event, actor: Participant, role: str, tex
         used = sorted({d["by"].split(":")[0] for d in decisions})
         return {
             "configured": configured,
-            "used": used,  # gemini / mock / mock_fallback / code
-            "model": next((d["by"].split(":", 1)[1] for d in decisions if d["by"].startswith("gemini:")), ""),
+            "used": used,  # claude / gemini / mock / mock_fallback / code
+            "model": next((d["by"].split(":", 1)[1] for d in decisions if d["by"].startswith(("gemini:", "claude:"))), ""),
             "fallback": fallback.get("reason", ""),
         }
 
@@ -173,7 +173,7 @@ def handle_message(db: Session, event: Event, actor: Participant, role: str, tex
         tool_names = {t["name"] for t in inp.tools}
         try:
             action = validate_action(llm.decide(inp), tool_names)
-            by = f"gemini:{getattr(llm, 'last_model', '')}" if llm.mode == "gemini" else ("mock_fallback" if fallback else "mock")
+            by = f"{llm.mode}:{getattr(llm, 'last_model', '')}" if llm.mode in ("gemini", "claude") else ("mock_fallback" if fallback else "mock")
         except LLMError as e:
             # 실제 LLM 실패·형식 오류 → 이 턴의 나머지는 규칙 기반으로. 잘못된 출력은 실행하지 않는다.
             fallback["reason"] = str(e)[:200]

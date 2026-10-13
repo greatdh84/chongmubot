@@ -58,7 +58,7 @@ def test_reissue_revokes_old_links(client, db):
     r = client.post(f"/api/large/admin/events/{w.event.id}/participants/{p.id}/invite/reissue")
     assert r.status_code == 200 and r.json()["revoked"] == 1
     assert client.post("/api/large/auth/invite/exchange", json={"token": old}).status_code == 401
-    body = db.query(DevMail).filter_by(to_email=p.email).one().body
+    body = db.query(DevMail).filter_by(to_email=p.slack_id).one().body
     new = re.search(r"#t=([\w-]+)", body).group(1)
     assert client.post("/api/large/auth/invite/exchange", json={"token": new}).status_code == 200
 
@@ -89,12 +89,12 @@ def test_participant_cannot_reach_team_or_admin(client, db):
 
 
 def _manager_login(client, db, p):
-    email = p.email
-    assert client.post("/api/large/auth/manager/request-code", json={"email": email}).status_code == 200
-    mail = db.query(DevMail).filter_by(to_email=email).order_by(DevMail.id.desc()).first()
+    login_id = p.employee_no
+    assert client.post("/api/large/auth/manager/request-code", json={"login_id": login_id}).status_code == 200
+    mail = db.query(DevMail).filter_by(to_email=p.slack_id).order_by(DevMail.id.desc()).first()
     code = re.search(r"인증코드: (\d{6})", mail.body).group(1)
     db.rollback()
-    return client.post("/api/large/auth/manager/verify", json={"email": email, "code": code})
+    return client.post("/api/large/auth/manager/verify", json={"login_id": login_id, "code": code})
 
 
 def test_manager_email_verification_and_team_scope(client, db):
@@ -109,17 +109,17 @@ def test_manager_email_verification_and_team_scope(client, db):
 def test_manager_code_for_non_manager_is_generic_and_sends_nothing(client, db):
     w = make_world(db)
     member = w.members[0][1]
-    r = client.post("/api/large/auth/manager/request-code", json={"email": member.email})
+    r = client.post("/api/large/auth/manager/request-code", json={"login_id": member.employee_no})
     assert r.json()["sent"] is True  # 존재 여부를 알리지 않음
-    assert db.query(DevMail).filter_by(to_email=member.email).count() == 0
-    assert client.post("/api/large/auth/manager/verify", json={"email": member.email, "code": "000000"}).status_code == 401
+    assert db.query(DevMail).filter_by(to_email=member.slack_id).count() == 0
+    assert client.post("/api/large/auth/manager/verify", json={"login_id": member.employee_no, "code": "000000"}).status_code == 401
 
 
 def test_manager_code_attempt_limit(client, db):
     w = make_world(db)
     mgr = w.members[0][0]
-    client.post("/api/large/auth/manager/request-code", json={"email": mgr.email})
-    codes = [client.post("/api/large/auth/manager/verify", json={"email": mgr.email, "code": "999999"}).status_code for _ in range(6)]
+    client.post("/api/large/auth/manager/request-code", json={"login_id": mgr.employee_no})
+    codes = [client.post("/api/large/auth/manager/verify", json={"login_id": mgr.employee_no, "code": "999999"}).status_code for _ in range(6)]
     assert codes[:5] == [401] * 5 and codes[5] == 429
 
 

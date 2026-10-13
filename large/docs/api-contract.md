@@ -20,7 +20,7 @@
 | 403 | `FORBIDDEN`, `CSRF_HEADER_MISSING` | 권한 없음(담당자 해제 등) |
 | 404 | `NOT_FOUND` | 없음 **또는 남의 행사·팀 데이터**(존재 여부를 숨김) |
 | 409 | `MODE_LOCKED`, `REFUND_RULE_MISSING`(detail.refundable_max), `RULE_APPLIES`, `NO_CHANGE`, `PENDING_CHANGE_EXISTS`, `ALREADY_DECIDED`, `DUPLICATE_ALLOCATION`, `ALLOCATION_EXCEEDS_TRANSACTION`, `SETTLEMENT_BLOCKED`(detail=사유 목록), `SETTLEMENT_NOT_CONFIRMED`, `PAYOUT_EXCEEDS_REFUND`, `LOCKED_AFTER_SNAPSHOT`, `TASK_NOT_OPEN` | 상태 충돌 |
-| 422 | `INVALID_REFUND`, `NOTE_REQUIRED`, `VALIDATION_ERROR`, `INVALID_CHOICE`, `UNDECIDED_AFTER_DEADLINE`, `PARTICIPANT_TEAM_MISMATCH`, `NOT_TEAM_MEMBER`, `CSV_COLUMNS`, `CSV_ROWS` | 입력 오류 |
+| 422 | `INVALID_REFUND`, `NOTE_REQUIRED`, `VALIDATION_ERROR`, `INVALID_CHOICE`, `UNDECIDED_AFTER_DEADLINE`, `PARTICIPANT_TEAM_MISMATCH`, `NOT_TEAM_MEMBER`, `CSV_COLUMNS`, `CSV_ROWS`(detail=[{line,error}]), `CSV_EMPTY` | 입력 오류 |
 | 429 | `TOO_MANY_ATTEMPTS` | 로그인·인증코드 시도 초과 |
 | 503 | `CONCURRENT_UPDATE` | 동시에 다른 쓰기가 있어 저장 실패 → 재시도 |
 
@@ -30,10 +30,10 @@
 | POST `/api/large/auth/admin/login` | `{email, password}` | `cm_admin` 쿠키 |
 | GET `/api/large/auth/admin/me` | | `{admin, events[]}` |
 | POST `/api/large/auth/invite/exchange` | `{token}` (링크 `#t=` 값) | `cm_participant` 쿠키, `{participant:{id,name}}` |
-| POST `/api/large/auth/manager/request-code` | `{email}` | 항상 `{sent:true, message}` (존재 여부 숨김) |
-| POST `/api/large/auth/manager/verify` | `{email, code}` | `cm_manager` 쿠키(team_id 고정) |
+| POST `/api/large/auth/manager/request-code` | `{login_id}` (명단 ID 또는 Slack ID) | 항상 `{sent:true, message}` (담당자 여부 숨김). 담당자면 Slack DM 으로 6자리 코드 |
+| POST `/api/large/auth/manager/verify` | `{login_id, code}` | `cm_manager` 쿠키(team_id 고정) |
 | POST `/api/large/auth/{admin|participant|manager}/logout` | | 세션 폐기 |
-| GET `/api/large/meta` | | `{app_mode, email_mode, llm_mode, demo_tools}` |
+| GET `/api/large/meta` | | `{app_mode, notify_mode(mock|slack), llm_mode(mock|claude|gemini), demo_tools}` (`email_mode` 는 이전 이름) |
 
 ## 3. 참가자 `/api/large/me` (세션의 본인만)
 | | |
@@ -57,18 +57,20 @@
 ## 5. 총무 `/api/large/admin/events/{event_id}/…` (자기 행사만)
 | 영역 | 경로 |
 |---|---|
-| 대시보드 | GET `` |
+| 대시보드 | GET `` (+ `stage`, `report{version,…}`. 지난 마감의 기준표가 없으면 이때 저장) |
 | 설정 | PUT `` (`name,event_at,attend_deadline,payment_deadline,fee_*,account_note`; 스냅샷 후 회비·참석 마감 잠김) · GET/POST `/refund-rules` · DELETE `/refund-rules/{id}` |
-| 명단 | POST `/roster` (CSV: 사번,이름,이메일,팀코드,팀명) · GET `/participants?team_id&q` · GET `/teams` |
+| 명단 | POST `/roster` (CSV: **ID,이름,전화번호,Slack ID,소속 부서,팀 담당자** → 부서=팀, 담당자 자동 지정. 결과 `{rows, inserted, updated, teams, managers_assigned, departments[], warnings[]}`) · GET `/participants?team_id&q`(이름·ID·Slack ID) · GET `/teams`(+ `counts`, 담당자 slack_id·phone) |
 | 담당자 | POST `/teams/{team_id}/manager` `{participant_id}` (그 팀원만, 기존 담당자 해제) |
-| 초대 | POST `/participants/{id}/invite/reissue` (기존 전부 폐기 + 새 메일) · `/invite/revoke` |
-| 응답 | POST `/participants/{id}/response` `{choice}` (총무 직접 입력, 마감 후면 즉시 승인) · POST `/snapshot` |
+| 초대 | POST `/participants/{id}/invite/reissue` (기존 전부 폐기 + 새 초대 DM) · `/invite/revoke` |
+| 응답 | POST `/participants/{id}/response` `{choice, note}` (총무 직접 입력·당일 변동. 마감 후면 규칙으로 금액이 정해지는 건 즉시 승인, 규칙이 없는 건(예: 당일 불참)은 승인 대기) · POST `/snapshot` |
 | 변경 | GET `/changes?status=` · POST `/changes/{id}/approve|reject` `{note, refund_amount?}` — 환불 규칙이 없는 건은 `refund_amount`+`note` 없이는 승인 불가 |
 | 입금 | POST `/transactions` (CSV: 거래일시,입금자명,금액,메모) · GET `/transactions` · POST `/transactions/{id}/allocations` `{team_id, participant_id?, amount, basis, confirm}` · POST `/allocations/{id}/confirm|cancel` · POST `/allocations/confirm-high` |
 | Agent | POST `/agent/settlement-review` · GET `/agent-runs?agent=` |
 | 과제 | GET `/tasks?status=active|…&assignee=` · POST `/tasks/{id}/resolve` `{resolution}` |
 | 정산 | GET `/settlements/{team_id}` · POST `/settlements/compute` · POST `/settlements/{team_id}/confirm` · POST `/settlements/{team_id}/payouts` `{amount, memo}` |
-| 이메일 | POST `/emails/enqueue` `{kind: invite|attend_reminder|payment_reminder}` · POST `/emails/dispatch` · GET `/emails` |
+| 정산 보고서 | GET `/report`(최신 + `versions[]`, `event`) · POST `/report/refresh` · GET `/report.csv` (§14) |
+| 총무 Agent | GET/POST `/agent/chat` `{text}` → `{thread, reply}` (§15) |
+| 알림(Slack DM) | POST `/emails/enqueue` `{kind: invite|attend_reminder|payment_reminder|refund_notice|extra_notice}` · POST `/emails/dispatch` · GET `/emails` |
 | 감사 | GET `/audit` |
 
 시연 전용(`APP_MODE=demo` 일 때만 등록): GET `/api/large/dev/inbox?to=`, GET `/api/large/dev/people`, POST `/api/large/dev/switch {role, participant_id?}`.
@@ -115,8 +117,8 @@
 |---|---|---|
 | `admins` | email, password_hash | scrypt |
 | `events` | admin_id, attend_deadline, payment_deadline, fee_bus/car/absent, snapshot_taken_at | |
-| `teams` | event_id, code, name | |
-| `participants` | event_id, team_id, employee_no, name, email | (event, email) 유일 |
+| `teams` | event_id, code, name | 팀 = 부서(명단의 소속 부서). code 는 처음 나온 순서로 T01… |
+| `participants` | event_id, team_id, employee_no(명단 ID), name, slack_id, phone | (event, slack_id)·(event, employee_no) 유일 |
 | `team_managers` | team_id, participant_id, assigned_by, revoked_at | 팀당 활성 1명(부분 유니크) |
 | `invites` | participant_id, token_hash, expires_at, revoked_at | 원문 미저장 |
 | `sessions` | token_hash, role, participant_id/team_id/admin_id, via, expires_at | |
@@ -130,7 +132,10 @@
 | `confirm_tasks` | kind, assignee, team/participant/transaction/change id, status, question, options, answer, evidence, rule, dedupe_key(유일) | 확인 과제 |
 | `chat_threads` / `chat_messages` | state, pending / sender, text, meta(steps, rules) | |
 | `agent_runs` | agent, trigger, evidence_message_id, steps, rules, result, llm_mode | 실행 근거 |
-| `email_jobs` / `dev_inbox` | kind, dedupe_key, status, attempts, scheduled_at, note | 본문은 발송 시 렌더(토큰 미저장) |
+| `email_jobs` / `dev_inbox` | kind, to_email(=받는 사람 Slack ID), dedupe_key, status, attempts, scheduled_at, note | Slack DM 작업(이름은 호환용). 본문은 발송 시 렌더(토큰 미저장) |
+| `team_billings` | team_id(유일), billed, counts, unresolved, lines[{participant_id, choice, fee}], received_by_deadline, captured_at | **납부 마감 청구표**, 한 번 저장 후 수정 안 함 |
+| `settlement_reports` | version, trigger, stage, content_hash, summary, teams[], people[], diff | 정산 보고서 버전. 내용이 같으면 새 버전 없음 |
+| `admin_chats` / `admin_chat_messages` | state, pending / sender, text, meta(steps, llm, report_version) | 총무 Agent 대화(행사당 1개) |
 | `settlements` / `payouts` | version, status, final_fee, received, refunds_paid, balance, detail, blockers / amount | |
 | `audit_logs` | actor, action, target, detail | |
 
@@ -138,7 +143,7 @@
 `change_approval`(총무) · `unknown_depositor` · `ambiguous_depositor` · `unclear_deposit` · `possible_duplicate` · `unresolved_response`(담당자, 정산 차단 안 함) · `correction_request` · `deposit_unresolved` · `overpayment_unexplained` · `multiple_team_reference`(총무 이관).
 상태: `open → answered → resolved` 또는 `escalated → resolved(총무)`.
 
-## 9. 이메일 작업
+## 9. 알림 작업 (Slack DM, `NOTIFY_MODE=mock|slack`)
 | kind | 대상 | dedupe_key | 발송 직전 재검사 |
 |---|---|---|---|
 | `invite` | 전원 | `invite:{pid}:initial` / `:reissue:{ts}` | — (발송 시 새 토큰 발급) |
@@ -146,6 +151,10 @@
 | `payment_reminder` | 잔액>0 팀의 담당자 | `payment:{team}:{KST날짜}` | 담당자 변경·잔액 0·입금 확인 과제 진행 중이면 skip |
 | `confirm_request` | 과제 받은 담당자 | `confirm:{task}` | 과제가 이미 처리됐으면 skip |
 | `manager_code` | 인증 요청자 | `manager_code:{id}` | 즉시 발송(금지 시간·한도 예외) |
+| `refund_notice` | 잔액<0(환불) 부서의 **담당자만** | `refund_notice:{team}:{잔액}` | 잔액이 바뀌어 환불이 아니면 skip. 확인 필요 부서는 만들지 않음 |
+| `extra_notice` | 잔액>0(추가 납부) 부서의 **담당자만** | `extra_notice:{team}:{잔액}` | 같음 |
+
+발송: `conversations.open(users=Slack ID)` → `chat.postMessage`. 모의 모드에서 Slack ID 에 `BOUNCE` 가 있으면 실패 재현.
 
 상태: `queued → sent | skipped | retry_wait(5·10분 백오프) → failed(3회)`. 금지 시간(21~8시 KST)·수신자별 하루 2건 초과 시 `scheduled_at` 연기.
 
@@ -161,9 +170,23 @@
 - `/api/large/meta.scheduler = {enabled, interval_seconds}`
 
 ## 13. Agent 실행 기록의 판단 주체
-`agent_runs.result.decisions[] = {by, action, after_steps}` — `by`: `gemini:<모델>`(실제 LLM), `mock`(규칙 기반 설정), `mock_fallback`(LLM 실패·형식 오류 후 대체), `code`('네/아니요' 판정). `steps[]` 는 코드가 실행한 도구와 결과. `result.llm.fallback` 에 대체 사유. 채팅 메시지 `llm` 필드에 같은 요약. 정산 처리 실행(`agent='settlement'`)은 `llm_mode='rule'` — LLM 을 쓰지 않음.
+`agent_runs.result.decisions[] = {by, action, after_steps}` — `by`: `claude:<모델>`·`gemini:<모델>`(실제 LLM), `mock`(규칙 기반 설정), `mock_fallback`(LLM 실패·형식 오류 후 대체), `code`('네/아니요' 판정). `steps[]` 는 코드가 실행한 도구와 결과. `result.llm.fallback` 에 대체 사유. 채팅 메시지 `llm` 필드에 같은 요약. 정산 처리 실행(`agent='settlement'`)은 `llm_mode='rule'` — LLM 을 쓰지 않음.
 
 ## 11. 공용 서버(hub)와의 경계
 - LARGE 는 `app.main.configure_large(app)`(API·오류 처리·CSRF 미들웨어)와 `add_large_ui(app)`(`/large/` 정적 화면, 내부 경로 새로고침 시 index.html)를 내보냅니다. hub 가 이 둘을 붙입니다.
 - `/api/large/*` 의 없는 경로는 LARGE 가 404 로 끝냅니다(SMALL 로 넘어가지 않음).
 - LARGE DB(`large/backend/var/chongmu.db`)와 SMALL 데이터(`app/data/`, 브라우저 localStorage)는 공유하지 않습니다.
+
+## 14. 마감 기준표와 정산 보고서
+- 기준표(한 번 저장, 수정 안 함): 참석 마감 `deadline_snapshots`(사람별) · 납부 마감 `team_billings`(부서별 청구표). 마감이 지나면 스케줄러·대시보드·보고서 조회 때 빠진 것을 저장합니다. 청구표는 `as_of=납부 마감`으로 계산해 언제 저장해도 같은 값입니다.
+- 변동 기록(추가만): `change_logs`(마감 후·당일 변동), `bank_transactions`+`allocations`, `payouts`.
+- 보고서 `settlement_reports`: 기준표+변동 기록을 정산 Agent 가 다시 계산. 돈·인원에 영향을 주는 POST(변경 승인·반려, 거래 업로드, 배정 확정·취소, 과제 처리, 담당자 답변, 정산 확정, 송금 기록, 명단 업로드, 총무 직접 입력, 총무 Agent 질문) 뒤에 `refresh(trigger)` → `content_hash` 가 같으면 버전 유지, 다르면 `version+1` + `diff{teams[], people_added[], people_removed[]}` + `agent_runs(agent='settlement', trigger='report:…')`.
+- 부서 행: `billed, final_fee, received, received_proposed, paid_by_deadline, late_paid, refunds_paid, payment_gap(=billed−received), change_delta(=final−billed), balance, status(extra|refund|check|done), blockers[]`. `balance = payment_gap + change_delta + refunds_paid`.
+- 사람 행: 청구 때 회비와 최종 회비가 다르거나 미확정인 사람만. `kind ∈ extra|refund|pending|unresolved|rule_missing|changed`, `amount`, `on_event_day`, `changes[]`(from/to·source·requested_at·rule·note).
+- `stage`: `collecting`(참석 마감 전) → `attend_closed` → `payment_closed` → `event_done`(행사 시작 후).
+
+## 15. 총무 Agent
+- 매 질문마다 보고서를 `refresh` 한 뒤 그 버전으로 답합니다. 숫자는 보고서에서만(코드 계산).
+- 조회 도구: `get_report_summary{}` · `get_department{team}` · `list_people{kind?, team?, on_event_day?}` · `list_teams{status?}` · `find_person{name}` · `what_changed{}`. `team` 은 부서 이름·일부·팀코드.
+- 갱신 도구: `notify_managers{kind: refund|extra, team?}` — dry run 으로 대상·금액을 보여 주고 `awaiting_confirmation`. '네/아니요'는 코드가 판정. 실행 시 `refund_notice/extra_notice` 작업 생성 + 발송. 담당자에게만.
+- LLM: `LLM_MODE=mock`(규칙 기반 해석) | `claude`(루트 `.env` 의 `LLM_API_KEY`) | `gemini`. 실패하면 규칙 기반 대체, `decisions[].by` 에 기록.
