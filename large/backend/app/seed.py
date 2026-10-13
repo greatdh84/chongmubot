@@ -1,11 +1,15 @@
-"""재현 가능한 가상 데이터: 300명 · 25개 팀 + 시연 시나리오.
+"""재현 가능한 가상 데이터: 300명 · 25개 부서(팀) + 시연 시나리오.
 
-    python -m app.seed --reset                    # 오늘(KST) 기준 날짜로 생성
-    python -m app.seed --reset --base-date 2026-10-08   # 날짜까지 완전히 고정
+    python -m app.seed --reset                         # 기본: 행사가 어제 끝난 상태(정산 보고서 시연)
+    python -m app.seed --reset --stage before-event    # 행사 5일 전 상태(참석 변경·납부 시연)
+    python -m app.seed --reset --base-date 2026-10-15  # 날짜까지 완전히 고정
 
-같은 --seed / --base-date 면 항상 같은 데이터가 나온다. 모든 이름·이메일은 가상이며 이메일은 example.com.
+같은 --seed / --base-date / --stage 면 항상 같은 데이터가 나온다. 이름·전화번호·Slack ID 는 모두 가상(Slack ID 는 UDEMO….)
+명단은 실제 업로드와 같은 CSV(ID, 이름, 전화번호, Slack ID, 소속 부서, 팀 담당자)로 넣는다.
 
 시나리오(팀코드 · 팀 내 순번, 0번은 담당자)
+- T01(경영지원팀)#5 자차→버스(납부 마감 후, 추가 5,000원) — "경영지원팀의 추가 회비 납부자" 질문용
+- 행사 당일 변동(총무 직접 입력): T20#2 자차→버스(당일 버스 탑승, 추가 납부), T14#4 버스→불참(당일 불참, 환불 규칙 없음 → 총무 결정 필요)
 - T02#7 버스→불참 변경 요청(총무 승인 대기)       - T09#3 자차→불참 변경 요청(승인 대기)
 - T03#3 버스→불참(입금 마감 전, 전액 환불)         - T12#4 버스→불참(입금 마감 후, 50% 환불)
 - T07#5 버스→자차(차액 환불) / T07#8 자차→버스(추가 납부)
@@ -15,7 +19,7 @@
 - T16 입금자 'ㅎㅂ'(불명) — 미납 T19 와 금액이 같아 금액만으로는 팀을 정할 수 없음
 - T06 메모 없는 담당자 명의 입금, T11 팀명 메모, T22 2회 분할 입금, T24 미납(2차 CSV 로 입금), T25 담당자 미지정
 - '결산이자' 37원(회비와 무관한 입금) → 총무 이관
-- emp150 메일은 반송(발송 실패·재시도 시연)
+- 150번째 사람은 Slack ID 가 UBOUNCE… (DM 발송 실패·재시도 시연)
 """
 from __future__ import annotations
 
@@ -32,7 +36,7 @@ from sqlalchemy import select
 
 from . import clock, db as dbmod
 from .config import BACKEND_DIR, settings
-from .models import Admin, DbMeta, Event, Participant, RefundRule, Team, TeamManager
+from .models import Admin, DbMeta, Event, Participant, RefundRule, Team
 from .security import hash_password
 from .services import emails, payments, responses, roster
 
@@ -78,18 +82,23 @@ def kst(d: date, days: float = 0, hour: int = 10, minute: int = 0) -> datetime:
 
 
 def build_roster(rng: random.Random) -> list[dict]:
+    """명단 CSV 와 같은 모양. 팀 담당자 칸은 홀수 부서는 ID, 짝수 부서는 이름으로 적어 둘 다 되는 걸 보인다. T25 는 비워 둠(미지정)."""
     pool = [s + g for s in SURNAMES for g in GIVEN if s + g != "김민준"]
     names = rng.sample(pool, 25 * TEAM_SIZE)
     rows = []
     n = 0
     for ti, team_name in enumerate(TEAM_NAMES, start=1):
+        start = n
         for mi in range(TEAM_SIZE):
             n += 1
             name = names[n - 1]
             if (ti, mi) in ((5, 4), (17, 9)):
                 name = "김민준"  # 동명이인 시나리오
-            email = f"emp{n:03d}@example.com" if n != 150 else "emp150.bounce@example.com"
-            rows.append({"사번": f"E26{n:04d}", "이름": name, "이메일": email, "팀코드": f"T{ti:02d}", "팀명": team_name})
+            slack = f"UDEMO{n:04d}" if n != 150 else "UBOUNCE0150"
+            rows.append({"ID": f"E26{n:04d}", "이름": name, "전화번호": f"010-0000-{n:04d}", "Slack ID": slack, "소속 부서": team_name, "팀 담당자": ""})
+        lead = rows[start]
+        for r in rows[start:]:
+            r["팀 담당자"] = "" if ti == 25 else (lead["ID"] if ti % 2 else lead["이름"])
     return rows
 
 
@@ -105,7 +114,8 @@ def snapshot_choices(rng: random.Random) -> dict[tuple[int, int], str | None]:
         for mi, c in enumerate(["bus"] * 9 + ["car"] * 2 + ["absent"]):
             out[(ti, mi)] = c
     forced = {(2, 7): "bus", (3, 3): "bus", (4, 9): "undecided", (5, 4): "bus", (7, 5): "bus", (7, 8): "car", (8, 10): "bus",
-              (9, 3): "car", (11, 2): "absent", (12, 4): "bus", (13, 6): "bus", (15, 6): "bus", (17, 9): "bus"}
+              (9, 3): "car", (11, 2): "absent", (12, 4): "bus", (13, 6): "bus", (15, 6): "bus", (17, 9): "bus",
+              (1, 5): "car", (20, 2): "car", (14, 4): "bus"}
     out.update(forced)
     # 발표 주 장면 팀(T10): 정산까지 바로 보이도록 미응답·미정 없이
     for mi in range(TEAM_SIZE):
@@ -123,8 +133,10 @@ def to_csv(rows: list[dict]) -> bytes:
     return buf.getvalue().encode("utf-8")
 
 
-def seed(base: date, rng_seed: int = 20261015) -> dict:
+def seed(base: date, rng_seed: int = 20261015, stage: str = "after-event") -> dict:
     rng = random.Random(rng_seed)
+    if stage == "after-event":
+        base = base - timedelta(days=6)  # 모든 일정을 6일 앞당겨 '행사가 어제 끝난' 상태로
     dbmod.init_db()
     db = dbmod.SessionLocal()
     try:
@@ -155,7 +167,8 @@ def seed(base: date, rng_seed: int = 20261015) -> dict:
         rows = build_roster(rng)
         SAMPLES_DIR.mkdir(parents=True, exist_ok=True)
         (SAMPLES_DIR / "roster_synthetic.csv").write_bytes(to_csv(rows))
-        roster.import_roster(db, ev, to_csv(rows), "roster_synthetic.csv", f"admin:{admin.id}")
+        result = roster.import_roster(db, ev, to_csv(rows), "roster_synthetic.csv", f"admin:{admin.id}", admin_id=admin.id)
+        assert result["managers_assigned"] == 24, result  # T25 는 담당자 미지정
 
         teams = {t.code: t for t in db.scalars(select(Team).where(Team.event_id == ev.id))}
         members: dict[int, list[Participant]] = {}
@@ -165,10 +178,7 @@ def seed(base: date, rng_seed: int = 20261015) -> dict:
         def member(ti: int, mi: int) -> Participant:
             return members[ti][mi]
 
-        for ti in range(1, 25):  # T25 는 담당자 미지정
-            db.add(TeamManager(team_id=teams[f"T{ti:02d}"].id, participant_id=member(ti, 0).id, assigned_by=admin.id, assigned_at=kst(base, -20)))
-
-        # 초대 메일(개발용 수신함) — 발송 시점에 토큰 발급
+        # 인원조사 초대 DM(개발용 수신함) — 발송 시점에 토큰 발급
         emails.enqueue_invites(db, ev)
         emails.dispatch_due(db, ev, now=kst(base, -20))
 
@@ -191,12 +201,12 @@ def seed(base: date, rng_seed: int = 20261015) -> dict:
         # 마감 후 변경(총무 승인 완료)
         approved = [((3, 3), "absent", kst(base, -3)), ((7, 5), "car", kst(base, -4)), ((7, 8), "bus", kst(base, -2)),
                     ((11, 2), "bus", kst(base, -5)), ((4, 9), "bus", kst(base, -6)), ((12, 4), "absent", kst(base, -0.5)),
-                    ((15, 6), "car", kst(base, -0.25))]
+                    ((15, 6), "car", kst(base, -0.25)), ((1, 5), "bus", kst(base, -0.3))]
         for (ti, mi), to, at in approved:
             clock.freeze(at)
             ch = responses.submit_change(db, ev, member(ti, mi), to, source="chat", actor=f"participant:{member(ti, mi).id}")
             clock.freeze(at + timedelta(hours=2))
-            responses.decide_change(db, ev, ch, admin, approve=True, note="시드: 총무 승인")
+            responses.decide_change(db, ev, ch, admin, approve=True, note="총무 승인")
         for (ti, mi), to, at in [((2, 7), "absent", kst(base, -0.4)), ((9, 3), "absent", kst(base, -0.35))]:
             clock.freeze(at)
             responses.submit_change(db, ev, member(ti, mi), to, source="chat", actor=f"participant:{member(ti, mi).id}")
@@ -253,6 +263,34 @@ def seed(base: date, rng_seed: int = 20261015) -> dict:
         clock.freeze(kst(base, -0.1))
         review = review_event(db, ev, trigger="seed")
 
+        if stage == "after-event":
+            # 행사 전 총무 처리: Agent 의 high 배정 제안 확정, 미응답·미정은 전화로 확인해 직접 입력(T14 2명은 남겨 둠)
+            from .models import Allocation, DeadlineSnapshot
+
+            clock.freeze(event_at - timedelta(days=2))
+            for aid in list(db.scalars(select(Allocation.id).where(Allocation.event_id == ev.id, Allocation.status == "proposed", Allocation.confidence == "high"))):
+                payments.confirm_allocation(db, ev, aid, admin.id)
+            unresolved = [s_.participant_id for s_ in db.scalars(select(DeadlineSnapshot).where(DeadlineSnapshot.event_id == ev.id, (DeadlineSnapshot.choice.is_(None) | (DeadlineSnapshot.choice == "undecided"))))]
+            for i, pid in enumerate(sorted(unresolved)):
+                p = db.get(Participant, pid)
+                if teams["T14"].id == p.team_id or responses.current_choice(db, pid) not in (None, "undecided"):
+                    continue
+                to = "bus" if i % 3 == 0 else "absent"  # 일부는 늦게 참석 확정(추가 납부), 나머지는 불참 확인
+                ch = responses.submit_change(db, ev, p, to, source="admin", actor=f"admin:{admin.id}", note="응답 없어 전화로 확인")
+                responses.decide_change(db, ev, ch, admin, approve=True, note="전화 확인")
+
+            # 행사 당일 변동: 총무가 현장에서 확인해 직접 입력
+            clock.freeze(event_at + timedelta(hours=1))
+            ch = responses.submit_change(db, ev, member(20, 2), "bus", source="admin", actor=f"admin:{admin.id}", note="당일 현장: 자차 대신 버스 탑승")
+            clock.freeze(event_at + timedelta(hours=2))
+            responses.decide_change(db, ev, ch, admin, approve=True, note="당일 버스 탑승 확인")
+            clock.freeze(event_at + timedelta(hours=1))
+            responses.submit_change(db, ev, member(14, 4), "absent", source="admin", actor=f"admin:{admin.id}", note="당일 현장: 버스 출발 때 나타나지 않음")
+            # 납부 마감 이후 2차 입금(T24)도 들어온 상태로
+            clock.freeze(event_at + timedelta(days=0.5))
+            payments.import_transactions(db, ev, to_csv(batch2), "transactions_batch2.csv", f"admin:{admin.id}")
+            review_event(db, ev, trigger="seed_after_event")
+
         # 발표 등장인물(같은 시드면 항상 같은 사람)
         cast = [
             {"role": "participant", "participant_id": member(10, 5).id, "name": member(10, 5).name, "team": "T10", "label": "주 장면: 모호한 변경 요청(버스→?)"},
@@ -262,10 +300,15 @@ def seed(base: date, rng_seed: int = 20261015) -> dict:
             {"role": "manager", "participant_id": member(13, 0).id, "name": member(13, 0).name, "team": "T13", "label": "보조: 개인·팀 중복 입금 확인"},
         ]
         db.merge(DbMeta(key="purpose", value=DEMO_PURPOSE))
-        db.merge(DbMeta(key="seed", value=json.dumps({"base_date": base.isoformat(), "rng_seed": rng_seed}, ensure_ascii=False)))
+        db.merge(DbMeta(key="seed", value=json.dumps({"base_date": base.isoformat(), "rng_seed": rng_seed, "stage": stage}, ensure_ascii=False)))
+        # 기준표(참석 마감·납부 마감)와 정산 보고서를 '지금' 기준으로 만든다
+        clock.freeze(None)
+        from .services import report
+
+        rep = report.refresh(db, ev, "seed")
         db.merge(DbMeta(key="cast", value=json.dumps(cast, ensure_ascii=False)))
         db.commit()
-        return {"event_id": ev.id, "participants": len(rows), "teams": 25, "transactions": len(tx), "review": review["summary"], "cast": cast}
+        return {"event_id": ev.id, "participants": len(rows), "teams": 25, "transactions": len(tx), "review": review["summary"], "report": f"v{rep.version} {rep.summary['stage_label']}", "cast": cast}
     finally:
         clock.freeze(None)
         db.close()
@@ -276,6 +319,7 @@ def main() -> None:
     ap.add_argument("--reset", action="store_true", help="기존 로컬 DB 를 지우고 새로 만든다")
     ap.add_argument("--base-date", help="기준일(KST, YYYY-MM-DD). 기본: 오늘")
     ap.add_argument("--seed", type=int, default=20261015)
+    ap.add_argument("--stage", choices=["after-event", "before-event"], default="after-event", help="after-event: 행사 다음 날(정산 보고서), before-event: 행사 5일 전")
     args = ap.parse_args()
     if not settings.is_demo:
         raise SystemExit("시드·초기화는 APP_MODE=demo 에서만 할 수 있습니다(운영 모드 거부)")
@@ -292,7 +336,7 @@ def main() -> None:
         for suffix in ("", "-wal", "-shm", "-journal"):
             Path(str(path) + suffix).unlink(missing_ok=True)
     base = date.fromisoformat(args.base_date) if args.base_date else clock.kst(clock.now()).date()
-    result = seed(base, args.seed)
+    result = seed(base, args.seed, args.stage)
     cast = result.pop("cast")
     print(f"시드 완료: {result}")
     print("발표 등장인물:")

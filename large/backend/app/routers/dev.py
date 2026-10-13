@@ -24,7 +24,7 @@ router = APIRouter(prefix=API_PREFIX + "/dev", tags=["dev (demo only)"])
 def inbox(to: str | None = None, db: Session = Depends(get_db)):
     q = select(DevMail)
     if to:
-        q = q.where(DevMail.to_email == to.strip().lower())
+        q = q.where(DevMail.to_email == to.strip().upper())
     return [
         {"id": m.id, "to_email": m.to_email, "subject": m.subject, "body": m.body, "created_at": clock.fmt(m.created_at)}
         for m in db.scalars(q.order_by(DevMail.id.desc()).limit(200))
@@ -41,7 +41,7 @@ def people(db: Session = Depends(get_db)):
     ]
     with_changes = set(db.scalars(select(ChangeLog.participant_id).where(ChangeLog.after_deadline.is_(True))))
     sample = [
-        {"participant_id": p.id, "name": p.name, "team": teams[p.team_id].code, "email": p.email, "has_change": p.id in with_changes}
+        {"participant_id": p.id, "name": p.name, "team": teams[p.team_id].code, "slack_id": p.slack_id, "has_change": p.id in with_changes}
         for p in db.scalars(select(Participant).order_by(Participant.employee_no).limit(24))
     ]
     meta = db.get(DbMeta, "cast")

@@ -52,8 +52,9 @@ def ensure_snapshot(db: Session, event: Event, now: datetime | None = None) -> b
     return True
 
 
-def fee_table(db: Session, event: Event, team_id: int | None = None) -> dict[int, FeeState]:
-    """참가자별 현재 부담액. 스냅샷 전에는 현재 선택의 회비, 후에는 스냅샷 + 승인된 변경의 부담액."""
+def fee_table(db: Session, event: Event, team_id: int | None = None, as_of: datetime | None = None) -> dict[int, FeeState]:
+    """참가자별 현재 부담액. 스냅샷 전에는 현재 선택의 회비, 후에는 스냅샷 + 승인된 변경의 부담액.
+    as_of 를 주면 그 시각까지 승인된 변경만 반영한다(납부 마감 청구표를 만들 때)."""
     q = select(Participant.id).where(Participant.event_id == event.id)
     if team_id is not None:
         q = q.where(Participant.team_id == team_id)
@@ -63,6 +64,8 @@ def fee_table(db: Session, event: Event, team_id: int | None = None) -> dict[int
     last_applied: dict[int, ChangeLog] = {}
     pending: dict[int, int] = {}
     for c in db.scalars(select(ChangeLog).where(ChangeLog.participant_id.in_(pids)).order_by(ChangeLog.id)):
+        if as_of is not None and (c.decided_at or c.requested_at) > as_of:
+            continue
         if c.status == "applied" and c.after_deadline:
             last_applied[c.participant_id] = c
         elif c.status == "pending_approval":

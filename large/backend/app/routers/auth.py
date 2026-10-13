@@ -1,4 +1,4 @@
-"""로그인·초대 토큰 교환·담당자 이메일 인증. 모든 상태 변경은 POST 로만."""
+"""로그인·초대 토큰 교환·담당자 Slack 인증(ID 입력 → Slack DM 으로 인증코드). 모든 상태 변경은 POST 로만."""
 from __future__ import annotations
 
 import time
@@ -84,9 +84,11 @@ def invite_exchange(body: InviteExchange, request: Request, response: Response, 
     return {"participant": {"id": p.id, "name": p.name}}
 
 
-def _managers_by_email(db: Session, email: str) -> list[tuple[Participant, int]]:
+def _managers_by_login(db: Session, login_id: str) -> list[tuple[Participant, int]]:
+    """명단의 ID 또는 Slack ID 로 현재 팀 담당자인 사람을 찾는다."""
     out = []
-    q = select(Participant).join(Event, Event.id == Participant.event_id).where(Participant.email == email.strip().lower(), Event.mode == "large")
+    key = login_id.strip()
+    q = select(Participant).join(Event, Event.id == Participant.event_id).where((Participant.employee_no == key) | (Participant.slack_id == key.upper()), Event.mode == "large")
     for p in db.scalars(q):
         m = active_manager(db, p.team_id)
         if m is not None and m.participant_id == p.id:
@@ -94,13 +96,13 @@ def _managers_by_email(db: Session, email: str) -> list[tuple[Participant, int]]
     return out
 
 
-GENERIC_SENT = {"sent": True, "message": "담당자로 등록된 이메일이면 인증코드를 보냈습니다. 메일함을 확인하세요."}
+GENERIC_SENT = {"sent": True, "message": "팀 담당자로 등록된 ID 면 Slack DM 으로 인증코드를 보냈습니다. Slack 을 확인하세요."}
 
 
 @router.post("/manager/request-code")
 def manager_request_code(body: ManagerCodeRequest, db: Session = Depends(get_db)):
-    """담당자 이메일 인증 1단계. 등록 여부와 관계없이 같은 응답을 준다(이메일 존재 여부 노출 방지)."""
-    found = _managers_by_email(db, body.email)
+    """담당자 인증 1단계. 등록 여부와 관계없이 같은 응답을 준다(담당자 여부 노출 방지)."""
+    found = _managers_by_login(db, body.login_id)
     if not found:
         return GENERIC_SENT
     p, team_id = found[0]
@@ -120,7 +122,7 @@ def manager_request_code(body: ManagerCodeRequest, db: Session = Depends(get_db)
 
 @router.post("/manager/verify")
 def manager_verify(body: ManagerCodeVerify, response: Response, db: Session = Depends(get_db)):
-    found = _managers_by_email(db, body.email)
+    found = _managers_by_login(db, body.login_id)
     if not found:
         raise unauthorized("인증코드가 올바르지 않습니다")
     p, team_id = found[0]
@@ -134,7 +136,7 @@ def manager_verify(body: ManagerCodeVerify, response: Response, db: Session = De
         db.commit()
         raise unauthorized("인증코드가 올바르지 않습니다")
     mc.consumed_at = clock.now()
-    token = create_session(db, "manager", via="email_code", event_id=p.event_id, participant_id=p.id, team_id=team_id)
+    token = create_session(db, "manager", via="slack_code", event_id=p.event_id, participant_id=p.id, team_id=team_id)
     audit(db, p.event_id, f"manager:{p.id}", "manager_verified", f"team:{team_id}")
     db.commit()
     set_session_cookie(response, "manager", token)

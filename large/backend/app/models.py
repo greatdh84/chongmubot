@@ -50,6 +50,8 @@ class Event(Base):
 
 
 class Team(Base):
+    """팀 = 부서. 명단 CSV 의 '소속 부서' 하나가 팀 하나이고, 담당자(팀장)가 팀 회비를 한 번에 걷어 낸다."""
+
     __tablename__ = "teams"
     __table_args__ = (UniqueConstraint("event_id", "code"),)
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -60,13 +62,16 @@ class Team(Base):
 
 class Participant(Base):
     __tablename__ = "participants"
-    __table_args__ = (UniqueConstraint("event_id", "email"), UniqueConstraint("event_id", "employee_no"))
+    """참가자. 연락은 Slack DM(slack_id)으로 한다. employee_no 는 명단 CSV 의 ID 열."""
+
+    __table_args__ = (UniqueConstraint("event_id", "slack_id"), UniqueConstraint("event_id", "employee_no"))
     id: Mapped[int] = mapped_column(primary_key=True)
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), index=True)
     team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), index=True)
     employee_no: Mapped[str] = mapped_column(String(30))
     name: Mapped[str] = mapped_column(String(50))
-    email: Mapped[str] = mapped_column(String(200))
+    slack_id: Mapped[str] = mapped_column(String(40))
+    phone: Mapped[str] = mapped_column(String(30), default="")
 
 
 class TeamManager(Base):
@@ -108,7 +113,7 @@ class AuthSession(Base):
     admin_id: Mapped[Optional[int]] = mapped_column(ForeignKey("admins.id"))
     participant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("participants.id"))
     team_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teams.id"))
-    via: Mapped[str] = mapped_column(String(30), default="")  # password | invite | email_code | demo_switch
+    via: Mapped[str] = mapped_column(String(30), default="")  # password | invite | slack_code | demo_switch
     expires_at: Mapped[datetime]
     revoked_at: Mapped[Optional[datetime]] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=_now)
@@ -327,12 +332,13 @@ class AgentRun(Base):
 
 
 class EmailJob(Base):
-    """이메일 발송 작업. 본문에 토큰을 저장하지 않고 발송 직전에 렌더링한다."""
+    """알림 발송 작업(Slack DM). 테이블 이름은 이전 버전 호환을 위해 그대로 둔다.
+    to_email 에는 받는 사람의 Slack ID 가 들어간다. 본문에 토큰을 저장하지 않고 발송 직전에 렌더링한다."""
 
     __tablename__ = "email_jobs"
     id: Mapped[int] = mapped_column(primary_key=True)
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), index=True)
-    kind: Mapped[str] = mapped_column(String(30))  # invite | attend_reminder | payment_reminder | confirm_request | manager_code
+    kind: Mapped[str] = mapped_column(String(30))  # invite | attend_reminder | payment_reminder | confirm_request | manager_code | refund_notice | extra_notice
     participant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("participants.id"))
     team_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teams.id"))
     task_id: Mapped[Optional[int]] = mapped_column(ForeignKey("confirm_tasks.id"))
@@ -353,7 +359,7 @@ class EmailJob(Base):
 
 
 class DevMail(Base):
-    """모의 이메일 모드의 개발용 수신함(실제 발송 대신 여기에 기록)."""
+    """모의 발송 모드의 개발용 수신함(실제 Slack DM 대신 여기에 기록). to_email = 받는 사람 Slack ID."""
 
     __tablename__ = "dev_inbox"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -416,4 +422,61 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(String(60))
     target: Mapped[str] = mapped_column(String(100), default="")
     detail: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+
+
+class TeamBilling(Base):
+    """납부 마감 시점의 팀별 청구표(한 번 저장 후 수정 금지).
+    담당자가 '이만큼 걷어서 내 주세요'라고 안내받은 금액이고, 마감 후 변동은 이 표와의 차이로 보고서에 나온다."""
+
+    __tablename__ = "team_billings"
+    __table_args__ = (UniqueConstraint("team_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), index=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"))
+    billed: Mapped[int] = mapped_column(default=0)  # 청구액(미확정 인원은 0으로 계산하고 unresolved 로 따로 셈)
+    counts: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)  # bus/car/absent/undecided/none
+    unresolved: Mapped[int] = mapped_column(default=0)
+    lines: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)  # [{participant_id, name, choice, fee}]
+    received_by_deadline: Mapped[int] = mapped_column(default=0)  # 마감까지 입금(배정 확정·제안 포함, 참고값)
+    captured_at: Mapped[datetime] = mapped_column(default=_now)
+
+
+class SettlementReport(Base):
+    """정산 Agent 가 만든 정산 보고서. 기준표(마감 기록) + 변동 기록으로 다시 만들 때마다 새 버전으로 저장한다.
+    내용이 이전 버전과 같으면 새 버전을 만들지 않는다(content_hash)."""
+
+    __tablename__ = "settlement_reports"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), index=True)
+    version: Mapped[int]
+    trigger: Mapped[str] = mapped_column(String(100))
+    stage: Mapped[str] = mapped_column(String(30))  # collecting | attend_closed | payment_closed | event_done
+    content_hash: Mapped[str] = mapped_column(String(64))
+    summary: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    teams: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    people: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    diff: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # 이전 버전 대비 바뀐 팀·사람
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+
+
+class AdminChat(Base):
+    """총무와 총무용 Agent 의 대화. state/pending 은 마지막 메시지 meta 대신 여기 둔다(행사당 1개)."""
+
+    __tablename__ = "admin_chats"
+    __table_args__ = (UniqueConstraint("event_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"))
+    state: Mapped[str] = mapped_column(String(30), default="idle")  # idle | awaiting_confirmation
+    pending: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, default=None)
+    updated_at: Mapped[datetime] = mapped_column(default=_now)
+
+
+class AdminChatMessage(Base):
+    __tablename__ = "admin_chat_messages"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("admin_chats.id"), index=True)
+    sender: Mapped[str] = mapped_column(String(20))  # user | agent
+    text: Mapped[str] = mapped_column(Text)
+    meta: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(default=_now)

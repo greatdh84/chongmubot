@@ -100,3 +100,47 @@ details summary { cursor: pointer; }
   .stat .value { font-size: 17px; }
   .top .modes { width: 100%; }
 }
+
+/* ---------- 대시보드: 총무 Agent + 단계 ---------- */
+.dash { display: grid; gap: 14px; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); align-items: start; margin-bottom: 14px; }
+@media (max-width: 920px) { .dash { grid-template-columns: minmax(0, 1fr); } }
+.dash > .card, .dash > div > .card { margin-bottom: 14px; }
+.agent-chat { height: min(640px, 80vh); border-color: #cfe3c6; }
+.agent-chat h2::before { content: "🤖 "; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.chips button { background: var(--soft); }
+.todo { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.todo li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+.todo li:last-child { border-bottom: none; }
+
+/* 상태 색(추가 납부·환불·확인 필요·완료) */
+.stat.tone-warn { border-color: #f2dc9a; background: var(--yellow-l); }
+.stat.tone-info { border-color: #c5dbf1; background: var(--blue-l); }
+.stat.tone-bad { border-color: #f4c5c1; background: var(--red-l); }
+.stat.tone-ok { border-color: #cfe3c6; background: var(--green-l); }
+.stat.clickable { text-align: left; cursor: pointer; font-weight: 400; padding: 10px 12px; }
+.stat.clickable .value { font-size: 17px; }
+
+/* 세그먼트 버튼(하위 탭·필터) */
+.seg { gap: 4px; }
+.seg button.active { background: var(--green); border-color: var(--green); color: #fff; }
+
+/* 단계 타임라인: 참석 마감 → 납부 마감 → 행사 → 보고서 */
+.timeline { list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; margin: 10px 0 0; padding: 0; counter-reset: st; }
+.timeline li { position: relative; padding: 22px 8px 0 0; display: grid; gap: 1px; font-size: 13px; counter-increment: st; }
+.timeline li::before { content: counter(st); position: absolute; top: 0; left: 0; width: 18px; height: 18px; border-radius: 50%; background: var(--grey-l); color: var(--muted); font-size: 11px; font-weight: 800; display: grid; place-items: center; z-index: 1; }
+.timeline li::after { content: ""; position: absolute; top: 8px; left: 18px; right: 0; height: 2px; background: var(--line); }
+.timeline li:last-child::after { display: none; }
+.timeline li.done::before { background: var(--green); color: #fff; }
+.timeline li.done::after { background: var(--green); }
+.timeline li.now::before { background: var(--yellow); color: var(--ink); }
+@media (max-width: 560px) { .timeline { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 10px; } .timeline li:nth-child(2)::after { display: none; } }
+
+/* 부서 카드 */
+.depts { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); margin-top: 10px; }
+.dept { text-align: left; display: grid; gap: 5px; padding: 10px 12px; border-radius: 12px; font-weight: 400; }
+.dept.selected { border-color: var(--green); background: var(--green-l); }
+.dept .bar { height: 5px; border-radius: 3px; background: var(--grey-l); overflow: hidden; }
+.dept .bar span { display: block; height: 100%; background: var(--green); }
+tr.sel td { background: var(--green-l); }
+td > button.small, td .row > button.small { white-space: nowrap; }

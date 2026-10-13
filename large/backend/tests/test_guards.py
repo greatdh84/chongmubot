@@ -157,7 +157,7 @@ def test_small_mode_event_is_invisible_to_large_api(client, db):
     client.post("/api/large/auth/admin/login", json={"email": "admin@example.com", "password": "pw-123456"})
     assert client.get(f"/api/large/admin/events/{w.event.id}").status_code == 404
     assert client.post("/api/large/auth/invite/exchange", json={"token": token}).status_code == 401
-    r = client.post("/api/large/auth/manager/request-code", json={"email": w.members[0][0].email})
+    r = client.post("/api/large/auth/manager/request-code", json={"login_id": w.members[0][0].employee_no})
     assert r.status_code == 200  # 응답은 같지만
     from app.models import DevMail
     assert db.query(DevMail).count() == 0  # 코드는 보내지 않음

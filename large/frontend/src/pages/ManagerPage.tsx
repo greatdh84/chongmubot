@@ -21,7 +21,7 @@ export default function ManagerPage() {
   const { busy, message, run } = useAction();
   const [correction, setCorrection] = useState("");
   useEventName(data?.event.name);
-  if (error) return <Page narrow><div className="card"><p className="error">{error.message}</p><Link to="/manager/login">이메일 인증하기</Link></div></Page>;
+  if (error) return <Page narrow><div className="card"><p className="error">{error.message}</p><Link to="/manager/login">Slack 으로 인증하기</Link></div></Page>;
   if (!data) return <Page><p className="muted">불러오는 중…</p></Page>;
   const b = data.billing;
   const open = data.tasks.filter((t) => t.status === "open");

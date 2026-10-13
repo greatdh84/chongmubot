@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import os
+
+os.environ.setdefault("LARGE_SKIP_ROOT_ENV", "1")  # 저장소 루트 .env 의 실제 Slack·Claude 키를 테스트가 읽지 않게
+
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -71,7 +75,7 @@ def make_world(db, *, n_teams=3, size=4, after_attend=False, after_payment=False
         members[ti] = []
         for mi in range(size):
             n += 1
-            p = Participant(event_id=ev.id, team_id=t.id, employee_no=f"{prefix}E{n:03d}", name=f"{prefix}이" + chr(0xAC00 + n * 37) + chr(0xAC00 + n * 53 + 11), email=f"{prefix}p{n:03d}@example.com")
+            p = Participant(event_id=ev.id, team_id=t.id, employee_no=f"{prefix}E{n:03d}", name=f"{prefix}이" + chr(0xAC00 + n * 37) + chr(0xAC00 + n * 53 + 11), slack_id=f"U{prefix or 'T'}{n:06d}")
             db.add(p)
             db.flush()
             members[ti].append(p)

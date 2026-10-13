@@ -20,7 +20,7 @@ def test_attend_reminder_only_unanswered_and_rechecked(db):
     db.commit()
     assert result.get("sent") == 1 and result.get("skipped") == 1
     assert db.query(EmailJob).filter_by(participant_id=c.id).one().note == "이미 응답함"
-    assert [m.to_email for m in db.query(DevMail)] == [b.email]
+    assert [m.to_email for m in db.query(DevMail)] == [b.slack_id]
 
 
 def test_quiet_hours_defer(db):
@@ -46,13 +46,13 @@ def test_daily_limit_defers(db, monkeypatch):
     out = emails.dispatch_due(db, w.event)
     assert out.get("deferred") == 1
     assert db.query(EmailJob).filter_by(kind="attend_reminder").one().note.startswith("하루 최대")
-    assert db.query(DevMail).filter_by(to_email=p.email).count() == 1
+    assert db.query(DevMail).filter_by(to_email=p.slack_id).count() == 1
 
 
 def test_failure_retry_then_failed(db):
     w = make_world(db, n_teams=1, size=1)
     p = w.members[0][0]
-    p.email = "x.bounce@example.com"
+    p.slack_id = "UBOUNCE001"
     emails.enqueue_invites(db, w.event)
     now = NOW
     statuses = []
@@ -75,7 +75,7 @@ def test_payment_reminder_targets_unpaid_team_managers_without_amounts(db):
     assert emails.enqueue_payment_reminders(db, w.event)["created"] == 1
     emails.dispatch_due(db, w.event)
     mail = db.query(DevMail).one()
-    assert mail.to_email == w.members[1][0].email
+    assert mail.to_email == w.members[1][0].slack_id
     assert "40,000" not in mail.body and "/manager/login" in mail.body  # 금액 대신 확인 링크
 
 

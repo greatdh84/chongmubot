@@ -18,18 +18,22 @@
 - 실행 가능한 프런트(React+TS)·백엔드(FastAPI+SQLite), 외부 키 없이 동작
 - 공통 데이터 모델과 API 계약 (`docs/api-contract.md`)
 - 총무·참가자·담당자 기본 화면, 초대 링크 검증, 역할별 접근 제한
-- 모의 이메일 수신함, 모의/Gemini LLM 어댑터, 소통·정산 Agent
+- 모의 Slack DM 수신함, 모의/Claude/Gemini LLM 어댑터, 소통·정산 Agent
 - 재현 가능한 가상 300명·25팀 데이터 + 시나리오(변경, 입금자 불명, 동명이인, 개인·팀 중복 입금 가능성, 분할 입금, 미납, 담당자 미지정, 반송 메일)
 - 금액 계산·권한·중복 배정 방지 테스트
 
 ### 제외
-Slack, 이메일 답장 자동 수집, 은행 API, 실제 송금, 배포, 팀 내부 수금 관리(회사 총무에게 납부된 회비만 관리).
+이메일, Slack 답장 자동 수집, 은행 API, 실제 송금, 배포, 팀 내부 수금 관리(회사 총무에게 납부된 회비만 관리).
 
 ## 4. 핵심 규칙
 | 규칙 | 구현 위치 |
 |---|---|
 | 시연 회비: 버스 20,000 / 자차 15,000 / 불참 0 (행사별 설정) | `Event.fee_*` |
 | 참석 마감과 팀 입금 마감 분리 | `Event.attend_deadline`, `payment_deadline` |
+| 전체 명단 CSV(ID·이름·전화번호·Slack ID·소속 부서·팀 담당자) → 부서 = 팀, 담당자 자동 지정, 오류 시 전체 반려 | `services/roster.py` |
+| 연락은 Slack DM: 인원조사는 개인, 회비·환불·추가 납부는 부서 담당자에게만 | `adapters/email.py`(Slack), `services/emails.py` |
+| 납부 마감 청구표를 한 번 저장(수정 금지), 이후 변동과 비교해 보고서 | `TeamBilling`, `services/report.py` |
+| 보고서는 버전으로 저장, 내용이 같으면 새 버전 없음, 이전 버전과 차이 기록 | `SettlementReport` |
 | 마감 기준 응답은 한 번 저장 후 보존, 이후 변경은 이력으로 추가 | `DeadlineSnapshot`, `ChangeLog` |
 | 마감 후 변경은 총무 승인 후 반영 | `ChangeLog.status=pending_approval` + `change_approval` 과제 |
 | 변경 시점·항목별 환불 규칙. 감액분 × 환불률만 환불, 규칙 없으면 0원(총무 확인) | `RefundRule`, `services/fees.py` |
@@ -43,6 +47,9 @@ Slack, 이메일 답장 자동 수집, 은행 API, 실제 송금, 배포, 팀 �
 | 정산에는 총무가 확정한 배정만 반영 | `Allocation.status=confirmed` |
 
 ## 5. Agent 정의
+
+총무 Agent(추가): 총무 질문 → 보고서 조회 도구 선택 → 답변. 갱신은 담당자 안내 발송 하나뿐이며 총무 '네' 후 코드가 실행. LLM 은 해석만, 숫자는 보고서.
+
 | | 소통 Agent | 정산 Agent |
 |---|---|---|
 | role | 참가자·담당자의 창구 | 입금·응답 대조 담당 |
