@@ -57,6 +57,8 @@ h1,h2,h3,h4{margin:0}
 .top-in{max-width:1440px;margin:0 auto;padding:10px 20px;display:flex;align-items:center;gap:14px}
 .brand{display:flex;align-items:center;gap:8px;font-weight:800;color:var(--green-d);white-space:nowrap}
 .brand .logo{width:30px;height:30px;border-radius:9px;background:var(--green);display:grid;place-items:center;font-size:17px}
+.brand .logo img{width:100%;height:100%;object-fit:cover;border-radius:inherit} /* 도총·채총 사진 */
+.brand .logo{overflow:hidden}
 .page{max-width:1440px;margin:0 auto;padding:20px}
 
 /* ---------- cards ---------- */
@@ -714,10 +716,10 @@ function fmtWhen(d, withSec){
   const day = diff === 0 ? '오늘' : diff === 1 ? '내일' : `${d.getMonth()+1}/${d.getDate()}`;
   return `${day} ${pad(d.getHours())}:${pad(d.getMinutes())}${withSec ? ':' + pad(d.getSeconds()) : ''}`;
 }
-// 구남친은 정해진 시간대에만 보냄: 새벽 1:00~4:00 (고정) + 낮술하기를 켜면 12:00~18:00
+// 구남친은 정해진 시간대에만 보냄: 새벽 1:00~4:00 (고정) + 낮술하기를 켜면 09:00~18:00
 // q 에 windows([[시작분, 끝분], …])가 있으면 '그 안에서만 보냄', 없으면 from~to 가 '금지 시간'
-const exbfWindows = () => [[60, 240], ...(S.dayDrink ? [[720, 1080]] : [])];
-const exbfText = () => `새벽 1:00~4:00${S.dayDrink ? ' · 낮 12:00~18:00' : ''}`;
+const exbfWindows = () => [[60, 240], ...(S.dayDrink ? [[540, 1080]] : [])];
+const exbfText = () => `새벽 1:00~4:00${S.dayDrink ? ' · 낮 9:00~18:00' : ''}`;
 const quietOf = persona => persona === 'shy' ? {windows:exbfWindows()} : S.quiet;
 function inQuiet(d, q){
   const m = d.getHours()*60 + d.getMinutes();
@@ -741,6 +743,8 @@ function nextTimes(sec, q, n){
 function dailyMax(sec, q){ if (q.windows) return Math.floor(q.windows.reduce((a, [f, t]) => a + t - f, 0) * 60 / sec); let quiet = (toMin(q.to) - toMin(q.from) + 1440) % 1440; if (q.from === q.to) quiet = 0; return Math.floor((1440 - quiet) * 60 / sec); }
 function freqText(f){ const p = []; if (+f.h) p.push(`${+f.h}시간`); if (+f.m) p.push(`${+f.m}분`); if (+f.s) p.push(`${+f.s}초`); return p.join(' ') || '0초'; }
 
+// 설정 화면 성격 카드 예시에 부르는 이름
+const CARD_NAMES = {active:'채원', shy:'은규', oldie:'도형', strict:'은규'}; // 구남친은 이름 없이 '자요?'로 시작
 function ctxFor(id){
   const e = S.event;
   return {name: id ? shortName(id) : '서준', event: e.name, fee: won(+e.fee||0), deadline: fmtDeadline(e.deadline),
@@ -1077,7 +1081,7 @@ function renderSizePick(){
   $('#app').innerHTML = `
   <header class="top"><div class="top-in">
     <button class="btn ghost sm" data-act="goStart">← 시작화면</button>
-    <div class="brand"><span class="logo">🐸</span>총무봇 만들기</div>
+    <div class="brand"><span class="logo"><img src="assets/logo.jpg" alt=""></span>총무봇 만들기</div>
   </div></header>
   <main class="page">
     <div class="size-h"><h2>어떤 모임의 총무봇을 만들까요?</h2><p>모임 규모에 따라 설정 항목과 대시보드가 달라집니다.</p></div>
@@ -1133,7 +1137,7 @@ function renderSmallSetup(){
   $('#app').innerHTML = `
   <header class="top"><div class="top-in">
     <button class="btn ghost sm" data-act="${S.started ? 'goDash' : 'changeSize'}">← ${S.started ? '대시보드' : '모임 규모'}</button>
-    <div class="brand"><span class="logo">🐸</span>소모임 총무봇 ${S.started ? '설정' : '만들기'}</div>
+    <div class="brand"><span class="logo"><img src="assets/logo.jpg" alt=""></span>도총 & 채총</div>
     <div class="grow"></div>
     <span class="hitl">HITL 1</span>
     <button class="btn yellow" data-act="confirmStart">${S.started ? '변경 저장' : '확인하고 시작하기'}</button>
@@ -1381,7 +1385,7 @@ function renderDinnerDash(){
   const ps = people();
   $('#app').innerHTML = `
   <header class="top"><div class="top-in">
-    <button class="brand btn ghost" data-act="goStart" style="padding:4px 8px"><span class="logo">🐸</span>도총 & 채총</button>
+    <button class="brand btn ghost" data-act="goStart" style="padding:4px 8px"><span class="logo"><img src="assets/logo.jpg" alt=""></span>도총 & 채총</button>
     <span class="tag b">#${esc(S.channel)}</span>
     ${S.paused ? '<span class="tag o">⏸ 봇 일시정지</span>' : '<span class="tag g">● 봇 동작 중</span>'}
     <div class="grow"></div>
@@ -1409,13 +1413,14 @@ function renderDinnerDash(){
           <div class="card-b">
             <div class="set-row"><label>봇 상태</label><div class="row"><button class="switch ${S.paused ? '' : 'on'}" data-act="togglePause" aria-label="봇 동작"></button><span class="small">${S.paused ? '일시정지 · 독촉 안 보냄' : '동작 중'}</span></div></div>
             <div class="set-row"><label>성격</label><div class="seg sm">${Object.entries(PERSONAS).map(([k,p]) => `<button class="${S.persona === k ? 'on' : ''}" data-act="dset" data-path="persona" data-val="${k}">${p.ic} ${p.label}</button>`).join('')}</div></div>
+            ${S.persona === 'oldie' ? `<div class="set-row"><label>라떼모드</label><div>${latteToggle()}</div></div>` : ''}
             <div class="set-row"><label>독촉 전략</label><div class="seg sm">${Object.entries(STRATEGIES).map(([k,p]) => `<button class="${S.strategy === k ? 'on' : ''}" data-act="dset" data-path="strategy" data-val="${k}">${p.label}</button>`).join('')}</div></div>
             <div class="set-row"><label>독촉 간격</label><div class="time-in small">
               <input class="inp num" type="number" min="0" data-dbind="freq.h" value="${esc(S.freq.h)}">시간
               <input class="inp num" type="number" min="0" max="59" data-dbind="freq.m" value="${esc(S.freq.m)}">분
               <input class="inp num" type="number" min="0" max="59" data-dbind="freq.s" value="${esc(S.freq.s)}">초</div></div>
             ${S.persona === 'shy' ? `<div class="set-row"><label>전송 시간</label><div class="small">🌙 ${exbfText()} <span class="muted">(고정)</span>
-              <label class="row" style="gap:6px;margin-top:4px;cursor:pointer"><input type="checkbox" data-act="dayDrink" ${S.dayDrink ? 'checked' : ''}>🍺 낮술하기</label></div></div>` : `<div class="set-row"><label>금지 시간</label><div class="time-in small"><input class="inp" type="time" data-dbind="quiet.from" value="${esc(S.quiet.from)}">~<input class="inp" type="time" data-dbind="quiet.to" value="${esc(S.quiet.to)}"></div></div>`}
+              <label class="row" style="gap:6px;margin-top:4px;cursor:pointer"><input type="checkbox" data-act="dayDrink" ${S.dayDrink ? 'checked' : ''}>🍺 낮술하기</label>${emoToggle()}</div></div>` : `<div class="set-row"><label>금지 시간</label><div class="time-in small"><input class="inp" type="time" data-dbind="quiet.from" value="${esc(S.quiet.from)}">~<input class="inp" type="time" data-dbind="quiet.to" value="${esc(S.quiet.to)}"></div></div>`}
             ${ph === 'survey' && (S.survey || {}).ts
               ? `<div class="set-row" style="margin:0"><label>조사 마감</label><input class="inp" type="datetime-local" data-dbind="survey.deadline" value="${esc(S.survey.deadline)}"></div>`
               : ph === 'plan' ? `<div class="set-row" style="margin:0"><label>투표 마감</label><input class="inp" type="datetime-local" data-dbind="dinner.voteDeadline" value="${esc(S.dinner.voteDeadline)}"></div>` : ''}
@@ -1762,7 +1767,7 @@ function meetSync(){
       : ph === 'survey' ? (p.surveyAt ? '' : '참석 조사 응답 아직 ([응답하기] 버튼)')
       : ph === 'settle' ? ((p.owe || 0) > 0 && p.pay !== '입금' ? '정산 입금 아직 (금액은 개인 DM 확인)' : '') : '';
     if (t) todo[m.slackId] = t; });
-  const body = {channel:S.slackChannel, persona:S.persona, info:meetInfo(), names, todo}, key = JSON.stringify(body);
+  const body = {channel:S.slackChannel, persona:S.persona, info:meetInfo(), names, todo, flavor:flavorOf()}, key = JSON.stringify(body);
   if (key === UI.meetSent) return;
   UI.meetSent = key; slackApi('/api/meet', body).catch(() => { UI.meetSent = ''; });
 }
@@ -1956,6 +1961,21 @@ setInterval(async () => {
   try { await sendGroup(); } finally { remindBusy = false; }
 }, 1000);
 
+// 라떼·감성 멘트 엔진 (1초마다): 모임이 시작됐고 모드가 켜져 있으면 정한 간격마다 단체방에 문구 그대로 올림
+let flavorBusy = false;
+setInterval(async () => {
+  if (!flavorOn() || !S.started || S.paused || flavorBusy) return;
+  const now = Date.now();
+  if (!S.flavorNext){ S.flavorNext = now + flavorEvery() * 1000; return; }
+  if (now < S.flavorNext || inQuiet(new Date(), quietOf(S.persona))) return;
+  flavorBusy = true; S.flavorNext = now + flavorEvery() * 1000;
+  const parts = nextFlavor(), what = `${flavorName()}: “${parts[0].split('\n')[0].slice(0, 24)}”${parts.length > 1 ? ` 외 ${parts.length - 1}개` : ''}`;
+  try {
+    if (SLACK.status === 'on' && S.slackChannel) await slackSend({channel:S.slackChannel}, {text:parts.join('\n'), label:flavorName(), mood:''}, S.persona, what, {raw:true, parts});
+    else { log('소통', `#${S.channel} ${what} (데모)`); render(); }
+  } finally { flavorBusy = false; save(); }
+}, 1000);
+
 // 다음 자동 독촉까지 남은 시간 표시 (화면 전체를 다시 그리지 않고 글자만 갱신)
 setInterval(() => document.querySelectorAll('[data-due]').forEach(el => {
   const left = Math.max(0, Math.round((+el.dataset.due - Date.now()) / 1000));
@@ -2014,7 +2034,7 @@ function setupPersona(n){ const s = S; return `
             <section class="sec" data-pv="msg">
         <div class="sec-h"><span class="n">${n}</span><div><h3>총무 기본 성격</h3><p>봇이 대화방에서 쓰는 기본 말투입니다.</p></div></div>
         <div class="grid4">${Object.entries(PERSONAS).map(([k,p]) => `
-          <button class="opt ${s.persona === k ? 'on' : ''}" data-act="set" data-path="persona" data-val="${k}"><b>${p.ic} ${p.label}</b><span>${esc(fill(LINES[k].dm0, ctxFor('hw')).slice(0, 30))}…</span></button>`).join('')}</div>
+          <button class="opt ${s.persona === k ? 'on' : ''}" data-act="set" data-path="persona" data-val="${k}"><b>${p.ic} ${p.label}</b><span>${esc(fill(LINES[k].dm0, {...ctxFor('hw'), name:CARD_NAMES[k] || '채원'}).slice(0, 30))}…</span></button>`).join('')}</div>
       </section>`; }
 function setupStrategy(n){ const s = S; return `
             <section class="sec" data-pv="msg">
@@ -2027,7 +2047,7 @@ function setupPersonaStrategy(n){ const s = S; return `
         <div class="sec-h"><span class="n">${n}</span><div><h3>총무 성격 · 독촉 전략</h3><p>봇이 쓰는 기본 말투와, 독촉이 반복될 때 말투가 어떻게 바뀔지 정합니다.</p></div></div>
         <label class="f">성격</label>
         <div class="grid4">${Object.entries(PERSONAS).map(([k,p]) => `
-          <button class="opt ${s.persona === k ? 'on' : ''}" data-act="set" data-path="persona" data-val="${k}"><b>${p.ic} ${p.label}</b><span>${esc(fill(LINES[k].dm0, ctxFor('hw')).slice(0, 30))}…</span></button>`).join('')}</div>
+          <button class="opt ${s.persona === k ? 'on' : ''}" data-act="set" data-path="persona" data-val="${k}"><b>${p.ic} ${p.label}</b><span>${esc(fill(LINES[k].dm0, {...ctxFor('hw'), name:CARD_NAMES[k] || '채원'}).slice(0, 30))}…</span></button>`).join('')}</div>
         <label class="f" style="margin-top:14px">독촉 전략</label>
         <div class="grid3">${Object.entries(STRATEGIES).map(([k,t]) => `
           <button class="opt ${s.strategy === k ? 'on' : ''}" data-act="set" data-path="strategy" data-val="${k}"><b>${t.ic} ${t.label}</b><span>${t.desc}</span></button>`).join('')}</div>
@@ -2046,13 +2066,15 @@ function setupFreq(n){ const s = S, sec = freqSec(s.freq); return `
             <div class="time-in"><input class="inp" type="time" value="01:00" disabled>부터
               <input class="inp" type="time" value="04:00" disabled>까지</div>
             <label class="row" style="margin-top:10px;gap:6px;cursor:pointer"><input type="checkbox" data-act="dayDrink" ${S.dayDrink ? 'checked' : ''}><b>🍺 낮술하기</b></label>
-            ${S.dayDrink ? `<div class="time-in" style="margin-top:6px"><input class="inp" type="time" value="12:00" disabled>부터
+            ${S.dayDrink ? `<div class="time-in" style="margin-top:6px"><input class="inp" type="time" value="09:00" disabled>부터
               <input class="inp" type="time" value="18:00" disabled>까지</div>` : ''}
+            ${emoToggle()}
             <p class="small muted" style="margin:8px 0 0">🌙 <b>구남친</b>은 ${exbfText()}에만 보내요 (고정). 그 밖의 시간에 걸린 메시지는 다음 전송 시간으로 미뤄요.</p>
           </div>` : `<div><label class="f">전송 금지 시간</label>
             <div class="time-in"><input class="inp" type="time" data-bind="quiet.from" value="${esc(s.quiet.from)}">부터
               <input class="inp" type="time" data-bind="quiet.to" value="${esc(s.quiet.to)}">까지</div>
             <p class="small muted" style="margin:8px 0 0">금지 시간에 걸린 메시지는 끝나는 시각으로 미뤄 보냅니다.</p>
+            ${s.persona === 'oldie' ? latteToggle() : ''}
           </div>`}
         </div>
         <div id="freqNote" style="margin-top:10px">${freqNote(sec)}</div>
@@ -2089,6 +2111,7 @@ function renderPreview(){
       <div class="row" style="margin:18px 0 8px"><b>독촉 예시 · ${PERSONAS[S.persona].ic} ${PERSONAS[S.persona].label} × ${STRATEGIES[S.strategy].ic} ${STRATEGIES[S.strategy].label}</b><span class="grow"></span>
         ${S.strategy === 'chaos' ? '<button class="btn sm" data-act="reroll">🎲 다시 뽑기</button>' : ''}</div>
       <div class="slack">${dinnerNagSample().map(m => `<div class="stage-lb">${m.label} · #${esc(S.channel)}</div>${bubble(m.text, m.mood, m.k === 'burst')}`).join('')}</div>
+      ${flavorPreview()}
       <p class="small muted" style="margin-top:14px">공지·독촉 문구는 실제로 보낼 때 Claude가 성격에 맞게 다시 써요. 투표 메시지는 그대로 올라가요. 독촉은 단체방에 이름 없이 인원만 말해요(예: 3명).<br>
         다음 단계: ${D.dateMode === 'vote' || D.placeMode === 'vote' ? '투표 마감 → 총무 확정 → ' : ''}참석 조사(시트 생성${D.baseFee.on ? ` · 기본회비 ${won(+D.baseFee.amount || 0)}` : ''}) → 모임 → 정산</p>`;
   } else if (UI.pvTab === 'msg'){
@@ -2097,6 +2120,7 @@ function renderPreview(){
       <div class="row" style="margin-bottom:12px"><b>${PERSONAS[S.persona].ic} ${PERSONAS[S.persona].label} × ${STRATEGIES[S.strategy].ic} ${STRATEGIES[S.strategy].label}</b><span class="grow"></span>
         ${S.strategy === 'chaos' ? '<button class="btn sm" data-act="reroll">🎲 다시 뽑기</button>' : ''}</div>
       <div class="slack">${seq.map(m => `<div class="stage-lb">${m.label} ${m.ch === 'group' ? '· #' + esc(S.channel) : '· 서준님에게'}</div>${bubble(m.text, m.mood, m.k === 'burst')}`).join('')}</div>
+      ${flavorPreview()}
       <p class="small muted" style="margin-top:14px">받는 사람 예시: 정서준 (미응답) · 실제 앱은 LLM이 받는 사람과 상황에 맞춰 문구를 만듭니다. 데모는 예시 문구입니다.</p>`;
   } else {
     const sec = freqSec(S.freq);
@@ -2141,7 +2165,7 @@ function renderDash(){
   const extraCols = S.schema.filter(c => !c.locked && c.key !== '메모').slice(0, 3);
   $('#app').innerHTML = `
   <header class="top"><div class="top-in">
-    <button class="brand btn ghost" data-act="goStart" style="padding:4px 8px"><span class="logo">🐸</span>도총 & 채총</button>
+    <button class="brand btn ghost" data-act="goStart" style="padding:4px 8px"><span class="logo"><img src="assets/logo.jpg" alt=""></span>도총 & 채총</button>
     <span class="tag b">#${esc(S.channel)}</span>
     ${S.paused ? '<span class="tag o">⏸ 봇 일시정지</span>' : '<span class="tag g">● 봇 동작 중</span>'}
     <div class="grow"></div>
@@ -2179,13 +2203,14 @@ function renderDash(){
           <div class="card-b">
             <div class="set-row"><label>봇 상태</label><div class="row"><button class="switch ${S.paused ? '' : 'on'}" data-act="togglePause" aria-label="봇 동작"></button><span class="small">${S.paused ? '일시정지 · 독촉 안 보냄' : '동작 중'}</span></div></div>
             <div class="set-row"><label>성격</label><div class="seg sm">${Object.entries(PERSONAS).map(([k,p]) => `<button class="${S.persona === k ? 'on' : ''}" data-act="dset" data-path="persona" data-val="${k}">${p.ic} ${p.label}</button>`).join('')}</div></div>
+            ${S.persona === 'oldie' ? `<div class="set-row"><label>라떼모드</label><div>${latteToggle()}</div></div>` : ''}
             <div class="set-row"><label>독촉 전략</label><div class="seg sm">${Object.entries(STRATEGIES).map(([k,p]) => `<button class="${S.strategy === k ? 'on' : ''}" data-act="dset" data-path="strategy" data-val="${k}">${p.label}</button>`).join('')}</div></div>
             <div class="set-row"><label>독촉 간격</label><div class="time-in small">
               <input class="inp num" type="number" min="0" data-dbind="freq.h" value="${esc(S.freq.h)}">시간
               <input class="inp num" type="number" min="0" max="59" data-dbind="freq.m" value="${esc(S.freq.m)}">분
               <input class="inp num" type="number" min="0" max="59" data-dbind="freq.s" value="${esc(S.freq.s)}">초</div></div>
             ${S.persona === 'shy' ? `<div class="set-row"><label>전송 시간</label><div class="small">🌙 ${exbfText()} <span class="muted">(고정)</span>
-              <label class="row" style="gap:6px;margin-top:4px;cursor:pointer"><input type="checkbox" data-act="dayDrink" ${S.dayDrink ? 'checked' : ''}>🍺 낮술하기</label></div></div>` : `<div class="set-row"><label>금지 시간</label><div class="time-in small"><input class="inp" type="time" data-dbind="quiet.from" value="${esc(S.quiet.from)}">~<input class="inp" type="time" data-dbind="quiet.to" value="${esc(S.quiet.to)}"></div></div>`}
+              <label class="row" style="gap:6px;margin-top:4px;cursor:pointer"><input type="checkbox" data-act="dayDrink" ${S.dayDrink ? 'checked' : ''}>🍺 낮술하기</label>${emoToggle()}</div></div>` : `<div class="set-row"><label>금지 시간</label><div class="time-in small"><input class="inp" type="time" data-dbind="quiet.from" value="${esc(S.quiet.from)}">~<input class="inp" type="time" data-dbind="quiet.to" value="${esc(S.quiet.to)}"></div></div>`}
             <div class="set-row" style="margin:0"><label>회비 마감</label><input class="inp" type="datetime-local" data-dbind="event.deadline" value="${esc(e.deadline)}"></div>
           </div>
         </section>
@@ -2746,7 +2771,10 @@ document.addEventListener('click', e => {
       if (SLACK.status === 'on' && S.slackChannel) slackSend({channel:S.slackChannel}, {text, label:'최종 인원 공지', mood:''}, S.persona, '최종 인원 공지', {raw:true});
       else log('소통', `#${S.channel} 최종 인원 공지 (데모)`);
       break; }
-    case 'dayDrink': S.dayDrink = !S.dayDrink; log('총무', `구남친 낮술하기 ${S.dayDrink ? '켬 (12:00~18:00 추가)' : '끔'}`); break;
+    case 'flavorEvery': S.flavorEvery = +d.sec; UI.pvTab = 'msg'; S.flavorNext = Date.now() + (+d.sec) * 1000; break;
+    case 'toggleEmo': S.emo = !S.emo; UI.pvTab = 'msg'; S.flavorNext = Date.now() + flavorEvery() * 1000; log('총무', `구남친 감성 ${S.emo ? 'ON' : 'OFF'}`); break;
+    case 'toggleLatte': S.latte = !S.latte; UI.pvTab = 'msg'; S.flavorNext = Date.now() + flavorEvery() * 1000; log('총무', `부장님 라떼모드 ${S.latte ? 'ON' : 'OFF'}`); break;
+    case 'dayDrink': S.dayDrink = !S.dayDrink; log('총무', `구남친 낮술하기 ${S.dayDrink ? '켬 (09:00~18:00 추가)' : '끔'}`); break;
     case 'phaseDm': openDmPlan([d.id]); return;
     case 'phaseDmAll': openDmPlan(phasePending().map(p => p.id)); return;
     case 'dmSet': {
@@ -2885,6 +2913,41 @@ document.addEventListener('keydown', e => {
 <script>
 const HERO_SRC = 'assets/start-hero.jpg'; // 시작화면 그림 (버튼까지 그림 안에 있음)
 // 실제 Slack 발송: 서버가 Claude 로 성격에 맞게 다시 쓴 뒤 보냄 (실패 시 예시 문구 그대로)
+// 성격별 추가 모드: 구남친 감성 ON, 부장님 라떼모드 ON
+const flavorOf = () => ({emo:!!S.emo, latte:!!S.latte});
+// 독촉과 상관없이 단체방에 주기적으로 올리는 멘트 (부장님 라떼모드 · 구남친 감성 ON). 문구 그대로 보냄
+const FLAVOR_LINES = {oldie:["나 때는 회식 투표 이런게 어딨어, 부장이 다 정했다", "회식 끝나고 슈퍼 가서 하드 하나씩 먹자^^", "다들 건배사 준비했나???", "옛날엔 총무가 장부에 볼펜으로 다 적었다, 계산기 두드리면서. 세상 참 편하다 편해", "우리 때는 적금 이자가 10%가 넘었어~ 그땐 그냥 넣어두면 됐다고^^", "나 신입 때는 삐삐로 연락받았다~ 8282 알지? 빨리빨리!", "MZ는 회식 싫어한다며~ 근데 이게 다 사회생활이야", "나 때는 여기 주변 다 논밭이었다"],
+  shy:["여러분… 자요?\n다 자겠죠…\n단톡방에 이런 거 보내면 안 되는 거 아는데\n그냥… 오늘은 좀 보내고 싶었어요\n아침에 보면 못 본 척해주세요", "자요…?\n…\n다들 읽기만 하시네요\n숫자 줄어드는 거 보고 있어요\n{인원}명 중에 {읽은 수}명…\n…다 보고 있는 거 알아요", "술 좀 마셨어요\n그래서 하는 말인데요\n저 이 방 진짜 좋아해요\n…내일 이 메시지 지울 수도 있어요\n근데 진심이에요", "고백할 게 있어요…\n저 사실 이 모임 처음 만들어질 때부터\n제일 기대한 사람이 저예요\n다들 그냥 회식이라고 생각하셨겠지만\n저한테는… 아니었어요", "우리 지난번 모였던 날\n다들 기억하세요?\n저는 그날 사진 아직도 가끔 봐요\n누가 고기 태웠는지까지 기억나요\n…이거 저만 그래요?", "솔직히 말할게요…\n요즘 다른 모임도 나가봤어요\n다들 괜찮은 사람들이었어요\n근데 이 방 같은 데는 없더라고요\n…돌아와도 될까요 저", "이 방 공지 올릴 때마다 떨려요\n읽씹당할까 봐서요\n반응 하나 달리면 하루 종일 기분 좋고\n아무도 안 달면…\n…그냥 그런 날도 있는 거죠 ㅎ", "이 방에 있는 누군가한테 하는 말인데요…\n누군지는 말 안 할게요\n본인은 알 거예요\n…아마 모르겠죠\n그래서 더 말 못 하겠어요", "지난 모임 때 제 옆자리 앉으셨던 분…\n아 아니에요\n그냥 고기 잘 구우셨다고요\n그 말이 하고 싶었어요\n…진짜 그것뿐이에요", "답장 제일 빨리 해주시는 분 있잖아요\n늘 고마웠어요\n이름은 안 부를게요\n부르면 다들 아실 테니까…\n…아 다들 이미 아시겠네요", "아 방금 메시지 무시해주세요\n잘못 보냈어요\n…라고 하기엔 너무 길게 썼네요\n그냥 읽어주세요\n다 진심이니까요", "죄송해요 여러분\n새벽 감성이었어요\n아침 되면 다 괜찮아질 거예요\n…괜찮아질까요?\n모르겠어요", "방 나가기 누를 뻔했어요\n근데 못 누르겠더라고요\n총무가 방 나가면 안 되잖아요…\n…그게 이유의 전부는 아니지만요", ["다들 바쁘세요?", "숫자는 줄었는데…", "이모티콘 하나만 달아주시면 안 될까요", "…", "괜찮아요 혼자 떠들게요", "근데 진짜 아무도 안 자요?", "ㅋㅋ 제가 왜 이러죠\n이 방에서 이러면 안 되는데\n…내일 다들 모른 척해주세요"]]};
+const FLAVOR_EVERY = [[3600, '1시간'], [1800, '30분'], [600, '10분'], [30, '🔥 30초']];
+const flavorOn = () => (S.persona === 'oldie' && S.latte) || (S.persona === 'shy' && S.emo);
+const flavorName = () => S.persona === 'oldie' ? '☕ 라떼 멘트' : '🌙 새벽 감성 멘트';
+const flavorEvery = () => +S.flavorEvery || 3600;
+const flavorEveryPicker = () => `<div class="row wrap" style="gap:6px;margin:6px 0 0 24px"><span class="small muted">독촉과 별개로 단체방에</span>${FLAVOR_EVERY.map(([sec, l]) =>
+  `<button class="btn sm ${flavorEvery() === sec ? 'primary' : ''}" data-act="flavorEvery" data-sec="${sec}">${l}</button>`).join('')}<span class="small muted">마다</span></div>`;
+// {인원}·{읽은 수} 채우기 (읽은 수는 인원보다 적게)
+function fillFlavor(t){
+  const n = Math.max(2, S.invited.length), read = Math.max(1, Math.floor(n * (0.4 + Math.random() * 0.4)));
+  const f = x => x.replace(/\{인원\}/g, n).replace(/\{읽은 수\}/g, Math.min(read, n - 1));
+  return Array.isArray(t) ? t.map(f) : [f(t)];
+}
+// 다음 멘트: 한 바퀴 다 쓰기 전엔 같은 멘트 안 나오게 섞어서 차례로
+function nextFlavor(){
+  const pool = FLAVOR_LINES[S.persona] || [];
+  if (!S.flavorBag || S.flavorBag.p !== S.persona || !S.flavorBag.left.length)
+    S.flavorBag = {p:S.persona, left:pool.map((_, i) => i).sort(() => Math.random() - 0.5)};
+  return fillFlavor(pool[S.flavorBag.left.shift()]);
+}
+// 미리보기용 (실제 순서와 무관하게 앞의 몇 개)
+const flavorSample = k => (FLAVOR_LINES[S.persona] || []).slice(0, k).map(t => fillFlavor(t));
+function flavorPreview(){
+  if (!flavorOn()) return '';
+  const every = (FLAVOR_EVERY.find(x => x[0] === flavorEvery()) || [0, ''])[1];
+  return `<div class="row" style="margin:18px 0 8px"><b>${flavorName()} · 독촉과 별개로 ${every}마다</b></div>
+    <div class="slack">${flavorSample(S.persona === 'oldie' ? 3 : 2).map(parts => `<div class="stage-lb">#${esc(S.channel)}</div>${parts.map(p => bubble(p, '', false)).join('')}`).join('')}</div>
+    <p class="small muted" style="margin-top:8px">${S.persona === 'shy' ? '🌙 구남친 전송 시간에만 올라가요. ' : ''}멘트 ${(FLAVOR_LINES[S.persona] || []).length}개를 섞어서 한 바퀴 돌 때까지 겹치지 않게 보내요.</p>`;
+}
+const emoToggle = () => `<label class="row" style="gap:6px;margin-top:6px;cursor:pointer"><input type="checkbox" data-act="toggleEmo" ${S.emo ? 'checked' : ''}><b>🌙 감성 ON</b><span class="small muted">추억·비유 가득한 새벽 감성 + 단체방 새벽 멘트</span></label>${S.emo ? flavorEveryPicker() : ''}`;
+const latteToggle = () => `<label class="row" style="gap:6px;margin-top:6px;cursor:pointer"><input type="checkbox" data-act="toggleLatte" ${S.latte ? 'checked' : ''}><b>☕ 라떼모드 ON</b><span class="small muted">메시지마다 '라떼는 말이야~' 한 줄 + 단체방 라떼 멘트</span></label>${S.latte ? flavorEveryPicker() : ''}`;
 // Claude 가 문장을 매번 다르게 쓰도록 주는 상황 정보
 function sendHint(m){
   const nth = +((m.label || '').match(/(\d+)차/) || [])[1] || 0;
@@ -2892,7 +2955,7 @@ function sendHint(m){
 }
 async function slackSend(to, m, persona, what, opts = {}){
   try {
-    const r = await slackApi('/api/slack/send', {...to, ...opts, text:m.text, persona, situation:`${m.label} (${m.mood})`, mood:m.k || '', kind:S.template, phase:S.phase, facts:m.facts || '', hint:sendHint(m)});
+    const r = await slackApi('/api/slack/send', {...to, ...opts, text:m.text, persona, situation:`${m.label} (${m.mood})`, mood:m.k || '', kind:S.template, phase:S.phase, facts:m.facts || '', hint:sendHint(m), flavor:flavorOf()});
     log('소통', `Slack 발송 ✓ ${what}${r.llm ? ` · Claude 작성${r.parts > 1 ? ` · ${r.parts}개로 나눠 보냄` : ''}` : ''}: “${r.text.slice(0, 70)}${r.text.length > 70 ? '…' : ''}”`);
     toast(`Slack으로 보냈어요${r.llm ? ' (Claude 작성)' : ''}`);
   } catch(e){ log('소통', `Slack 발송 실패 · ${what}: ${slackErr(e.message)}`); toast(`Slack 발송 실패: ${slackErr(e.message)}`); }

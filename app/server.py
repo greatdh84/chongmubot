@@ -13,7 +13,7 @@ API
   GET  /api/slack/members                 워크스페이스 이름 + 사람 멤버 목록
   POST /api/slack/channel  {name, users}  채널 생성 후 users 초대
   POST /api/slack/invite   {channel, users} 기존 채널에 추가 초대
-  POST /api/slack/send     {channel|user, text, persona, situation, name, mood?, kind?, phase?, facts?, hint?, survey_channel?}
+  POST /api/slack/send     {channel|user, text, persona, situation, name, mood?, kind?, phase?, facts?, hint?, flavor?, parts?, survey_channel?}
                            Claude 가 성격대로 처음부터 짧은 메시지 1~3개로 써서 몇 초 간격으로 나눠 보냄
   POST /api/pay/parse      {text?, images?[dataURL]}  은행 입금 문자·캡처에서 입금자·금액·시각을 읽음
   POST /api/receipt/parse  {images[dataURL]}  영수증에서 최종 결제 금액과 가게 이름을 읽음
@@ -250,6 +250,20 @@ def exbf_extra(key, mood, group, name):
     return out
 
 
+# 성격별 추가 모드 (화면의 토글): 구남친 '감성 ON', 부장님 '라떼모드 ON'
+EMO_EXTRA = ("★감성 ON (가장 중요): 새벽 감성이 폭발한 상태다. 레퍼토리보다 이걸 우선한다. 반드시 ① 같이 갔던 곳·그날 날씨·같이 듣던 노래 같은 추억을 한 줄, "
+             "② 달·비·별·가로등 같은 비유를 한 줄 넣는다. 발라드 가사처럼 아련하게 쓰고 🌙·🥀 이모지를 하나 쓴다. "
+             "메시지는 4~5개로 나눠도 된다. 그래도 전할 사실(마감 등)은 마지막에 꼭 넣는다.\n")
+LATTE_TOPICS = ["삐삐로 약속 잡던 시절", "회식은 무조건 3차까지 가던 시절", "출석부에 볼펜으로 이름 쓰던 시절", "지하철 토큰 쓰던 시절",
+                "노래방 탬버린 담당이던 시절", "공중전화 앞에 줄 서던 시절", "카세트테이프로 노래 녹음하던 시절", "막내가 고기 굽던 시절",
+                "엑셀 대신 장부에 손으로 회비 적던 시절", "다이얼 전화로 회식 예약하던 시절"]
+
+
+def latte_extra(key):
+    return (f"라떼모드 ON: 메시지마다 '라떼는 말이야~' 또는 '나 때는~'으로 시작하는 옛날 얘기를 한 줄 꼭 넣는다. "
+            f"이번 소재: {pick_fresh(key + ':latte', LATTE_TOPICS)}. 옛날 얘기 뒤에 전할 사실로 자연스럽게 돌아온다.\n")
+
+
 def exbf_record(key, msgs):
     with RECENT_LOCK:
         EXBF_DAY[key] = time.strftime("%Y-%m-%d")
@@ -328,7 +342,11 @@ def hint_text(hint, group, mood):
     return " · ".join(random.sample(out, min(len(out), 1 if mood in ("last", "burst") else random.choice((1, 2)))))
 
 
-def compose(text, persona, situation, name, mood="", kind="", phase="", group=False, facts="", hint=None, key=""):
+MSGS_SCHEMA = {"type": "object", "properties": {"messages": {"type": "array", "items": {"type": "string"}}},
+               "required": ["messages"], "additionalProperties": False}
+
+
+def compose(text, persona, situation, name, mood="", kind="", phase="", group=False, facts="", hint=None, key="", flavor=None):
     """전할 내용(사실)을 바탕으로 Claude 가 성격대로 짧은 메시지 1~3개를 처음부터 씀. 실패하면 None
     facts 가 있으면(부장님) 완성 문장 대신 사실만 넘겨 매번 새로 쓰게 함. key 는 반복 막기용 받는 사람"""
     if not LLM_KEY:
@@ -355,8 +373,10 @@ def compose(text, persona, situation, name, mood="", kind="", phase="", group=Fa
         if facts:
             body = (f"전할 사실(이 문장은 말투를 무시하고 사실만 뽑아 쓸 것): {facts}\n"
                     f"참고 정보(어울리면 한 번만 자연스럽게, 아니면 빼기): {hint_text(hint, group, mood)}")
+        if (flavor or {}).get("latte") and mood != "burst":  # 곽철용 버럭에는 안 섞음
+            extra += latte_extra(key)
     if persona == "shy":
-        extra = exbf_extra(key, mood, group, name)
+        extra = exbf_extra(key, mood, group, name) + (EMO_EXTRA if (flavor or {}).get("emo") else "")
         length = "3~4줄 이내(줄바꿈으로 짧게 끊기)"
         if facts:
             body = f"전할 사실(말투는 무시하고 사실만 뽑아 쓸 것): {facts}"
@@ -369,11 +389,12 @@ def compose(text, persona, situation, name, mood="", kind="", phase="", group=Fa
               + ("- 지금은 새벽(잠 못 드는 시간)이라는 설정으로 쓴다. 인사는 붙이지 않는다.\n" if persona == "shy"
                  else f"- 지금은 {part}({now.tm_hour}시)이다. 어울리면 짧은 인사를 붙이되 매번 같은 표현은 피한다.\n" if mood not in ("last", "burst")
                  else "- 인사·안부는 붙이지 않고 바로 본론으로 들어간다.\n") +
-              "- 출력은 JSON 문자열 배열만. 예: [\"…\", \"…\"]")
+              "- 나눠 보낼 메시지들을 messages 배열에 순서대로 담는다.")
     where = "단체방 전체" if group or not name else name
     try:
-        raw = claude(system, f"상황: {situation}\n받는 사람: {where}\n{body}")
-        msgs = json.loads(raw[raw.find("["): raw.rfind("]") + 1])
+        # 구조화 출력 + 넉넉한 max_tokens (생각하느라 토큰을 다 써서 빈 대답이 오는 일 방지)
+        raw = claude(system, f"상황: {situation}\n받는 사람: {where}\n{body}", max_tokens=4000, schema=MSGS_SCHEMA)
+        msgs = json.loads(raw)["messages"]
         msgs = [m.strip() for m in msgs if isinstance(m, str) and m.strip()][:5 if persona == "shy" else 3]
         if msgs and persona == "shy":
             exbf_record(key, msgs)
@@ -419,9 +440,11 @@ def send(data):
     # raw: 확정 공지처럼 문구를 바꾸면 안 되는 메시지
     msgs = None if data.get("raw") else compose(text, persona, data.get("situation", ""), data.get("name", ""),
                                                 data.get("mood", ""), data.get("kind", ""), data.get("phase", ""), bool(data.get("channel")),
-                                                data.get("facts", ""), data.get("hint"), data.get("channel") or data.get("user", ""))
+                                                data.get("facts", ""), data.get("hint"), data.get("channel") or data.get("user", ""),
+                                                data.get("flavor"))
     llm = bool(msgs)
-    msgs = msgs or [text]
+    # parts: 문구 그대로 여러 개로 나눠 보냄 (구남친 '읽씹 후 연타' 같은 멘트)
+    msgs = msgs or ([p for p in data.get("parts") or [] if p] if data.get("raw") else []) or [text]
     if data.get("extra"):
         msgs[-1] += "\n" + data["extra"]
     channel = data.get("channel") or slack("conversations.open", users=data.get("user", ""))["channel"]["id"]
@@ -764,6 +787,7 @@ def meet_save(data):
     with LOCK:
         db = meet_load()
         db[ch] = {"persona": data.get("persona", "active"), "info": data.get("info", {}), "names": data.get("names", {}),
+                  "flavor": data.get("flavor", {}),
                   "todo": data.get("todo", {}),
                   "at": time.strftime("%m/%d %H:%M")}
         DATA.mkdir(exist_ok=True)
@@ -809,6 +833,11 @@ def chat_think(meet, sv, uid, name, text, history, streak):
     label, _, style = PERSONAS.get(persona, PERSONAS["active"])
     traits, examples = TRAITS.get(persona, TRAITS["active"])
     tone = f"\n평소 말투: {OLDIE_MOODS['soft'][0]}" if persona == "oldie" else ""
+    flavor = meet.get("flavor") or {}
+    if persona == "oldie" and flavor.get("latte"):
+        tone += "\n" + latte_extra(meet.get("_ch", "") + uid).strip()
+    if persona == "shy" and flavor.get("emo"):
+        tone += "\n" + EMO_EXTRA.strip()
     qs = sv.get("questions", []) if sv else []
     fields = [f"{q['key']}({q.get('type')}: {'O 또는 X' if q.get('type') == 'ox' else q.get('options') or '자유 입력'})" for q in qs]
     prev = (sv or {}).get("users", {}).get(uid, {})
