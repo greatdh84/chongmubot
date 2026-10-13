@@ -787,7 +787,7 @@ def meet_save(data):
     with LOCK:
         db = meet_load()
         db[ch] = {"persona": data.get("persona", "active"), "info": data.get("info", {}), "names": data.get("names", {}),
-                  "flavor": data.get("flavor", {}),
+                  "flavor": data.get("flavor", {}), "ended": bool(data.get("ended")),
                   "todo": data.get("todo", {}),
                   "at": time.strftime("%m/%d %H:%M")}
         DATA.mkdir(exist_ok=True)
@@ -876,6 +876,9 @@ def chat_handle(ch, uid, text, ts, thread_ts, client):
     if not meet or not text.strip() or not LLM_KEY:
         if not meet:
             print(f"단체방 메시지 무시 ({ch}: 대시보드가 모임 정보를 아직 안 보낸 채널)")
+        return
+    if meet.get("ended"):  # 정산까지 끝난 모임은 단체방 대화에 더 끼어들지 않음
+        print(f"단체방 메시지 무시 ({ch}: 정산이 끝난 모임)")
         return
     name = meet.get("names", {}).get(uid) or "참가자"
     hist = HISTORY.setdefault(ch, [])
