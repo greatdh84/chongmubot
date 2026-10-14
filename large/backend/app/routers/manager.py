@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from .. import clock
 from ..agents import communication
+from ..services import report as rpt
 from ..agents.tools import ToolContext, run_tool, team_counts
 from ..config import API_PREFIX
 from ..db import get_db
@@ -69,6 +70,7 @@ def answer(task_id: int, body: TaskAnswer, ctx: ManagerCtx = Depends(current_man
         err = step["error"]
         raise AppError(404 if err["code"] == "NOT_FOUND" else 409 if err["code"] == "TASK_NOT_OPEN" else 422, err["code"], err["message"])
     add_message(db, tctx.thread, "agent", f"답변을 기록했어요. 정산 Agent 재검토 결과: {step['result']['review']['summary']}", {"steps": [step]})
+    rpt.refresh(db, ctx.event, "manager_answer")
     db.commit()
     return step["result"]
 
@@ -104,5 +106,6 @@ def get_chat(ctx: ManagerCtx = Depends(current_manager), db: Session = Depends(g
 @router.post("/chat")
 def send_chat(body: ChatSend, ctx: ManagerCtx = Depends(current_manager), db: Session = Depends(get_db)):
     out = communication.handle_message(db, ctx.event, ctx.participant, "manager", body.text)
+    rpt.refresh(db, ctx.event, "manager_chat")
     db.commit()
     return out

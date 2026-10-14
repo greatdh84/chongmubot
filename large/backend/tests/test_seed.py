@@ -9,7 +9,7 @@ from app.models import BankTransaction, ConfirmTask, Participant, Team, TeamMana
 
 def _fingerprint():
     with dbmod.SessionLocal() as s:
-        people = s.execute(select(Participant.employee_no, Participant.name, Participant.email).order_by(Participant.employee_no)).all()
+        people = s.execute(select(Participant.employee_no, Participant.name, Participant.slack_id).order_by(Participant.employee_no)).all()
         txns = s.execute(select(BankTransaction.depositor, BankTransaction.amount).order_by(BankTransaction.id)).all()
         kinds = dict(s.execute(select(ConfirmTask.kind, func.count()).group_by(ConfirmTask.kind)).all())
         return people, txns, kinds, s.scalar(select(func.count()).select_from(Team)), s.scalar(select(func.count()).select_from(TeamManager))

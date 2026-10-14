@@ -3,75 +3,107 @@ import { api, CHOICE_LABEL, fmtTime, won, type SettlementCalc, type Task } from 
 import { ChoicePill, Msg, StatusPill } from "../../components/common";
 import { useAction, useLoad } from "../../hooks";
 
-interface TeamRow { id: number; code: string; name: string; headcount: number; manager: { participant_id: number; name: string; email: string } | null; final_fee: number; received: number; refunds_paid: number; balance: number; balance_label: string; blockers: string[]; settlement_status: string | null }
-interface PRow { id: number; employee_no: string; name: string; email: string; team: { id: number; code: string; name: string }; is_manager: boolean; choice: string | null; snapshot_choice: string | null; fee: number | null; pending_change_id: number | null; invite: { issued: number; active: number; latest_expires_at: string | null; last_used_at: string | null } }
+interface TeamRow { id: number; code: string; name: string; headcount: number; manager: { participant_id: number; name: string; slack_id: string; phone: string } | null; counts: Record<string, number>; final_fee: number; received: number; refunds_paid: number; balance: number; balance_label: string; blockers: string[]; settlement_status: string | null }
+interface PRow { id: number; employee_no: string; name: string; slack_id: string; phone: string; team: { id: number; code: string; name: string }; is_manager: boolean; choice: string | null; snapshot_choice: string | null; fee: number | null; pending_change_id: number | null; invite: { issued: number; active: number; latest_expires_at: string | null; last_used_at: string | null } }
+interface RosterResult { rows: number; inserted: number; updated: number; teams: number; managers_assigned: number; departments: { code: string; name: string; headcount: number; manager: string | null }[]; warnings: string[] }
+interface RowError { line: number; error: string }
 
-function Upload({ label, onFile, busy }: { label: string; onFile: (f: File) => void; busy: boolean }) {
+function Upload({ label, onFile, busy, primary }: { label: string; onFile: (f: File) => void; busy: boolean; primary?: boolean }) {
   return (
-    <label className="btn">
+    <label className={`btn ${primary ? "primary" : ""}`}>
       {label}
       <input type="file" accept=".csv,text/csv" hidden disabled={busy} onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ""; }} />
     </label>
   );
 }
 
+/** 부서·명단: 전체 명단 CSV 한 파일 → 소속 부서별로 묶이고 팀 담당자가 지정된다. 부서를 누르면 그 부서 명단. */
 export function RosterTab({ base }: { base: string }) {
   const { data: teams, reload: reloadTeams } = useLoad(() => api.get<TeamRow[]>(`${base}/teams`), [base]);
   const [teamId, setTeamId] = useState<number | "">("");
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
-  const { data: people, reload } = useLoad(() => api.get<PRow[]>(`${base}/participants?${teamId ? `team_id=${teamId}&` : ""}${query ? `q=${encodeURIComponent(query)}` : ""}`), [base, teamId, query]);
-  const { busy, message, run } = useAction();
+  const { data: people, reload } = useLoad(() => (teamId || query ? api.get<PRow[]>(`${base}/participants?${teamId ? `team_id=${teamId}&` : ""}${query ? `q=${encodeURIComponent(query)}` : ""}`) : Promise.resolve([] as PRow[])), [base, teamId, query]);
+  const { busy, message, run, setMessage } = useAction();
+  const [result, setResult] = useState<RosterResult | null>(null);
+  const [rowErrors, setRowErrors] = useState<RowError[]>([]);
   const refresh = () => { reload(); reloadTeams(); };
+  const upload = async (f: File) => {
+    setRowErrors([]);
+    setResult(null);
+    try {
+      const r = await api.upload<RosterResult>(`${base}/roster`, f);
+      setResult(r);
+      setMessage({ kind: "ok", text: `명단 ${r.rows}명 → ${r.teams}개 부서로 묶었습니다 (새로 ${r.inserted} · 수정 ${r.updated} · 담당자 지정 ${r.managers_assigned})` });
+      refresh();
+    } catch (e) {
+      const err = e as { message: string; detail?: unknown };
+      setMessage({ kind: "bad", text: err.message });
+      if (Array.isArray(err.detail)) setRowErrors(err.detail as RowError[]);
+    }
+  };
+  const sel = teams?.find((t) => t.id === teamId);
   return (
     <>
       <div className="card">
         <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2>팀과 담당자</h2>
-          <Upload label="명단 CSV 업로드" busy={busy} onFile={(f) => run(() => api.upload<{ rows: number; inserted: number; updated: number }>(`${base}/roster`, f), (r) => `명단 ${r.rows}행: 추가 ${r.inserted}, 수정 ${r.updated}`).then(refresh)} />
+          <h2>전체 명단 → 부서별 묶기</h2>
+          <Upload label="명단 CSV 업로드" busy={busy} onFile={upload} primary />
         </div>
-        <p className="muted">CSV 열: 사번,이름,이메일,팀코드,팀명. 담당자는 팀원 중에서 총무만 지정합니다. 팀을 누르면 아래 명단이 걸러집니다.</p>
+        <p className="muted">열: <b>ID, 이름, 전화번호, Slack ID, 소속 부서, 팀 담당자</b>. 소속 부서 하나가 팀 하나가 되고, 팀 담당자 칸(그 부서 팀장의 ID 나 이름)으로 담당자가 지정됩니다. 회비는 담당자가 부서 단위로 걷어 내고, 환불도 담당자에게만 연락합니다. 한 행이라도 오류가 있으면 아무것도 반영하지 않습니다.</p>
         <Msg m={message} />
-        <div className="table-wrap"><table>
-          <thead><tr><th>팀</th><th className="num">인원</th><th>담당자</th><th className="num">최종 회비</th><th className="num">확정 수납</th><th className="num">잔액</th><th>정산</th></tr></thead>
-          <tbody>{teams?.map((t) => (
-            <tr key={t.id}>
-              <td><button className="small" onClick={() => setTeamId(t.id)}>{t.code}</button> {t.name}</td>
-              <td className="num">{t.headcount}</td>
-              <td>{t.manager ? t.manager.name : <span className="pill bad">미지정</span>}</td>
-              <td className="num">{won(t.final_fee)}</td><td className="num">{won(t.received)}</td>
-              <td className="num">{won(Math.abs(t.balance))} <span className="muted">{t.balance_label}</span></td>
-              <td>{t.settlement_status ? <StatusPill status={t.settlement_status} /> : "-"} {t.blockers.length > 0 && <span className="pill warn" title={t.blockers.join("\n")}>확인 {t.blockers.length}</span>}</td>
-            </tr>))}
-          </tbody>
-        </table></div>
+        {rowErrors.length > 0 && (
+          <div className="notice bad"><b>반영하지 않은 이유</b><ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>{rowErrors.map((e, i) => <li key={i}>{e.line}행: {e.error}</li>)}</ul></div>
+        )}
+        {result?.warnings.length ? <div className="notice warn">{result.warnings.map((w, i) => <div key={i}>{w}</div>)}</div> : null}
+        <div className="depts">
+          {teams?.map((t) => {
+            const c = t.counts;
+            const answered = t.headcount - c.none - c.undecided;
+            return (
+              <button key={t.id} className={`dept ${teamId === t.id ? "selected" : ""}`} onClick={() => setTeamId(teamId === t.id ? "" : t.id)}>
+                <div className="row" style={{ justifyContent: "space-between" }}><b>{t.name}</b><span className="muted">{t.code}</span></div>
+                <div className="muted">담당자 {t.manager ? <b style={{ color: "var(--ink)" }}>{t.manager.name}</b> : <span className="pill bad">미지정</span>}</div>
+                <div className="bar" aria-label={`응답 ${answered}/${t.headcount}`}><span style={{ width: `${(answered / Math.max(1, t.headcount)) * 100}%` }} /></div>
+                <div className="muted">{t.headcount}명 · 버스 {c.bus} · 자차 {c.car} · 불참 {c.absent}{c.none + c.undecided ? ` · 미확정 ${c.none + c.undecided}` : ""}</div>
+                <div className="row" style={{ gap: 4 }}>
+                  <span className={`pill ${t.balance > 0 ? "warn" : t.balance < 0 ? "info" : "ok"}`}>{t.balance === 0 ? "정산 0원" : `${t.balance_label} ${won(Math.abs(t.balance))}`}</span>
+                  {t.blockers.length > 0 && <span className="pill bad" title={t.blockers.join("\n")}>확인 {t.blockers.length}</span>}
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </div>
       <div className="card">
         <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2>참가자 {teamId && `· ${teams?.find((t) => t.id === teamId)?.name}`}</h2>
+          <h2>{sel ? `${sel.name} 명단` : "명단"} {sel?.manager && <span className="muted">· 담당자 {sel.manager.name} ({sel.manager.slack_id}{sel.manager.phone ? ` · ${sel.manager.phone}` : ""})</span>}</h2>
           <div className="row">
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="이름·이메일 검색" aria-label="검색" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && setQuery(q)} placeholder="이름 · ID · Slack ID 검색" aria-label="검색" />
             <button onClick={() => setQuery(q)}>검색</button>
-            {teamId && <button onClick={() => setTeamId("")}>전체 팀</button>}
+            {(teamId || query) && <button onClick={() => { setTeamId(""); setQuery(""); setQ(""); }}>지우기</button>}
           </div>
         </div>
-        <div className="table-wrap"><table>
-          <thead><tr><th>사번</th><th>이름</th><th>팀</th><th>마감 기준</th><th>현재</th><th className="num">회비</th><th>초대 링크</th><th>작업</th></tr></thead>
-          <tbody>{people?.map((p) => (
-            <tr key={p.id}>
-              <td>{p.employee_no}</td><td>{p.name} {p.is_manager && <span className="pill">담당자</span>}</td><td>{p.team.code}</td>
-              <td><ChoicePill choice={p.snapshot_choice} /></td><td><ChoicePill choice={p.choice} /> {p.pending_change_id && <span className="pill warn">승인 대기</span>}</td>
-              <td className="num">{won(p.fee)}</td>
-              <td className="muted">유효 {p.invite.active}/{p.invite.issued} · 사용 {fmtTime(p.invite.last_used_at)}</td>
-              <td><div className="row">
-                {!p.is_manager && <button className="small" disabled={busy} onClick={() => run(() => api.post(`${base}/teams/${p.team.id}/manager`, { participant_id: p.id }), `${p.name}님을 ${p.team.code} 담당자로 지정했습니다.`).then(refresh)}>담당자 지정</button>}
-                <button className="small" disabled={busy} onClick={() => run(() => api.post<{ revoked: number; email_status: string }>(`${base}/participants/${p.id}/invite/reissue`), (r) => `기존 링크 ${r.revoked}개 폐기, 새 초대 메일 ${r.email_status}`).then(reload)}>재발급</button>
-                <button className="small danger" disabled={busy} onClick={() => run(() => api.post<{ revoked: number }>(`${base}/participants/${p.id}/invite/revoke`), (r) => `링크 ${r.revoked}개 폐기`).then(reload)}>폐기</button>
-                <SetResponse base={base} p={p} onDone={refresh} />
-              </div></td>
-            </tr>))}
-          </tbody>
-        </table></div>
+        {!teamId && !query && <p className="muted">위에서 부서를 누르거나 이름으로 검색하세요.</p>}
+        {(teamId || query) && (
+          <div className="table-wrap"><table>
+            <thead><tr><th>ID</th><th>이름</th><th>부서</th><th>Slack ID</th><th>전화번호</th><th>마감 기준</th><th>현재</th><th className="num">회비</th><th>초대 링크</th><th>작업</th></tr></thead>
+            <tbody>{people?.map((p) => (
+              <tr key={p.id}>
+                <td>{p.employee_no}</td><td>{p.name} {p.is_manager && <span className="pill ok">담당자</span>}</td><td>{p.team.name}</td>
+                <td className="muted">{p.slack_id}</td><td className="muted">{p.phone || "-"}</td>
+                <td><ChoicePill choice={p.snapshot_choice} /></td><td><ChoicePill choice={p.choice} /> {p.pending_change_id && <span className="pill warn">승인 대기</span>}</td>
+                <td className="num">{won(p.fee)}</td>
+                <td className="muted">유효 {p.invite.active}/{p.invite.issued} · 사용 {fmtTime(p.invite.last_used_at)}</td>
+                <td><div className="row">
+                  {!p.is_manager && <button className="small" disabled={busy} onClick={() => run(() => api.post(`${base}/teams/${p.team.id}/manager`, { participant_id: p.id }), `${p.name}님을 ${p.team.name} 담당자로 지정했습니다.`).then(refresh)}>담당자 지정</button>}
+                  <button className="small" disabled={busy} onClick={() => run(() => api.post<{ revoked: number; email_status: string }>(`${base}/participants/${p.id}/invite/reissue`), (r) => `기존 링크 ${r.revoked}개 폐기, 새 초대 DM ${r.email_status}`).then(reload)}>링크 재발급</button>
+                  <SetResponse base={base} p={p} onDone={refresh} />
+                </div></td>
+              </tr>))}
+            </tbody>
+          </table></div>
+        )}
       </div>
     </>
   );
@@ -81,8 +113,8 @@ function SetResponse({ base, p, onDone }: { base: string; p: PRow; onDone: () =>
   const { busy, message, run } = useAction();
   return (
     <>
-      <select aria-label="총무 직접 입력" disabled={busy} value="" onChange={(e) => e.target.value && run(() => api.post(`${base}/participants/${p.id}/response`, { choice: e.target.value, note: "총무 확인 후 입력" }), "기록했습니다.").then(onDone)}>
-        <option value="">응답 직접 입력…</option>
+      <select aria-label="총무 직접 입력" disabled={busy} value="" onChange={(e) => e.target.value && run(() => api.post(`${base}/participants/${p.id}/response`, { choice: e.target.value, note: "총무 확인 후 입력(전화·당일 현장)" }), "기록했습니다. 마감 후 변동은 정산 보고서에 반영됩니다.").then(onDone)}>
+        <option value="">응답 직접 입력(당일 변동)…</option>
         {["bus", "car", "absent", "undecided"].map((c) => <option key={c} value={c}>{CHOICE_LABEL[c]}</option>)}
       </select>
       {message?.kind === "bad" && <span className="error">{message.text}</span>}
@@ -141,7 +173,7 @@ function ManualAllocate({ base, txn, teams, onDone }: { base: string; txn: Txn; 
   return (
     <div>
       <div className="row">
-        <select value={team} onChange={(e) => setTeam(e.target.value)} aria-label="팀"><option value="">팀 선택</option>{teams.map((t) => <option key={t.id} value={t.id}>{t.code} {t.name}</option>)}</select>
+        <select value={team} onChange={(e) => setTeam(e.target.value)} aria-label="팀"><option value="">팀 선택</option>{teams.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.code})</option>)}</select>
         <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} style={{ width: 100 }} aria-label="금액" />
         <button className="small" disabled={busy || !team} onClick={() => run(() => api.post(`${base}/transactions/${txn.id}/allocations`, { team_id: Number(team), amount: Number(amount), basis: "총무 수동 배정", confirm: true }), "배정했습니다.").then(onDone)}>배정</button>
       </div>
@@ -224,7 +256,7 @@ export function SettlementTab({ base }: { base: string }) {
   );
 }
 
-function TeamStatement({ base, teamId, onChange }: { base: string; teamId: number; onChange: () => void }) {
+export function TeamStatement({ base, teamId, onChange }: { base: string; teamId: number; onChange: () => void }) {
   const { data, reload } = useLoad(() => api.get<{ calc: SettlementCalc; latest: { version: number; status: string; manager_ack_at: string | null } | null }>(`${base}/settlements/${teamId}`), [base, teamId]);
   const { busy, message, run } = useAction();
   const [payout, setPayout] = useState("");

@@ -23,7 +23,7 @@ export default function ParticipantPage() {
     api.post<Preview>("/api/large/me/response/preview", { choice: sel }).then(setPreview).catch((e) => setPvError(e.message));
   }, [sel, me]);
 
-  if (error) return <Page narrow><div className="card"><p className="error">{error.message}</p><p className="muted">이메일의 개인 초대 링크로 다시 들어와 주세요.</p></div></Page>;
+  if (error) return <Page narrow><div className="card"><p className="error">{error.message}</p><p className="muted">Slack DM 으로 받은 개인 초대 링크로 다시 들어와 주세요.</p></div></Page>;
   if (!me) return <Page narrow><p className="muted">불러오는 중…</p></Page>;
   const ev = me.event;
   const submit = () =>
@@ -94,7 +94,7 @@ export default function ParticipantPage() {
             </tbody>
           </table></div>
         )}
-        <p className="muted">로그인 이메일: {me.participant.email_masked}</p>
+        <p className="muted">Slack: {me.participant.slack_masked}</p>
       </div>
     </Page>
   );

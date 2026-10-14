@@ -106,7 +106,7 @@ def test_scheduler_respects_recheck_and_quiet_hours(db):
     assert db.query(DevMail).count() == 0
     sched.run_once(now=NOW + timedelta(days=1))  # 다음날 낮(연기된 시각 이후)
     db.rollback()  # 테스트 세션의 오래된 읽기 스냅샷을 끝냄
-    assert [m.to_email for m in db.query(DevMail)] == [b.email]
+    assert [m.to_email for m in db.query(DevMail)] == [b.slack_id]
     assert db.query(EmailJob).filter_by(participant_id=a.id).one().note == "이미 응답함"
 
 

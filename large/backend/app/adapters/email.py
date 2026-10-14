@@ -1,10 +1,14 @@
-"""이메일 어댑터. EMAIL_MODE=mock 이면 실제로 보내지 않고 개발용 수신함(dev_inbox)에 기록한다."""
+"""알림 발송 어댑터(Slack DM). 파일 이름은 이전 버전 호환을 위해 그대로 둔다.
+
+NOTIFY_MODE=mock  : 실제로 보내지 않고 개발용 수신함(dev_inbox)에 기록한다.
+NOTIFY_MODE=slack : 소모임과 같은 Slack 봇 토큰(SLACK_BOT_TOKEN)으로 받는 사람에게 DM 을 보낸다.
+                    conversations.open → chat.postMessage. 필요한 권한: im:write, chat:write (소모임 봇에 이미 있음)
+"""
 from __future__ import annotations
 
-import smtplib
-from email.message import EmailMessage
 from typing import Protocol
 
+import httpx
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -12,7 +16,7 @@ from ..models import DevMail
 
 
 class EmailSendError(Exception):
-    pass
+    """발송 실패. 이름은 이전 버전 호환용(실제로는 Slack DM 실패)."""
 
 
 class EmailAdapter(Protocol):
@@ -25,29 +29,31 @@ class MockEmailAdapter:
     mode = "mock"
 
     def send(self, db: Session, *, to: str, subject: str, body: str, job_id: int | None) -> None:
-        # 시연용 실패 재현: 주소에 'bounce' 가 들어 있으면 발송 실패로 처리
-        if "bounce" in to:
-            raise EmailSendError("모의 반송: 수신 서버가 메일을 거부했습니다")
+        # 시연용 실패 재현: Slack ID 에 'BOUNCE' 가 들어 있으면 발송 실패로 처리
+        if "bounce" in to.lower():
+            raise EmailSendError("모의 실패: Slack 에서 사용자를 찾을 수 없습니다(user_not_found)")
         db.add(DevMail(email_job_id=job_id, to_email=to, subject=subject, body=body))
 
 
-class SmtpEmailAdapter:
-    mode = "smtp"
+class SlackDmAdapter:
+    mode = "slack"
+    api = "https://slack.com/api/"
+
+    def _call(self, method: str, payload: dict) -> dict:
+        try:
+            r = httpx.post(self.api + method, headers={"Authorization": f"Bearer {settings.slack_bot_token}"}, json=payload, timeout=15)
+            data = r.json()
+        except (httpx.HTTPError, ValueError) as e:
+            raise EmailSendError(f"Slack 연결 오류: {type(e).__name__}") from None
+        if not data.get("ok"):
+            # 오류 코드만 남긴다(본문·링크·토큰이 로그에 섞이지 않게)
+            raise EmailSendError(f"Slack 오류: {str(data.get('error', 'unknown'))[:80]}")
+        return data
 
     def send(self, db: Session, *, to: str, subject: str, body: str, job_id: int | None) -> None:
-        msg = EmailMessage()
-        msg["From"], msg["To"], msg["Subject"] = settings.smtp_from, to, subject
-        msg.set_content(body)
-        try:
-            with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as smtp:
-                smtp.starttls()
-                if settings.smtp_user:
-                    smtp.login(settings.smtp_user, settings.smtp_password)
-                smtp.send_message(msg)
-        except (smtplib.SMTPException, OSError) as e:
-            # 예외 메시지에 본문(링크)이 섞이지 않도록 종류만 남긴다
-            raise EmailSendError(f"SMTP 오류: {type(e).__name__}") from None
+        channel = self._call("conversations.open", {"users": to})["channel"]["id"]
+        self._call("chat.postMessage", {"channel": channel, "text": f"*{subject}*\n{body}", "unfurl_links": False})
 
 
 def get_email_adapter() -> EmailAdapter:
-    return SmtpEmailAdapter() if settings.email_mode == "smtp" else MockEmailAdapter()
+    return SlackDmAdapter() if settings.email_mode == "slack" else MockEmailAdapter()

@@ -498,7 +498,7 @@ const BASE_COLS = [
 const TEMPLATES = {
   dinner:{label:'회식', icon:'🍻', desc:'투표·1/2차·후정산', cols:[['1차','ox'],['2차','ox'],['도착 시간','text'],['음주 여부','ox']]},
   mt:    {label:'MT', icon:'🏕', desc:'차량·방·준비물', cols:[['차량','select','운전,동승,자차'],['좌석','number'],['방','select','A,B,C'],['준비물','text'],['알레르기','text']]},
-  ws:    {label:'워크샵', icon:'🏢', desc:'소속·버스·숙소', cols:[['소속','text'],['버스','ox'],['숙소','select','1인실,2인실,4인실'],['식사','select','일반,채식,할랄']]},
+  ws:    {label:'워크샵', icon:'🏢', desc:'300명 · 부서별 정산', cols:[['소속','text'],['버스','ox'],['숙소','select','1인실,2인실,4인실'],['식사','select','일반,채식,할랄']]},
   custom:{label:'직접 설명', icon:'✍️', desc:'말로 설명', cols:[]}
 };
 const makeSchema = tpl => [...BASE_COLS.map(c => ({...c}))
@@ -1072,7 +1072,7 @@ function renderStart(){
 
 /* ---------- 1) 총무 설정창 ---------- */
 function renderSetup(){
-  if (!S.size) return renderSizePick();
+  if (!S.size) S.size = 'small'; // 규모 선택 화면은 쓰지 않음: 바로 모임 종류 선택(워크샵 카드 = 대모임)
   if (S.size === 'large') return LARGE.render($('#app'));
   renderSmallSetup();
 }
@@ -1125,20 +1125,20 @@ const LARGE = {
     }[LARGE.server] || '';
     el.innerHTML = `
     <header class="top"><div class="top-in">
-      <button class="btn ghost sm" data-act="${S.started ? 'goDash' : 'changeSize'}">← ${S.started ? '대시보드' : '모임 규모'}</button>
+      <button class="btn ghost sm" data-act="${S.started ? 'goDash' : 'changeSize'}">← ${S.started ? '대시보드' : '모임 종류'}</button>
       <div class="brand"><span class="logo">🐸</span>대모임 총무봇</div>
     </div></header>
     <main class="page"><div class="card" style="max-width:880px;margin:24px auto 0">
       <section class="sec">
         <div class="sec-h"><span class="n">🏢</span><div><h3>대모임(워크숍·연수) 총무 Agent</h3>
-          <p>수백 명 규모 행사의 개인 참석 응답 → 팀 청구 → 입금 대조 → 변경·불일치 확인 대화 → 정산까지. 참가자는 이메일 개인 링크, 팀 담당자는 이메일 인증으로 들어옵니다.</p></div></div>
+          <p>수백 명 규모 행사: 전체 명단 CSV → 부서별 묶기 → 개인 인원조사(Slack DM) → 부서 담당자가 회비 일괄 납부 → 마감 기준표 저장 → 행사 후 정산 Agent 가 <b>정산 보고서 한 장</b>(추가 납부·환불·확인 필요)으로 정리. 환불·추가 납부는 부서 담당자에게만 연락합니다.</p></div></div>
         <p>${status}</p>
         <div class="lg-row">
           <button class="btn primary" data-act="large:open" ${on ? '' : 'disabled'}>대모임 관리 화면 열기 →</button>
           <button class="btn ghost" data-act="large:recheck">서버 다시 확인</button>
         </div>
         ${LARGE.server === 'off' ? `<p class="muted lg-note">공용 서버를 켠 뒤 <code>http://127.0.0.1:8787</code> 로 다시 열어 주세요. 실행: <code>.venv/bin/python -m hub</code> (README 참고)</p>` : ''}
-        <p class="muted lg-note">대모임은 Slack 을 쓰지 않습니다(이메일 + 모바일 웹). 대모임 화면에 들어가도 소모임의 Slack 발송은 실행되지 않습니다.</p>
+        <p class="muted lg-note">연락은 소모임과 같은 Slack 봇의 DM 입니다(대모임 서버 설정 <code>NOTIFY_MODE=slack</code> 일 때만 실제 발송, 기본은 모의 발송).</p>
       </section>
     </div></main>`;
     if (LARGE.server === 'unknown') LARGE.probe();
@@ -1163,7 +1163,16 @@ const LARGE = {
       location.href = '/large/';
       return false;
     },
-    recheck(){ LARGE.server = 'unknown'; }
+    recheck(){ LARGE.server = 'unknown'; },
+    // 소모임 설정의 '워크샵' 카드: 공용 서버가 켜져 있으면 바로 대모임 화면, 아니면 대모임 진입 카드
+    fromWorkshop(){
+      S.size = 'large'; S.screen = 'setup'; save();
+      if (!location.protocol.startsWith('http')) { LARGE.server = 'off'; return render(); }
+      fetch('/api/large/meta', {cache:'no-store'})
+        .then(r => r.ok ? r.json() : Promise.reject())
+        .then(j => { if (j.system === 'large') { LARGE.server = 'on'; LARGE.act.open(); } else { LARGE.server = 'off'; render(); } })
+        .catch(() => { LARGE.server = 'off'; render(); });
+    }
   }
 };
 /* ===================== 대모임 블록 끝 ===================== */
@@ -1175,7 +1184,7 @@ function renderSmallSetup(){
   const s = S, e = s.event, sec = freqSec(s.freq);
   $('#app').innerHTML = `
   <header class="top"><div class="top-in">
-    <button class="btn ghost sm" data-act="${S.started ? 'goDash' : 'changeSize'}">← ${S.started ? '대시보드' : '모임 규모'}</button>
+    <button class="btn ghost sm" data-act="${S.started ? 'goDash' : 'changeSize'}">← ${S.started ? '대시보드' : '시작화면'}</button>
     <div class="brand"><span class="logo"><img src="assets/logo.jpg" alt=""></span>도총 & 채총</div>
     <div class="grow"></div>
     <span class="hitl">HITL 1</span>
@@ -2584,7 +2593,7 @@ document.addEventListener('click', e => {
     case 'goStart': S.screen = 'start'; closeDrawer(); break;
     case 'goSetup': S.screen = 'setup'; closeDrawer(); window.scrollTo(0, 0); break;
     case 'pickSize': S.size = d.val; window.scrollTo(0, 0); break;
-    case 'changeSize': S.size = null; window.scrollTo(0, 0); break;
+    case 'changeSize': if (S.size === 'large') S.size = 'small'; else S.screen = 'start'; window.scrollTo(0, 0); break; // 대모임 → 모임 종류, 소모임 → 시작화면
     case 'goDash':
       if (!S.started){ S.started = true; seedRun(); toast('데모 모임(가평 MT)을 불러왔어요'); }
       S.screen = 'dash'; window.scrollTo(0, 0); break;
@@ -2840,6 +2849,7 @@ document.addEventListener('click', e => {
     case 'dmStop': { const p = S.people[d.id]; if (p && p.dmPlan){ p.dmPlan.done = true; log('총무', `${MEM[p.id].name}님 개인 DM 반복 멈춤`); } break; }
     case 'inviteNone': S.invited = ['me']; break;
     case 'tpl':
+      if (d.val === 'ws') return LARGE.act.fromWorkshop(); // 워크샵 = 대모임(채총) 화면으로 — 채총 요청 변경
       if (S.template === d.val) return;
       S.template = d.val; S.schema = makeSchema(d.val); UI.pvTab = 'sheet';
       // 기본 예시 이름(가평 MT)이 그대로면 회식에 맞는 이름으로

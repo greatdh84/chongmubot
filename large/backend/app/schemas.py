@@ -17,11 +17,11 @@ class InviteExchange(BaseModel):
 
 
 class ManagerCodeRequest(BaseModel):
-    email: str
+    login_id: str = Field(min_length=2, max_length=40)  # 명단의 ID 또는 Slack ID
 
 
 class ManagerCodeVerify(BaseModel):
-    email: str
+    login_id: str = Field(min_length=2, max_length=40)
     code: str = Field(min_length=6, max_length=6)
 
 
@@ -91,7 +91,7 @@ class PayoutIn(BaseModel):
 
 
 class EmailEnqueue(BaseModel):
-    kind: Literal["invite", "attend_reminder", "payment_reminder"]
+    kind: Literal["invite", "attend_reminder", "payment_reminder", "refund_notice", "extra_notice"]
 
 
 class SchedulerToggle(BaseModel):

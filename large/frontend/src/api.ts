@@ -36,7 +36,7 @@ export const api = {
 export type Choice = "bus" | "car" | "absent" | "undecided";
 export const CHOICE_LABEL: Record<string, string> = { bus: "참석+버스", car: "참석+자차", absent: "불참", undecided: "미정", none: "미응답" };
 
-export interface Meta { system: "large"; app_mode: "demo" | "production"; email_mode: "mock" | "smtp"; llm_mode: "mock" | "gemini"; demo_tools: boolean; scheduler?: { enabled: boolean; interval_seconds: number } }
+export interface Meta { system: "large"; app_mode: "demo" | "production"; email_mode: string; notify_mode: "mock" | "slack"; llm_mode: "mock" | "claude" | "gemini"; demo_tools: boolean; scheduler?: { enabled: boolean; interval_seconds: number } }
 
 export interface EventInfo {
   id: number; name: string; event_at: string; attend_deadline: string; payment_deadline: string;
@@ -51,7 +51,7 @@ export interface Change {
 }
 
 export interface Me {
-  participant: { id: number; name: string; email_masked: string; team: { id: number; code: string; name: string } };
+  participant: { id: number; name: string; slack_masked: string; team: { id: number; code: string; name: string } };
   event: EventInfo;
   response: { choice: Choice | null; label: string; fee: number | null; snapshot_choice: string | null };
   pending_change: Change | null;

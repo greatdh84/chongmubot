@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi.responses import Response as RawResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import clock
-from ..agents import settlement_agent
+from ..agents import admin_agent, settlement_agent
 from ..config import API_PREFIX, settings
 from ..db import get_db
 from ..deps import admin_event, current_admin
@@ -16,8 +17,8 @@ from ..models import (
     CHOICE_LABELS, Admin, AgentRun, Allocation, AuditLog, BankTransaction, ChangeLog, ConfirmTask, EmailJob, Event,
     Participant, RefundRule, Response, Settlement, Team, TeamManager,
 )
-from ..schemas import AdminResponseSet, AllocationIn, Decision, EmailEnqueue, EventUpdate, ManagerAssign, PayoutIn, RefundRuleIn, SchedulerToggle, TaskResolve
-from ..services import emails, invites, payments, responses as resp_svc, roster, settlement as stl
+from ..schemas import AdminResponseSet, AllocationIn, ChatSend as ChatIn, Decision, EmailEnqueue, EventUpdate, ManagerAssign, PayoutIn, RefundRuleIn, SchedulerToggle, TaskResolve
+from ..services import emails, invites, payments, report as rpt, responses as resp_svc, roster, settlement as stl
 from ..services.common import active_manager, audit, get_participant_in_event, get_team_in_event
 from .util import change_out, event_out, task_out
 
@@ -27,6 +28,11 @@ MAX_UPLOAD = 2 * 1024 * 1024
 
 def _actor(admin: Admin) -> str:
     return f"admin:{admin.id}"
+
+
+def _refresh(db: Session, ev: Event, trigger: str) -> None:
+    """돈·인원에 영향을 주는 처리 뒤에는 정산 Agent 가 보고서를 다시 만든다(내용이 같으면 새 버전 없음)."""
+    rpt.refresh(db, ev, trigger)
 
 
 async def _read_upload(file: UploadFile) -> bytes:
@@ -43,6 +49,9 @@ def list_events(admin: Admin = Depends(current_admin), db: Session = Depends(get
 
 @router.get("/events/{event_id}")
 def dashboard(ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
+    if rpt.ensure_checkpoints(db, ev):
+        _refresh(db, ev, "checkpoint")
+        db.commit()
     pids = select(Participant.id).where(Participant.event_id == ev.id)
     total = db.scalar(select(func.count()).select_from(Participant).where(Participant.event_id == ev.id))
     counts = dict(db.execute(select(Response.choice, func.count()).where(Response.participant_id.in_(pids)).group_by(Response.choice)).all())
@@ -55,7 +64,7 @@ def dashboard(ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
     email_counts = dict(db.execute(select(EmailJob.status, func.count()).where(EmailJob.event_id == ev.id).group_by(EmailJob.status)).all())
     return {
         "event": event_out(ev),
-        "modes": {"app": settings.app_mode, "email": settings.email_mode, "llm": settings.llm_mode},
+        "modes": {"app": settings.app_mode, "notify": settings.email_mode, "llm": settings.llm_mode},
         "participants": total,
         "teams": len(teams),
         "teams_without_manager": sum(1 for t in teams if active_manager(db, t.id) is None),
@@ -72,6 +81,8 @@ def dashboard(ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
         "open_tasks": tasks,
         "pending_changes": db.scalar(select(func.count()).select_from(ChangeLog).where(ChangeLog.event_id == ev.id, ChangeLog.status == "pending_approval")),
         "emails": email_counts,
+        "stage": rpt.stage_of(ev), "stage_label": rpt.STAGES[rpt.stage_of(ev)],
+        "report": (lambda r: {"version": r.version, "created_at": clock.fmt(r.created_at), "trigger": r.trigger} if r else None)(rpt.latest(db, ev)),
     }
 
 
@@ -132,7 +143,8 @@ def delete_rule(rule_id: int, ev: Event = Depends(admin_event), admin: Admin = D
 
 @router.post("/events/{event_id}/roster")
 async def upload_roster(file: UploadFile = File(...), ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
-    result = roster.import_roster(db, ev, await _read_upload(file), file.filename or "roster.csv", _actor(admin))
+    result = roster.import_roster(db, ev, await _read_upload(file), file.filename or "roster.csv", _actor(admin), admin_id=admin.id)
+    _refresh(db, ev, "roster_upload")
     db.commit()
     return result
 
@@ -148,12 +160,20 @@ def list_teams(ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
         out.append(
             {
                 "id": t.id, "code": t.code, "name": t.name, "headcount": calc["headcount"],
-                "manager": {"participant_id": mp.id, "name": mp.name, "email": mp.email} if mp else None,
+                "manager": {"participant_id": mp.id, "name": mp.name, "slack_id": mp.slack_id, "phone": mp.phone} if mp else None,
+                "counts": _choice_counts(db, ev, t.id),
                 "final_fee": calc["final_fee"], "received": calc["received"], "refunds_paid": calc["refunds_paid"],
                 "balance": calc["balance"], "balance_label": calc["balance_label"], "blockers": calc["blockers"],
                 "settlement_status": latest.status if latest else None,
             }
         )
+    return out
+
+
+def _choice_counts(db: Session, ev: Event, team_id: int) -> dict[str, int]:
+    out = {k: 0 for k in ("bus", "car", "absent", "undecided", "none")}
+    for st in resp_svc.fee_table(db, ev, team_id).values():
+        out[st.choice or "none"] += 1
     return out
 
 
@@ -171,6 +191,7 @@ def assign_manager(team_id: int, body: ManagerAssign, ev: Event = Depends(admin_
         db.flush()
     db.add(TeamManager(team_id=team.id, participant_id=p.id, assigned_by=admin.id))
     audit(db, ev.id, _actor(admin), "manager_assigned", f"team:{team.id}", {"participant_id": p.id, "previous": current.participant_id if current else None})
+    _refresh(db, ev, "manager_assigned")
     db.commit()
     return {"ok": True}
 
@@ -181,7 +202,7 @@ def list_participants(team_id: int | None = None, q: str | None = None, ev: Even
     if team_id:
         query = query.where(Participant.team_id == team_id)
     if q:
-        query = query.where(Participant.name.contains(q) | Participant.email.contains(q))
+        query = query.where(Participant.name.contains(q) | Participant.slack_id.contains(q.upper()) | Participant.employee_no.contains(q))
     table = resp_svc.fee_table(db, ev, team_id)
     teams = {t.id: t for t in db.scalars(select(Team).where(Team.event_id == ev.id))}
     managers = {m.participant_id for m in db.scalars(select(TeamManager).where(TeamManager.revoked_at.is_(None)))}
@@ -190,7 +211,7 @@ def list_participants(team_id: int | None = None, q: str | None = None, ev: Even
         st = table.get(p.id)
         out.append(
             {
-                "id": p.id, "employee_no": p.employee_no, "name": p.name, "email": p.email,
+                "id": p.id, "employee_no": p.employee_no, "name": p.name, "slack_id": p.slack_id, "phone": p.phone,
                 "team": {"id": p.team_id, "code": teams[p.team_id].code, "name": teams[p.team_id].name},
                 "is_manager": p.id in managers, "choice": st.choice if st else None, "choice_label": CHOICE_LABELS[st.choice if st else None],
                 "snapshot_choice": st.snapshot_choice if st else None, "fee": st.liability if st else None,
@@ -202,7 +223,7 @@ def list_participants(team_id: int | None = None, q: str | None = None, ev: Even
 
 @router.post("/events/{event_id}/participants/{participant_id}/invite/reissue")
 def reissue_invite(participant_id: int, ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
-    """기존 링크를 모두 폐기하고 새 초대 메일을 보낸다(모의 모드는 개발용 수신함)."""
+    """기존 링크를 모두 폐기하고 새 초대 DM 을 보낸다(모의 모드는 개발용 수신함)."""
     p = get_participant_in_event(db, ev.id, participant_id)
     revoked = invites.revoke_all(db, p.id)
     job = emails.enqueue_reissue(db, ev, p)
@@ -226,8 +247,10 @@ def admin_set_response(participant_id: int, body: AdminResponseSet, ev: Event = 
     """총무가 확인한 응답을 대신 기록(예: 전화로 확인). 마감 후면 같은 규칙으로 계산해 즉시 승인한다."""
     p = get_participant_in_event(db, ev.id, participant_id)
     change = resp_svc.submit_change(db, ev, p, body.choice, source="admin", actor=_actor(admin), note=body.note[:300])
-    if change.status == "pending_approval":
+    if change.status == "pending_approval" and not change.rule_missing:
+        # 규칙으로 금액이 정해지는 변경은 바로 승인. 규칙이 없는 변경(예: 행사 당일 불참)은 '변경 승인'에서 총무가 환불액을 정한다.
         resp_svc.decide_change(db, ev, change, admin, approve=True, note="총무 직접 입력")
+    _refresh(db, ev, "admin_response")
     db.commit()
     return change_out(change, p.name)
 
@@ -238,6 +261,7 @@ def take_snapshot(ev: Event = Depends(admin_event), admin: Admin = Depends(curre
         raise conflict("BEFORE_DEADLINE", "참석 마감 전에는 마감 기준 응답을 저장할 수 없습니다")
     created = resp_svc.ensure_snapshot(db, ev)
     audit(db, ev.id, _actor(admin), "snapshot_requested", detail={"created": created})
+    _refresh(db, ev, "attend_snapshot")
     db.commit()
     return {"created": created, "snapshot_taken_at": clock.fmt(ev.snapshot_taken_at)}
 
@@ -262,6 +286,7 @@ def _get_change(db: Session, ev: Event, change_id: int) -> ChangeLog:
 @router.post("/events/{event_id}/changes/{change_id}/approve")
 def approve_change(change_id: int, body: Decision, ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
     c = resp_svc.decide_change(db, ev, _get_change(db, ev, change_id), admin, approve=True, note=body.note, refund_amount=body.refund_amount)
+    _refresh(db, ev, "change_approved")
     db.commit()
     return change_out(c)
 
@@ -269,6 +294,7 @@ def approve_change(change_id: int, body: Decision, ev: Event = Depends(admin_eve
 @router.post("/events/{event_id}/changes/{change_id}/reject")
 def reject_change(change_id: int, body: Decision, ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
     c = resp_svc.decide_change(db, ev, _get_change(db, ev, change_id), admin, approve=False, note=body.note)
+    _refresh(db, ev, "change_rejected")
     db.commit()
     return change_out(c)
 
@@ -278,6 +304,7 @@ def reject_change(change_id: int, body: Decision, ev: Event = Depends(admin_even
 @router.post("/events/{event_id}/transactions")
 async def upload_transactions(file: UploadFile = File(...), ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
     result = payments.import_transactions(db, ev, await _read_upload(file), file.filename or "transactions.csv", _actor(admin))
+    _refresh(db, ev, "transactions_upload")
     db.commit()
     return result
 
@@ -319,6 +346,7 @@ def create_allocation(transaction_id: int, body: AllocationIn, ev: Event = Depen
         db, ev, transaction_id, body.team_id, body.amount, participant_id=body.participant_id,
         status="confirmed" if body.confirm else "proposed", source="admin", basis=body.basis, actor=_actor(admin), admin_id=admin.id,
     )
+    _refresh(db, ev, "allocation_manual")
     db.commit()
     return {"id": a.id, "status": a.status}
 
@@ -326,6 +354,7 @@ def create_allocation(transaction_id: int, body: AllocationIn, ev: Event = Depen
 @router.post("/events/{event_id}/allocations/{allocation_id}/confirm")
 def confirm_allocation(allocation_id: int, ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
     a = payments.confirm_allocation(db, ev, allocation_id, admin.id)
+    _refresh(db, ev, "allocation_confirmed")
     db.commit()
     return {"id": a.id, "status": a.status}
 
@@ -336,6 +365,7 @@ def confirm_high(ev: Event = Depends(admin_event), admin: Admin = Depends(curren
     ids = list(db.scalars(select(Allocation.id).where(Allocation.event_id == ev.id, Allocation.status == "proposed", Allocation.confidence == "high")))
     for aid in ids:
         payments.confirm_allocation(db, ev, aid, admin.id)
+    _refresh(db, ev, "allocations_confirmed_high")
     db.commit()
     return {"confirmed": len(ids)}
 
@@ -343,6 +373,7 @@ def confirm_high(ev: Event = Depends(admin_event), admin: Admin = Depends(curren
 @router.post("/events/{event_id}/allocations/{allocation_id}/cancel")
 def cancel_allocation(allocation_id: int, ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
     a = payments.cancel_allocation(db, ev, allocation_id, _actor(admin))
+    _refresh(db, ev, "allocation_cancelled")
     db.commit()
     return {"id": a.id, "status": a.status}
 
@@ -352,6 +383,7 @@ def cancel_allocation(allocation_id: int, ev: Event = Depends(admin_event), admi
 @router.post("/events/{event_id}/agent/settlement-review")
 def run_settlement_review(ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
     result = settlement_agent.review_event(db, ev, trigger=f"manual:{_actor(admin)}")
+    _refresh(db, ev, "settlement_review")
     db.commit()
     return result
 
@@ -379,6 +411,7 @@ def resolve_task(task_id: int, body: TaskResolve, ev: Event = Depends(admin_even
         raise conflict("ALREADY_RESOLVED", "이미 처리된 과제입니다")
     t.status, t.resolution, t.updated_at = "resolved", f"총무 처리: {body.resolution}", clock.now()
     audit(db, ev.id, _actor(admin), "task_resolved", f"task:{t.id}")
+    _refresh(db, ev, "task_resolved")
     db.commit()
     return task_out(t)
 
@@ -414,6 +447,7 @@ def compute_all(ev: Event = Depends(admin_event), admin: Admin = Depends(current
 @router.post("/events/{event_id}/settlements/{team_id}/confirm")
 def confirm_settlement(team_id: int, ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
     s = stl.confirm(db, ev, team_id, admin)
+    _refresh(db, ev, "settlement_confirmed")
     db.commit()
     return {"id": s.id, "version": s.version, "status": s.status, "balance": s.balance}
 
@@ -421,16 +455,65 @@ def confirm_settlement(team_id: int, ev: Event = Depends(admin_event), admin: Ad
 @router.post("/events/{event_id}/settlements/{team_id}/payouts")
 def record_payout(team_id: int, body: PayoutIn, ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
     p = stl.record_payout(db, ev, team_id, body.amount, body.memo, admin)
+    _refresh(db, ev, "payout_recorded")
     db.commit()
     return {"id": p.id, "amount": p.amount}
 
 
-# ---------------------------------------------------------------- 이메일
+# ---------------------------------------------------------------- 정산 보고서·총무 Agent
+
+@router.get("/events/{event_id}/report")
+def get_report(ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
+    """최신 정산 보고서. 빠진 기준표가 있거나 아직 보고서가 없으면 지금 만든다."""
+    rep = rpt.latest(db, ev)
+    if rep is None or rpt.ensure_checkpoints(db, ev):
+        rep = rpt.refresh(db, ev, "report_view")
+        db.commit()
+    versions = [{"version": r.version, "trigger": r.trigger, "created_at": clock.fmt(r.created_at), "stage": r.stage} for r in db.scalars(select(rpt.SettlementReport).where(rpt.SettlementReport.event_id == ev.id).order_by(rpt.SettlementReport.version.desc()).limit(30))]
+    return rpt.report_out(rep) | {"versions": versions, "event": event_out(ev)}
+
+
+@router.post("/events/{event_id}/report/refresh")
+def refresh_report(ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
+    rep = rpt.refresh(db, ev, f"manual:{_actor(admin)}")
+    db.commit()
+    return rpt.report_out(rep)
+
+
+@router.get("/events/{event_id}/report.csv")
+def report_csv(ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
+    rep = rpt.latest(db, ev) or rpt.refresh(db, ev, "report_csv")
+    db.commit()
+    return RawResponse(
+        content="\ufeff" + rpt.to_csv(rep), media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="settlement_report_v{rep.version}.csv"'},
+    )
+
+
+@router.get("/events/{event_id}/agent/chat")
+def admin_chat(ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
+    out = admin_agent.thread_for(db, ev)
+    db.commit()
+    return out
+
+
+@router.post("/events/{event_id}/agent/chat")
+def admin_chat_send(body: ChatIn, ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
+    out = admin_agent.handle_message(db, ev, body.text)
+    db.commit()
+    return {"thread": out["chat"], "reply": out["reply"]}
+
+
+# ---------------------------------------------------------------- 알림(Slack DM)
 
 @router.post("/events/{event_id}/emails/enqueue")
 def enqueue(body: EmailEnqueue, ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
-    fn = {"invite": emails.enqueue_invites, "attend_reminder": emails.enqueue_attend_reminders, "payment_reminder": emails.enqueue_payment_reminders}[body.kind]
-    result = fn(db, ev)
+    fns = {
+        "invite": emails.enqueue_invites, "attend_reminder": emails.enqueue_attend_reminders, "payment_reminder": emails.enqueue_payment_reminders,
+        "refund_notice": lambda d, e: emails.enqueue_settlement_notices(d, e, "refund_notice"),
+        "extra_notice": lambda d, e: emails.enqueue_settlement_notices(d, e, "extra_notice"),
+    }
+    result = fns[body.kind](db, ev)
     audit(db, ev.id, _actor(admin), "emails_enqueued", detail={"kind": body.kind, **result})
     db.commit()
     return result
@@ -452,11 +535,11 @@ def scheduler_status(ev: Event = Depends(admin_event)):
 
 @router.post("/events/{event_id}/emails/scheduler")
 def scheduler_toggle(body: SchedulerToggle, ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
-    """이 서버 프로세스의 스케줄러를 일시정지·재개. 시작 자체는 EMAIL_SCHEDULER 설정으로 정한다."""
+    """이 서버 프로세스의 스케줄러를 일시정지·재개. 시작 자체는 NOTIFY_SCHEDULER 설정으로 정한다."""
     from ..services.scheduler import scheduler
 
     if body.enabled and not scheduler.running:
-        raise conflict("SCHEDULER_NOT_STARTED", "스케줄러가 꺼진 설정으로 시작됐습니다. EMAIL_SCHEDULER=on 으로 서버를 다시 시작하세요")
+        raise conflict("SCHEDULER_NOT_STARTED", "스케줄러가 꺼진 설정으로 시작됐습니다. NOTIFY_SCHEDULER=on 으로 서버를 다시 시작하세요")
     scheduler.paused = not body.enabled
     audit(db, ev.id, _actor(admin), "email_scheduler_" + ("resumed" if body.enabled else "paused"))
     db.commit()
