@@ -94,8 +94,8 @@ export function ReportTab({ base }: { base: string }) {
         </div>
         <p className="muted" style={{ marginTop: 10 }}>부서 정산 잔액 = (청구액 − 확정 입금) + (최종 회비 − 청구액) + 지급 환불. <b>+ 는 담당자가 더 걷어 낼 돈, − 는 총무가 담당자에게 돌려줄 돈</b>입니다. 회비는 팀 단위라 안내는 담당자에게만 갑니다.</p>
         <div className="row">
-          <button className="primary" disabled={busy || !s.team_status.refund} onClick={() => notify("refund_notice")}>환불 부서 담당자에게 안내</button>
-          <button className="primary" disabled={busy || !s.team_status.extra} onClick={() => notify("extra_notice")}>추가 납부 부서 담당자에게 안내</button>
+          <button className="yellow" disabled={busy || !s.team_status.refund} onClick={() => notify("refund_notice")}>환불 부서 담당자에게 안내</button>
+          <button className="yellow" disabled={busy || !s.team_status.extra} onClick={() => notify("extra_notice")}>추가 납부 부서 담당자에게 안내</button>
         </div>
       </div>
 
