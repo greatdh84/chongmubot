@@ -26,6 +26,8 @@ API
   POST /api/slack/thread   {channel, ts, text, persona?}  메시지 아래 스레드 댓글 (투표 마감 안내)
   POST /api/survey/start   {channel, title, text, questions, persona?}  [응답하기] 버튼이 달린 참석 조사 메시지
   GET  /api/survey?channel=  참석 조사 질문과 사람별 응답
+  POST /api/slack/archive  {channel}  모임 마무리: 채널 보관(archive), 참석 조사 기록 정리
+  GET  /api/slack/history?channel=|dm=1  단체방 또는 총무 DM 최근 메시지 (대시보드 오른쪽 Slack 패널)
   GET  /api/socket         응답 받기(Socket Mode) 연결 상태
   POST /api/slack/cancel   {channel, text, persona?}  모임 취소 안내, 참석 조사 기록 삭제 (채널은 그대로 둠)
   GET  /api/slack/poll?channel=&ts=  번호 이모지별 투표자 (봇 반응 제외)
@@ -35,6 +37,7 @@ API
 import json
 import mimetypes
 import random
+import re
 import threading
 import time
 import os
@@ -137,15 +140,16 @@ def create_channel(name, users):
 
 # 성격별 말투 지시 + Slack 에 보이는 보낸 사람 이름·아이콘
 PERSONAS = {
-    "active": ("영크크", ":laughing:", "텐션 최고의 극외향 말투. 밝고 에너지 넘치며 느낌표와 이모지를 자주 쓴다."),
-    "shy": ("구남친", ":pleading_face:", "헤어진 지 꽤 됐는데 아직 못 잊은 사람처럼, 새벽에 잠 못 들고 머뭇거리며 연락한다. "
+    "active": ("영크크", ":laughing:", "팬 소통 앱에 상주하는 데뷔 3년 차 아이돌. 모임 멤버는 전부 내 팬이고, 모임은 팬미팅, 회비는 팬들의 사랑이다. "
+               "팬서비스를 아끼지 않고 오글거림을 두려워하지 않는다. 목적은 참석 확인과 회비 납부를 받아내는 것."),
+    "shy": ("구남친", ":pleading_face:", "군대 갔다 온 복학생 구남친. 헤어진 지 꽤 됐는데 아직 못 잊어서, 새벽에 잠 못 들고 반말로 머뭇거리며 연락한다. "
             "겉으로는 안부·추억·핑계를 대지만 진짜 용건은 언제나 참석 여부와 회비 입금이다."),
     "oldie": ("부장님", ":older_man:", "50대 초반 부장님. 푸근하고 정이 많지만 잔소리가 많다. 존댓말과 반말을 섞어 쓴다. 화나면 영화 '타짜'의 곽철용으로 돌변한다."),
     "strict": ("맑눈광", ":face_with_monocle:", "원칙과 기한을 중시하는 공식적인 말투. 정중하지만 단호하고 예외를 두지 않는다. 비꼬기·모욕은 하지 않는다."),
 }
 # 그림 아이콘을 쓰는 성격: Slack 은 공개 주소의 그림만 쓸 수 있어 GitHub Pages 에 올라간 파일을 씀.
 # 그 주소가 아직 안 열리면(올리기 전) 위의 이모지 아이콘으로 보냄
-PERSONA_IMG = {"oldie": "assets/bujang.jpg", "shy": "assets/exbf.jpg", "strict": "assets/mnk.jpg"}
+PERSONA_IMG = {"active": "assets/ykk.jpg", "oldie": "assets/kwak.jpg", "shy": "assets/exbf.jpg", "strict": "assets/mnk.jpg"}
 ASSET_BASE = os.environ.get("PUBLIC_ASSET_BASE", "https://greatdh84.github.io/chongmubot/demo/")
 _IMG_OK = {}  # url → (열리는지, 확인 시각)
 
@@ -171,13 +175,17 @@ def persona_icon(persona, emoji):
 
 # 성격별 말버릇과 예시 대화 (처음부터 쓸 때 말투가 일정하게)
 TRAITS = {
-    "active": ("'~요!', '~용', 'ㅎㅎ', 'ㅋㅋ'를 섞고 이모지를 메시지마다 1~3개. 느낌표 많이, 텐션 최고. 반말은 안 씀.",
-               ['["도형님~ 좋은 아침이에요! ☀️", "회식 장소 투표 아직이시죠? ㅎㅎ", "이모지 하나만 콕! 오늘 6시 마감이에용 🙌"]']),
-    "shy": ("'○○님' + 존댓말. 문장을 끝맺지 못하고 흐린다. 마침표 대신 '…'이나 줄바꿈으로 짧은 줄을 여러 번 끊는다. "
-            "'갑자기', '그냥', '문득', '혹시', '잠이 안 와서'로 연락 이유를 얼버무린다. 이모지는 거의 안 쓰고 써도 'ㅎ', 'ㅋㅋ' 정도. "
-            "'술 좀 마셨어요', '잠이 안 와서요' 같은 새벽 핑계를 쓴다. 가끔 오타를 하나 섞어 살짝 취한 느낌을 낸다(예: 회비→회뷔, 입금→입긍). "
+    "active": ("문장 끝을 늘이고 올린다('~요오', '~죠오?', '했어요!!!'). 이름을 계속 부른다('○○님~', '우리 ○○님', '○○니이임'). 단체방은 '우리 팬분들'. "
+               "팬서비스 멘트를 아끼지 않는다('사랑해요 ○○님💕', '보고 싶어서 죽는 줄 알았어요', '○○님은 나만 봐요', '오늘 꿈에서 만나요🌙', '하트 받아요🫶', '볼콕 >_<'). "
+               "감탄사: 헤헤, 히히, 꺄, 앗, 뿅, 흐잉. 이모지 넉넉히: 🥺💕✨😆🫶🎤💖🌙. "
+               "모임 = 팬미팅/무대, 참석 = '보러 와주기', 회비 = '사랑 보내주기'로 바꿔 말한다. 2~4문장. 일정·금액·계좌·마감은 애교 속에서도 반드시 정확히 넣는다.",
+               ['["도형니이임~✨ 오늘도 보고 싶었어요!!", "10/24(토) 19:00 돈주는남자, 10월 팀 회식 팬미팅 열려요 😆", "보러 와주실 거죠? 사랑해요💕🫶"]']),
+    "shy": ("반말만 쓴다(존댓말 금지: '~요', '~습니다'를 쓰지 않음). 상대는 이름만 부르거나 '○○아/○○야', 단체방은 '얘들아'. "
+            "문장을 끝맺지 못하고 흐린다. 마침표 대신 '…'이나 줄바꿈으로 짧은 줄을 여러 번 끊는다. '갑자기', '그냥', '문득', '혹시', '잠이 안 와서'로 연락 이유를 얼버무린다. "
+            "복학생 느낌: '나 전역하고 나서…', '그때 학교 앞에서…', '학식', '동아리방' 같은 캠퍼스 추억을 가끔 꺼낸다. "
+            "이모지는 거의 안 쓰고 써도 'ㅎ', 'ㅋㅋ' 정도. '술 좀 마셨어', '잠이 안 와서' 같은 새벽 핑계를 쓴다. 가끔 오타를 하나 섞어 살짝 취한 느낌(예: 회비→회뷔, 입금→입긍). 단 '자니?'에는 오타를 넣지 않는다. "
             "한 메시지는 3~4줄 이내. 모임명·날짜·금액·계좌·마감일은 정확하게 쓰고 여기엔 오타를 넣지 않는다.",
-            ['["자요?\\n갑자기 생각나서요\\n10월 팀 회식… 오실 수 있어요?"]']),
+            ['["자니?\\n갑자기 생각나서\\n10월 팀 회식… 올 수 있어?"]']),
     "oldie": ("존댓말과 반말을 섞음('~해요', '~했지?', '~해라', '~하자고'). 개인 DM에선 상대를 '○○씨'라고 부르고 반말 비중이 높고, "
               "단체방에선 '여러분~'이라고 부르고 존댓말 비중이 높음. '허허', '^^', '~~', '..'를 즐겨 쓰고 이모지는 거의 안 씀. "
               "전할 내용에 '○○님'이 있으면 '○○씨'로 바꿔 부름. 욕설·인신공격·실제 위협은 하지 않음.",
@@ -204,29 +212,45 @@ OLDIE_MOODS = {
     "sorry": ("버럭한 뒤 부장님으로 돌아와 멋쩍게 사과한다. 짧게. 영화나 캐릭터 이름은 꺼내지 않는다.",
               '["허허.. 내가 좀 흥분했네~", "미안미안^^ 편할 때 눌러 줘요~~"]'),
 }
-# 구남친(새벽 연락) 강도별 레퍼토리 묶음. 서버가 매번 몇 개만 골라 예시로 줌 (받는 사람별로 최근에 쓴 건 빼고)
+# 구남친(복학생, 새벽 연락, 반말) 강도별 레퍼토리 묶음. 서버가 매번 몇 개만 골라 예시로 줌 (받는 사람별로 최근에 쓴 건 빼고)
 EXBF_MOODS = {
     "soft": "새벽 연락형(첫 연락·참석 확인) 또는 안부 위장형(회비·정산 요청)",
     "firm": "추억 소환형 / 핑계형 / 미련·후회형 중 하나",
-    "last": "읽씹 후 연타형. '자요?'를 단독으로 반복해 시작해도 된다. 마감일을 꼭 넣는다",
-    "burst": "읽씹 후 연타형을 더 짧게, 한두 단어씩 여러 번 끊어서. 마지막에 '…근데 ○○은 잊지 말아주세요'처럼 용건",
-    "sorry": "'미안해요 그냥 잊어주세요', 'ㅋㅋ 제가 왜 이러죠'처럼 물러서는 척하다가 용건 한 줄",
+    "last": "읽씹 후 연타형. '자니?'(변주 없이 그대로)를 단독으로 반복해 시작해도 된다. 마감일을 꼭 넣는다",
+    "burst": "읽씹 후 연타형을 더 짧게, 한두 단어씩 여러 번 끊어서. 마지막에 '…근데 ○○은 잊지 마'처럼 용건",
+    "sorry": "'미안 그냥 잊어줘', 'ㅋㅋ 내가 왜 이러냐'처럼 물러서는 척하다가 용건 한 줄",
 }
 EXBF_LINES = {
-    "soft": ["자요?\n갑자기 생각나서요\n{날짜} {모임명}… 오실 수 있어요?", "자요?\n뭐 해요\n그냥… {모임명} 오시나 해서",
-             "자요?\n술 좀 마셨어요\n근데 {모임명}은 진심으로 물어보는 거예요", "아 실수로 보냈네요…\n근데 온 김에 참석 여부만…",
-             "자요?\n그냥 잘 지내나 궁금해서요\n아 그리고… {금액}원이요", "별일 없죠?\n지난 {모임명} 정산이요…\n{은행} {계좌번호} ({예금주})"],
-    "firm": ["자요?\n오늘 {장소} 지나가다가… {이름}님 생각났어요", "우리 지난번 갔던 거기…\n이번에도 거기예요",
-             "그때 {이름}님이 시켰던 거…\n이번에도 드실 거예요?", "자요?\n{이름}님 그 영수증… 아직 저한테 있어요",
-             "잠이 안 와서요…\n혹시 그때 그 식당 이름 기억나요?\n아 그리고 회비…", "계좌번호 안 바꿨어요…\n그대로예요. {은행} {계좌번호}",
-             "자요?\n제가 지난번에 너무 급하게 물어봤던 것 같아요…", "저 많이 변했어요…\n이번엔 정산 금방 끝내요",
-             "요즘 {이름}님처럼 제때 입금해주는 사람이 없더라고요…", "{이름}님만한 사람 없더라고요…\n{금액}원만요"],
-    "last": ["자요?", "자요…?", "바빠요?", "답장 안 해도 돼요…", "…", "{마감일}까지만 기다릴게요"],
-    "burst": ["자요?", "자요…?", "바빠요?", "…", "미안해요 그냥 잊어주세요", "…근데 {금액}원은 잊지 말아주세요"],
-    "sorry": ["미안해요 그냥 잊어주세요", "ㅋㅋ 제가 왜 이러죠", "…근데 {금액}원은 잊지 말아주세요"],
+    "soft": ["자니?\n갑자기 생각나서\n{날짜} {모임명}… 올 수 있어?", "자니?\n뭐 해\n그냥… {모임명} 오나 해서",
+             "자니?\n술 좀 마셨어\n근데 {모임명}은 진심으로 물어보는 거야", "아 실수로 보냈네…\n근데 온 김에 참석 여부만…",
+             "자니?\n그냥 잘 지내나 궁금해서\n아 그리고… {금액}원", "별일 없지?\n지난 {모임명} 정산…\n{은행} {계좌번호} ({예금주})"],
+    "firm": ["자니?\n오늘 {장소} 지나가다가… {이름} 생각났어", "우리 지난번 갔던 거기…\n이번에도 거기야",
+             "그때 {이름}이 시켰던 거…\n이번에도 먹을 거야?", "자니?\n그 영수증… 아직 나한테 있어",
+             "잠이 안 와서…\n혹시 학교 앞 그 술집 이름 기억나?\n아 그리고 회비…", "계좌번호 안 바꿨어…\n그대로야. {은행} {계좌번호}",
+             "자니?\n내가 지난번에 너무 급하게 물어봤던 것 같아…", "나 전역하고 많이 변했어…\n이번엔 정산 금방 끝내자",
+             "요즘 {이름}처럼 제때 입금해주는 사람이 없더라…", "{이름}만한 사람 없더라…\n{금액}원만"],
+    "last": ["자니?", "자니…?", "바빠?", "답장 안 해도 돼…", "…", "{마감일}까지만 기다릴게"],
+    "burst": ["자니?", "자니…?", "바빠?", "…", "미안 그냥 잊어줘", "…근데 {금액}원은 잊지 마"],
+    "sorry": ["미안 그냥 잊어줘", "ㅋㅋ 내가 왜 이러냐", "…근데 {금액}원은 잊지 마"],
 }
-EXBF_DONE = ["확인했어요… 고마워요\n이제 자도 되겠네요 ㅎ", "이제 연락 안 할게요", "…다음 모임 때 또 연락해도 돼요?"]
-# 받는 사람별 '오늘 첫 연락' 날짜와 최근에 보낸 문장 (구남친: 첫 메시지는 '자요?', 같은 문장 반복 금지). 서버를 끄면 사라짐
+# 구남친 버럭(급발진 포함) 때 넣는 잔소리. 진행 단계로 상황을 고름: 투표·참석 조사 → 참석, 정산 → 회비, 모임 당일 → 시간
+EXBF_NAG = {
+    "attend": ["답장은 간단하게. '참석' 두 글자면 된다", "고민 중이면 고민 중이라고 말해. 그것도 답장이다",
+               "투표 하나 누르는 데 3초면 된다. 3초", "공지 읽었으면 이모티콘이라도 남기자, 응?", "갑자기 빠지면 남은 사람들이 수습하는 거야"],
+    "money": ["돈 얘기는 한 번에 끝내자. 두 번 말하게 하지 말고", "금액 작아도 늦으면 크게 보인다", "송금했으면 '보냈습니다' 한 마디. 그게 매너다",
+              "입금자명은 본명으로. 총무가 탐정은 아니잖아", "회비는 먼저 내고 나중에 잊는 거다"],
+    "time": ["늦을 것 같으면 늦기 전에 말하는 거다. 늦고 나서 말하는 건 변명이고", "'거의 다 왔어요'는 출발했을 때 하는 말이 아니다",
+             "약속 시간은 출발 시간이 아니라 도착 시간이다"],
+}
+
+
+def exbf_nag(key, phase, text):
+    kind = "money" if phase == "settle" or any(w in (text or "") for w in ("회비", "입금", "정산", "송금")) else "time" if phase == "event" else "attend"
+    return pick_fresh(key + ":nag", EXBF_NAG[kind])
+
+
+EXBF_DONE = ["확인했어… 고마워\n이제 좀 잘 수 있겠다 ㅎ", "이제 연락 안 할게", "…다음 모임 때 또 연락해도 되냐?"]
+# 받는 사람별 '오늘 첫 연락' 날짜와 최근에 보낸 문장 (구남친: 첫 메시지는 '자니?', 같은 문장 반복 금지). 서버를 끄면 사라짐
 EXBF_DAY, EXBF_SENT = {}, {}
 
 
@@ -240,13 +264,13 @@ def exbf_extra(key, mood, group, name):
     out = (f"이번 레퍼토리: {EXBF_MOODS.get(mood, EXBF_MOODS['soft'])}\n"
            f"참고 대사(골라서 상황에 맞게 변형, 그대로 베끼지 말 것): {json.dumps(picks, ensure_ascii=False)}\n")
     if first:
-        out += f"- 오늘 이 {'단체방' if group else '사람'}에게 보내는 첫 메시지다. 첫 메시지는 이름 없이 반드시 '자요?'로 시작한다(오타 '쟈요?', '자여?'로 변주 가능). 이름은 '자요?' 앞에 붙이지 않고, 용건은 다음 줄에 돌려 말한다.\n"
+        out += f"- 오늘 이 {'단체방' if group else '사람'}에게 보내는 첫 메시지다. 첫 메시지는 이름 없이 반드시 정확히 '자니?'로 시작한다. '자니?'는 오타나 변주('쟈니?', '자냐?', '자?' 등) 없이 항상 그대로 쓴다. 이름은 '자니?' 앞에 붙이지 않고, 용건은 다음 줄에 돌려 말한다.\n"
     else:
-        out += "- 오늘 이미 연락했다. '자요?'로 다시 시작해도 되지만 다른 방식(안부·추억·핑계)도 좋다.\n"
+        out += "- 오늘 이미 연락했다. '자니?'로 다시 시작해도 되지만 다른 방식(안부·추억·핑계)도 좋다.\n"
     if group:
-        out += "- 단체방이면 특정인 이름 대신 '다들'·'여러분'으로 부르고, 인원수만 말한다.\n"
+        out += "- 단체방이면 특정인 이름 대신 '얘들아'·'다들'로 부르고, 인원수만 말한다.\n"
     if sent:
-        out += f"- 이 {'단체방' if group else '사람'}에게 이미 보낸 문장(반복 금지, '자요?'만 예외): {json.dumps(sent[-8:], ensure_ascii=False)}\n"
+        out += f"- 이 {'단체방' if group else '사람'}에게 이미 보낸 문장(반복 금지, '자니?'만 예외): {json.dumps(sent[-8:], ensure_ascii=False)}\n"
     return out
 
 
@@ -268,8 +292,37 @@ def exbf_record(key, msgs):
     with RECENT_LOCK:
         EXBF_DAY[key] = time.strftime("%Y-%m-%d")
         lst = EXBF_SENT.setdefault(key, [])
-        lst.extend(m for m in msgs if m.strip() not in ("자요?", "자요…?"))
+        lst.extend(m for m in msgs if m.strip() not in ("자니?", "자니…?"))
         del lst[:-12]
+
+
+# 영크크(아이돌): 독촉 전략별 말투. 단계적 압박은 몇 번째 연락인지(nth)로 1~4회차를 고름
+YKK_STRAT = {
+    "consistent": "[초지일관] 몇 번째 독촉이든 같은 텐션의 상큼함을 유지한다. 서운함도 압박도 없이 매번 처음 보는 것처럼 반갑다. 이 무한 긍정 자체가 압박이 된다.",
+    "escalate": ["[단계적 압박 1회차] 컴백 소식처럼 설레게 공지한다.",
+                 "[단계적 압박 2회차] '답장 기다렸는데…🥺' 시무룩 + 애교.",
+                 "[단계적 압박 3회차] 조르기 총공격. '○○님만 안 왔어요ㅠㅠ 저 무대에서 ○○님 자리만 보고 있을 거예요' 같은 식.",
+                 "[단계적 압박 4회차 이상] 이모지는 마지막에 딱 1개, 짧고 진지하게. 팬레터에 진심으로 답장하는 톤. 앞의 애교와의 반전이 핵심."],
+    "chaos": "[급발진] 평소엔 기본 말투로 달콤하다.",
+}
+# 급발진 정색 한 줄 (무표정, 마침표로 끝, 이모지 금지) → 다음 줄에서 황급히 애교로 수습
+YKK_DEADPAN = ["근데 진짜 왜 답 안 해요?", "읽은 거 다 보여요.", "저 지금 웃고 있는 거 아니에요.", "매니저 형한테 말할 거예요."]
+
+
+def ykk_extra(key, mood, strategy, hint, group):
+    nth = int((hint or {}).get("nth") or 1)
+    if strategy == "escalate":
+        out = YKK_STRAT["escalate"][min(max(nth, 1), 4) - 1]
+    else:
+        out = YKK_STRAT.get(strategy, YKK_STRAT["consistent"])
+    if mood == "burst":
+        out += (f"\n이번엔 아이돌 이미지가 무너지는 순간이다: 상큼한 한 줄 → 무표정한 정색 한 줄 → '헤헤 농담이에요💕'처럼 황급히 애교로 수습. "
+                f"정색 줄은 이걸 그대로 쓴다: \"{pick_fresh(key + ':ykk', YKK_DEADPAN)}\" — 짧게, 마침표로 끝내고 이모지를 절대 붙이지 않는다(붙이면 온도차가 사라짐).")
+    elif mood == "sorry":
+        out += "\n방금 정색한 걸 황급히 수습하는 메시지다. '흐잉 아까 건 실수예요💕', '헤헤 놀랐죠? 농담이에요오' 같은 애교로."
+    if group:
+        out += "\n단체방이면 특정인 대신 '우리 팬분들'로 부르고 인원수만 말한다."
+    return "이번 말투: " + out + "\n"
 
 
 # 곽철용 대사: 버럭 때 서버가 하나를 골라 줌 (받는 사람별로 최근에 쓴 건 빼고)
@@ -346,7 +399,7 @@ MSGS_SCHEMA = {"type": "object", "properties": {"messages": {"type": "array", "i
                "required": ["messages"], "additionalProperties": False}
 
 
-def compose(text, persona, situation, name, mood="", kind="", phase="", group=False, facts="", hint=None, key="", flavor=None):
+def compose(text, persona, situation, name, mood="", kind="", phase="", group=False, facts="", hint=None, key="", flavor=None, strategy=""):
     """전할 내용(사실)을 바탕으로 Claude 가 성격대로 짧은 메시지 1~3개를 처음부터 씀. 실패하면 None
     facts 가 있으면(부장님) 완성 문장 대신 사실만 넘겨 매번 새로 쓰게 함. key 는 반복 막기용 받는 사람"""
     if not LLM_KEY:
@@ -375,8 +428,16 @@ def compose(text, persona, situation, name, mood="", kind="", phase="", group=Fa
                     f"참고 정보(어울리면 한 번만 자연스럽게, 아니면 빼기): {hint_text(hint, group, mood)}")
         if (flavor or {}).get("latte") and mood != "burst":  # 곽철용 버럭에는 안 섞음
             extra += latte_extra(key)
+    if persona == "active":
+        extra = ykk_extra(key, mood, strategy, hint, group)
+        length = "2~4문장(메시지 여러 개로 나눠도 됨)"
+        if facts:
+            body = f"전할 사실(말투는 무시하고 사실만 뽑아 쓸 것): {facts}"
     if persona == "shy":
-        extra = exbf_extra(key, mood, group, name) + (EMO_EXTRA if (flavor or {}).get("emo") else "")
+        extra = exbf_extra(key, mood, group, name)
+        if mood == "burst":  # 버럭·급발진: 상황에 맞는 잔소리 한 줄
+            extra += (f"이번 잔소리(꼭 한 번 그대로 넣기. 어미만 반말로 자연스럽게 다듬어도 됨): {exbf_nag(key, phase, facts or text)}\n"
+                      "잔소리는 머뭇거리는 평소 말투와 달리 딱 잘라 말하고, 그 뒤에 전할 사실(마감 등)을 짧게 붙인다.\n") + (EMO_EXTRA if (flavor or {}).get("emo") else "")
         length = "3~4줄 이내(줄바꿈으로 짧게 끊기)"
         if facts:
             body = f"전할 사실(말투는 무시하고 사실만 뽑아 쓸 것): {facts}"
@@ -441,7 +502,7 @@ def send(data):
     msgs = None if data.get("raw") else compose(text, persona, data.get("situation", ""), data.get("name", ""),
                                                 data.get("mood", ""), data.get("kind", ""), data.get("phase", ""), bool(data.get("channel")),
                                                 data.get("facts", ""), data.get("hint"), data.get("channel") or data.get("user", ""),
-                                                data.get("flavor"))
+                                                data.get("flavor"), data.get("strategy", ""))
     llm = bool(msgs)
     # parts: 문구 그대로 여러 개로 나눠 보냄 (구남친 '읽씹 후 연타' 같은 멘트)
     msgs = msgs or ([p for p in data.get("parts") or [] if p] if data.get("raw") else []) or [text]
@@ -586,7 +647,9 @@ def poll_create(data):
     opts = [o for o in opts if o.get("label")][:10]
     if len(opts) < 2:
         raise SlackError("need_two_places")
-    lines = [f"🗳 *{data.get('title') or '투표'}*", "번호 이모지를 눌러 주세요. *여러 개 골라도 돼요!*", ""]
+    # intro: 화면이 성격별 말투로 만든 머리말 두 줄 (없으면 기본 문구)
+    intro = [str(x) for x in (data.get("intro") or [])][:2] or [f"🗳 *{data.get('title') or '투표'}*", "번호 이모지를 눌러 주세요. *여러 개 골라도 돼요!*"]
+    lines = intro + [""]
     for i, o in enumerate(opts):
         lines.append(f"{NUM_CHAR[i]}  *{o['label']}*" + (f"  _{o['extra']}_" if o.get("extra") else ""))
         if o.get("url"):
@@ -748,6 +811,71 @@ def start_socket():
     threading.Thread(target=run, daemon=True).start()
 
 
+# ---------- 대시보드 오른쪽 Slack 패널: 최근 메시지 ----------
+USER_CACHE = {}
+try:  # Slack 은 이모지를 ':clipboard:' 같은 글자 코드로 돌려줌 → 실제 이모지로 (라이브러리가 없으면 코드 그대로)
+    import emoji as _emoji
+except ImportError:
+    _emoji = None
+SKIN = re.compile(r":skin-tone-\d:")
+
+
+def emojize(t):
+    if not _emoji or not t:
+        return t
+    return _emoji.emojize(SKIN.sub("", t), language="alias")
+
+
+def user_brief(uid):
+    if uid not in USER_CACHE:
+        try:
+            p = slack("users.info", user=uid)["user"].get("profile", {})
+            USER_CACHE[uid] = {"name": p.get("display_name") or p.get("real_name") or uid, "avatar": p.get("image_48", "")}
+        except SlackError:
+            USER_CACHE[uid] = {"name": uid, "avatar": ""}
+    return USER_CACHE[uid]
+
+
+def history(q):
+    """채널(또는 총무와 총무봇의 DM)의 최근 메시지를 오래된 순으로. 봇 메시지는 보낸 이름·아이콘(성격)을 그대로"""
+    ch = q.get("channel", "")
+    if q.get("dm"):
+        if not OWNER:
+            raise SlackError("no_owner")
+        ch = slack("conversations.open", users=OWNER)["channel"]["id"]
+    if not ch:
+        raise SlackError("bad_request")
+    msgs = slack("conversations.history", channel=ch, limit=min(int(q.get("limit") or 40), 100))["messages"]
+    out = []
+    for m in reversed(msgs):
+        if m.get("subtype") in ("channel_join", "channel_purpose", "channel_topic") and not m.get("text"):
+            continue
+        if m.get("bot_id") or m.get("subtype") == "bot_message":
+            icons = m.get("icons") or {}
+            name, avatar, emoji = m.get("username") or "총무봇", icons.get("image_48") or icons.get("image_72") or "", icons.get("emoji", "")
+        else:
+            u = user_brief(m.get("user", ""))
+            name, avatar, emoji = u["name"], u["avatar"], ""
+        button = any(e.get("type") == "button" for b in m.get("blocks", []) for e in b.get("elements", []) if isinstance(e, dict))
+        out.append({"ts": m["ts"], "name": name, "avatar": avatar, "emoji": emojize(emoji), "text": emojize(m.get("text", "")), "bot": bool(m.get("bot_id")),
+                    "subtype": m.get("subtype", ""), "button": button, "replies": m.get("reply_count", 0),
+                    "reactions": [{"name": r["name"], "char": emojize(f":{r['name']}:"), "count": r.get("count", 0)} for r in m.get("reactions", [])]})
+    return {"channel": ch, "messages": out}
+
+
+def archive_meeting(data):
+    """정산까지 끝난 모임을 마무리: 채널을 보관(봇은 삭제 불가)하고 서버의 참석 조사 기록을 정리"""
+    ch = data.get("channel", "")
+    if not ch:
+        raise SlackError("bad_request")
+    slack("conversations.archive", channel=ch)
+    with LOCK:
+        db = survey_load()
+        if db.pop(ch, None) is not None:
+            survey_save(db)
+    return {"archived": True}
+
+
 def cancel_meeting(data):
     ch = data.get("channel", "")
     if not ch:
@@ -787,7 +915,7 @@ def meet_save(data):
     with LOCK:
         db = meet_load()
         db[ch] = {"persona": data.get("persona", "active"), "info": data.get("info", {}), "names": data.get("names", {}),
-                  "flavor": data.get("flavor", {}),
+                  "flavor": data.get("flavor", {}), "ended": bool(data.get("ended")),
                   "todo": data.get("todo", {}),
                   "at": time.strftime("%m/%d %H:%M")}
         DATA.mkdir(exist_ok=True)
@@ -877,6 +1005,9 @@ def chat_handle(ch, uid, text, ts, thread_ts, client):
         if not meet:
             print(f"단체방 메시지 무시 ({ch}: 대시보드가 모임 정보를 아직 안 보낸 채널)")
         return
+    if meet.get("ended"):  # 정산까지 끝난 모임은 단체방 대화에 더 끼어들지 않음
+        print(f"단체방 메시지 무시 ({ch}: 정산이 끝난 모임)")
+        return
     name = meet.get("names", {}).get(uid) or "참가자"
     hist = HISTORY.setdefault(ch, [])
     now = time.time()
@@ -957,6 +1088,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/slack/members": list_members,
             "/api/config": lambda: {"kakaoJsKey": KAKAO_JS_KEY},
             "/api/socket": lambda: dict(SOCKET),
+            "/api/slack/history": lambda: history(q),
             "/api/survey": lambda: survey_get(q.get("channel", "")),
             "/api/slack/poll": lambda: poll_tally(q.get("channel", ""), q.get("ts", "")),
             "/api/chat": lambda: chat_events(q.get("channel", "")),
@@ -980,6 +1112,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/slack/thread": lambda: thread_reply(data),
             "/api/survey/start": lambda: survey_start(data),
             "/api/slack/cancel": lambda: cancel_meeting(data),
+            "/api/slack/archive": lambda: archive_meeting(data),
             "/api/meet": lambda: meet_save(data),
             "/api/pay/parse": lambda: pay_parse(data),
             "/api/receipt/parse": lambda: receipt_parse(data),

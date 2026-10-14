@@ -122,6 +122,13 @@ label.f{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:0
 /* 성격 카드: 내용을 위에 붙이고 예시 문구는 두 줄까지만 (카드마다 제목 위치가 같게) */
 .grid4 .opt{display:flex;flex-direction:column;justify-content:flex-start;gap:2px}
 .grid4 .opt span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+/* 성격 카드: 사진(또는 이모지)을 왼쪽에 크게, 이름·미리보기는 오른쪽 */
+.opt.pcard, .grid4 .opt.pcard{display:flex;flex-direction:row;align-items:center;gap:12px}
+.opt.pcard .pav{flex:none;width:64px;height:64px;border-radius:50%;overflow:hidden;display:grid;place-items:center;background:var(--grey-l);font-size:38px;line-height:1;-webkit-line-clamp:unset;color:inherit}
+.opt.pcard .pav img{width:100%;height:100%;object-fit:cover;display:block}
+.opt.pcard .ptx{min-width:0;display:flex;flex-direction:column;gap:2px;font-size:inherit;color:inherit;-webkit-line-clamp:unset}
+.opt.pcard .ptx span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:12px;color:var(--muted)}
+@media (max-width:640px){.opt.pcard .pav{width:48px;height:48px;font-size:28px}}
 .tpls{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .tpls .opt{text-align:center}
 .tpls .opt .ic{font-size:22px;display:block}
@@ -177,6 +184,33 @@ img.av{object-fit:cover;background:var(--grey-l)}
 .steps .sep{width:18px;height:2px;background:var(--line)}
 .polls{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
 .poll-fixed{font-size:18px;font-weight:800;margin-bottom:4px}
+/* 대시보드 오른쪽 Slack 패널 (화면의 약 1/3, 스크롤해도 고정) */
+.page.with-slack{max-width:none;display:grid;grid-template-columns:minmax(0,2fr) minmax(340px,1fr);gap:16px;align-items:start}
+.slack-pane{position:sticky;top:76px;height:calc(100vh - 96px);display:flex;flex-direction:column;background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.sm-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:#4a154b;color:#fff}
+.sm-head .muted{color:#e9d8ea}
+.sm-tabs{display:flex;gap:4px;flex:1;min-width:0}
+.sm-tabs button{border:0;background:transparent;color:#e9d8ea;font-weight:700;padding:6px 10px;border-radius:8px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sm-tabs button.on{background:rgba(255,255,255,.18);color:#fff}
+.sm-list{flex:1;overflow:auto;padding:8px 0}
+.sm-msg{display:flex;gap:8px;padding:6px 14px}
+.sm-msg:hover{background:#f8f8f8}
+.sm-av{flex:none;width:36px;height:36px;border-radius:8px;overflow:hidden;background:var(--grey-l);display:grid;place-items:center;font-size:20px;font-weight:700}
+.sm-av img{width:100%;height:100%;object-fit:cover}
+.sm-body{min-width:0;flex:1}
+.sm-meta{display:flex;align-items:center;gap:6px;font-size:13px}
+.sm-meta span{color:#616061;font-size:12px}
+.sm-meta .app{background:#e8e8e8;color:#616061;font-size:10px;font-weight:700;padding:0 4px;border-radius:3px}
+.sm-text{font-size:14px;line-height:1.45;word-break:break-word;color:#1d1c1d}
+.sm-text a{color:#1264a3}
+.sm-btn{display:inline-block;margin-top:6px;padding:4px 12px;border-radius:6px;background:#007a5a;color:#fff;font-size:13px;font-weight:700}
+.sm-reacts{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.sm-reacts span{border:1px solid #e0e0e0;background:#f6f6f6;border-radius:12px;padding:1px 8px;font-size:12px}
+.sm-replies{margin-top:4px;font-size:12px;color:#1264a3;font-weight:700}
+.sm-msg.sys .sm-text{color:#616061;font-size:13px}
+@media (max-width:1100px){.page.with-slack{grid-template-columns:1fr}.slack-pane{position:static;height:520px}}
+pre.report{white-space:pre-wrap;background:var(--grey-l);border-radius:10px;padding:12px;font-size:12px;line-height:1.6;max-height:260px;overflow:auto;margin:0}
+.hist-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
 .card.remind{display:flex;align-items:center;gap:10px;padding:10px 16px;margin-bottom:16px}
 .card.next{display:flex;align-items:center;gap:10px;padding:14px 16px;margin-bottom:16px;border-color:var(--green);background:var(--green-l)}
 .drow{border-top:1px solid var(--line)}
@@ -523,33 +557,33 @@ const KEYWORDS = [
 ];
 
 const PERSONAS = {
-  active:{label:'영크크', ic:'😆'}, shy:{label:'구남친', ic:'<img class="pic" src="assets/exbf.jpg" alt="">'}, oldie:{label:'부장님', ic:'<img class="pic" src="assets/bujang.jpg" alt="">'}, strict:{label:'맑눈광', ic:'<img class="pic" src="assets/mnk.jpg" alt="">'}
+  active:{label:'영크크', ic:'<img class="pic" src="assets/ykk.jpg" alt="">'}, shy:{label:'구남친', ic:'<img class="pic" src="assets/exbf.jpg" alt="">'}, oldie:{label:'부장님', ic:'<img class="pic" src="assets/kwak.jpg" alt="">'}, strict:{label:'맑눈광', ic:'<img class="pic" src="assets/mnk.jpg" alt="">'}
 };
 const STRATEGIES = {
   consistent:{label:'초지일관', ic:'➖', desc:'처음부터 끝까지 같은 말투'},
   escalate:{label:'단계적 압박', ic:'📈', desc:'공지 → DM → 마감, 점점 단호하게'},
-  chaos:{label:'급발진', ic:'🌋', desc:'친절하다가 갑자기 버럭, 예측 불가'}
+  chaos:{label:'급발진', ic:'🌋', desc:'친절하다가 갑자기 버럭, 예측 불가 (구남친은 거의 매번 버럭)'}
 };
 
 // 말투별 문구 (실제 앱에서는 LLM이 상황에 맞춰 생성. 데모는 예시 문구)
 const LINES = {
   active:{
-    g:'다들 안녕하세요~! 🎉 {event} 참석 조사 시작할게요!\n참석 여부랑 회비({fee}) 부탁드려요. 마감은 {deadline}이에요 🙌',
-    dm0:'{name}님~ {event} 오시죠? 😆 참석 여부만 슬쩍 알려주세요! 회비는 {fee}이에요~',
-    dl0:'{name}님! 오늘 {dtime} 마감이에요~ 시간 되실 때 답 주시면 감사해요 🙏',
-    dm1:'{name}님! 아직 답이 없으셔서 다시 여쭤봐요 ✋ {deadline}까지 참석 여부와 회비 부탁드려요!',
-    dl2:'{name}님!! 오늘 {dtime} 마감이에요 ⏰ 그때까지 답이 없으면 불참으로 처리할게요!',
-    burst:['{name}님!!!!! 왜!!! 답이!!! 없으세요!!! 😤😤 지금 당장 알려주세요!!!','아니 {name}님 메시지 읽으신 거 다 보여요!!! 👀🔥🔥'],
-    sorry:['앗 아까는 제가 너무 흥분했네요 😅 {name}님 천천히 답 주세요~ 🌸','ㅎㅎ 농담이에요~ 💕 편하실 때 알려주세요!']
+    g:'우리 팬분들~✨ {event} 팬미팅 열려요오!! 😆🎤\n참석 여부랑 사랑({fee}) 보내주세요오 마감은 {deadline}이에요💕',
+    dm0:'{name}니이임~✨ {event} 보러 와주실 거죠오? 😆 사랑({fee})도 기다릴게요💕🫶',
+    dl0:'{name}님~ 오늘 {dtime}에 마감이에요오! 헤헤 답장 기다릴게요🥺💕',
+    dm1:'앗… {name}님 혹시 제 메시지 못 보셨나요?🥺 {deadline}까지 참석이랑 사랑 보내주세요오💕',
+    dl2:'{name}님, 오늘 {dtime}이 마감이에요.\n꼭 답 주세요. 늘 고마워요. 🎤',
+    burst:['{name}님~ {event} 오시는 거 맞죠? 😆💕\n근데 읽은 거 다 보여요.\n…헤헤 농담이에요!! 하트 받아요🫶', '{name}니이임~✨\n근데 진짜 왜 답 안 해요?\n…히히 장난이에요💕 기다릴게요🥺'],
+    sorry:['흐잉 아까 건 실수예요💕\n{name}님 사랑해요🫶', '헤헤 놀랐죠? 농담이에요오✨\n볼콕 >_<']
   },
   shy:{
-    g:'자요?\n그냥… {event} 하려고요\n참석이랑 회비({fee})… {deadline}까지만 알려줘요',
-    dm0:'자요?\n갑자기 생각나서요\n{event}… 오실 수 있어요?',
-    dl0:'자요?\n오늘이 마감이라서요…\n{event} 오시는지만…',
-    dm1:'자요?\n제가 지난번에 너무 급하게 물어봤던 것 같아요…\n{deadline}까지만 알려줘요',
-    dl2:'자요?\n자요…?\n오늘 {dtime}까지만 기다릴게요',
-    burst:['자요?\n바빠요?\n답장 안 해도 돼요…','…\n{name}님만한 사람 없더라고요…'],
-    sorry:['미안해요 그냥 잊어주세요\nㅋㅋ 제가 왜 이러죠','아 실수로 보냈네요…']
+    g:'자니?\n그냥… {event} 하려고\n참석이랑 회비({fee})… {deadline}까지만 알려줘',
+    dm0:'자니?\n갑자기 생각나서\n{event}… 올 수 있어?',
+    dl0:'자니?\n오늘 마감이라서…\n{event} 오는지만…',
+    dm1:'자니?\n내가 지난번에 너무 급하게 물어봤던 것 같아…\n{deadline}까지만 알려줘',
+    dl2:'자니?\n자니…?\n오늘 {dtime}까지만 기다릴게',
+    burst:['자니?\n바빠?\n답장 안 해도 돼…','…\n{name}만한 사람 없더라…'],
+    sorry:['미안 그냥 잊어줘\nㅋㅋ 내가 왜 이러냐','아 실수로 보냈네…']
   },
   oldie:{
     g:'허허 여러분~ {event} 참석 조사 시작합니다^^\n참석 여부랑 회비({fee}) 알려 줘요~~ 마감은 {deadline}이야.. 나 때는 이런 거 종이에 받았어 허허',
@@ -573,16 +607,16 @@ const LINES = {
 // 투표 독촉 문구 ({what}: 아직 안 한 투표, 예: 날짜·장소). 버럭·급사과는 LINES 것을 같이 씀
 const VOTE_LINES = {
   active:{
-    soft:'{name}님~ {event} {what} 투표 아직이에요! 😆 이모지 하나만 콕 눌러주세요~ (마감 {deadline})',
-    firm:'{name}님! {what} 투표 꼭 부탁드려요 🙏 여러 개 골라도 돼요! {deadline} 마감이에요~',
-    last:'{name}님!! 오늘 {dtime} {what} 투표 마감이에요 ⏰ 안 하시면 다수결로 정할게요!',
-    burst:'{name}님!!!!! {what} 투표!!! 이모지 하나!!! 왜 안 누르세요!!! 😤😤'
+    soft:'{name}님~✨ {event} {what} 투표 아직이에요오! 😆 이모지 하나만 콕 눌러주세요💕 (마감 {deadline})',
+    firm:'앗… {name}님 {what} 투표 기다렸는데…🥺 여러 개 골라도 돼요오 {deadline} 마감이에요💕',
+    last:'{name}님, 오늘 {dtime}에 {what} 투표가 끝나요.\n이모지 하나만 부탁할게요. 🎤',
+    burst:'{name}님~ {what} 투표 하셨죠? 😆\n근데 읽은 거 다 보여요.\n…헤헤 농담이에요!! 콕 눌러주세요🫶'
   },
   shy:{
-    soft:'자요?\n그냥… {what} 투표 하셨나 해서요\n{deadline}까지예요',
-    firm:'자요?\n우리 지난번 갔던 거기… 기억나요?\n{what} 투표만 눌러줘요',
-    last:'자요?\n자요…?\n오늘 {dtime}에 {what} 투표 끝나요…',
-    burst:'…\n{deadline}까지만 기다릴게요\n{what} 투표…'
+    soft:'자니?\n그냥… {what} 투표 했나 해서\n{deadline}까지야',
+    firm:'자니?\n우리 지난번 갔던 거기… 기억나?\n{what} 투표만 눌러줘',
+    last:'자니?\n자니…?\n오늘 {dtime}에 {what} 투표 끝나…',
+    burst:'…\n{deadline}까지만 기다릴게\n{what} 투표…'
   },
   oldie:{
     soft:'허허 {name}씨~ {event} {what} 투표 아직이지?^^ 뭘 먹어야 맛있게 먹었다고 소문이 날까~ 이모지 하나만 꾹 눌러 줘요 ({deadline} 마감)',
@@ -599,16 +633,16 @@ const VOTE_LINES = {
 };
 // 정산 단체방 독촉 (이름·금액 없이 인원만) · 개인 금액은 DM 으로만
 const SETTLE_GROUP = {
-  active:{soft:'정산 DM 보내드렸어요! 💸 아직 {n}분이 입금 전이에요~ DM 확인 부탁드려요 (마감 {deadline})',
-    firm:'{n}분 남았어요!! 🙏 DM으로 보내드린 금액 확인하고 보내주세요~ {deadline}까지예요!',
-    last:'정산 마감 임박!! ⏰ 아직 {n}분이에요! {dtime}까지 꼭 부탁드려요!!',
-    burst:['아직!!! {n}분!!! 정산!!! 부탁드려요!!! 😤😤', '{n}분!!! DM 읽으신 거 다 보여요!!! 👀🔥'],
-    sorry:['앗 흥분했네요 😅 {n}분 편하실 때 보내주세요~ 🌸', 'ㅎㅎ 농담이에요~ 💕 {n}분 천천히 부탁드려요!']},
-  shy:{soft:'자요?\n정산 금액 DM으로 보냈어요…\n아직 {n}분이요… ({deadline})',
-    firm:'저 많이 변했어요…\n이번엔 정산 금방 끝내요\n{n}분만…',
-    last:'자요?\n오늘 {dtime}까지예요…\n아직 {n}분…',
-    burst:['자요?\n자요…?\n{n}분…', '답장 안 해도 돼요…\n…근데 정산은 잊지 말아주세요'],
-    sorry:['미안해요 그냥 잊어주세요\nㅋㅋ 제가 왜 이러죠', '아 실수로 보냈네요…\n{n}분 천천히…']},
+  active:{soft:'우리 팬분들~✨ 정산 금액 DM으로 보냈어요오! 💸 아직 {n}분이 사랑을 안 보내주셨어요🥺 (마감 {deadline})',
+    firm:'{n}분 남았어요오… 답장 기다렸는데…🥺 DM 확인하고 사랑 보내주세요💕 {deadline}까지예요!',
+    last:'정산 마감은 {dtime}이에요.\n아직 {n}분 남았어요. 부탁드려요. 🎤',
+    burst:['우리 팬분들~ 정산 DM 보셨죠? 😆\n근데 읽은 거 다 보여요.\n…헤헤 농담이에요!! {n}분 사랑 보내주세요🫶', '아직 {n}분이에요오💕\n저 지금 웃고 있는 거 아니에요.\n…히히 장난이에요✨ 기다릴게요🥺'],
+    sorry:['흐잉 아까 건 실수예요💕\n{n}분 천천히 해주세요🫶', '헤헤 놀랐죠? 농담이에요오✨\n사랑해요💖']},
+  shy:{soft:'자니?\n정산 금액 DM으로 보냈어…\n아직 {n}명… ({deadline})',
+    firm:'나 전역하고 많이 변했어…\n이번엔 정산 금방 끝내자\n{n}명만…',
+    last:'자니?\n오늘 {dtime}까지야…\n아직 {n}명…',
+    burst:['자니?\n자니…?\n{n}명…', '돈 얘기는 한 번에 끝내자. 두 번 말하게 하지 말고\n아직 {n}명', '답장 안 해도 돼…\n…근데 정산은 잊지 마'],
+    sorry:['미안 그냥 잊어줘\nㅋㅋ 내가 왜 이러냐', '아 실수로 보냈네…\n천천히 해…']},
   oldie:{soft:'허허 여러분~ 정산 금액은 DM으로 보냈어요^^ 아직 {n}명이 입금 전이야~~ DM 확인 부탁해요 (마감 {deadline})',
     firm:'지방방송 끄세요~~ 아직 {n}명 남았다. DM에 금액이랑 계좌 있으니까 {deadline}까지 보내라~',
     last:'오늘 {dtime} 정산 마감이다. 아직 {n}명. 다들 시계 밥 좀 줘라.',
@@ -620,12 +654,13 @@ const SETTLE_GROUP = {
 };
 // 정산 개인 DM 독촉 ({amount}·{account} 는 그 사람 금액과 총무 계좌)
 const SETTLE_DM = {
-  active:{soft:'{name}님~ {event} 정산 {amount} 아직이에요! 😆 {account}로 보내주시면 돼요~ (마감 {deadline})',
-    firm:'{name}님! 정산 {amount} 부탁드려요 🙏 {account} · {deadline}까지예요!', last:'{name}님!! 오늘 {dtime} 정산 마감이에요 ⏰ {amount} → {account}',
-    burst:'{name}님!!!!! 정산 {amount}!!! 지금!!! 부탁드려요!!! 😤 {account}'},
-  shy:{soft:'자요?\n그냥 잘 지내나 궁금해서요\n아 그리고… {amount}이요 ({account})',
-    firm:'{name}님만한 사람 없더라고요…\n{amount}만요… {account}', last:'자요?\n{deadline}까지만 기다릴게요\n{amount}… {account}',
-    burst:'…근데 {amount}은 잊지 말아주세요\n{account}'},
+  active:{soft:'{name}니이임~✨ {event} 사랑 {amount} 아직이에요오! 😆 {account}로 보내주시면 오늘 밤 꿈에 나갈게요🌙💕 (마감 {deadline})',
+    firm:'앗… {name}님 혹시 제 메시지 못 보셨나요?🥺 사랑 {amount}, {deadline}까지 {account}로 보내주세요오💕',
+    last:'{name}님, 이번엔 진짜 마지막으로 부탁드릴게요.\n{event} 회비 {amount}, {deadline}까지 {account}로요.\n늘 고마워요. 🎤',
+    burst:'{name}님~ 정산 DM 보셨죠? 😆💕\n근데 읽은 거 다 보여요.\n…헤헤 농담이에요!! {amount} → {account} 하트 받아요🫶'},
+  shy:{soft:'자니?\n그냥 잘 지내나 궁금해서\n아 그리고… {amount} ({account})',
+    firm:'{name}만한 사람 없더라…\n{amount}만… {account}', last:'자니?\n{deadline}까지만 기다릴게\n{amount}… {account}',
+    burst:'…근데 {amount}은 잊지 마\n{account}'},
   oldie:{soft:'허허 {name}씨~ {event} 정산 {amount} 아직이지?^^ {account}로 보내 주면 돼요~~ (마감 {deadline})',
     firm:'{name}씨, 정산 {amount} 아직이네~ {account}로 {deadline}까지 보내라~', last:'{name}씨. 오늘 {dtime} 정산 마감이다. {amount} → {account}.',
     burst:'나 깡패 아니다. 나도 적금 붓고 보험 들고 살고 그런다. 나도 순정이 있다. {name}씨가 {amount} 이런 식으로 안 보내고 그러면.. 그때는 깡패가 되는 거야! {account}'},
@@ -634,16 +669,16 @@ const SETTLE_DM = {
 };
 // 투표 단체방 독촉 (이름 없이 인원만) · {n}: 미투표 인원, {what}: 열린 투표(날짜·장소)
 const VOTE_GROUP = {
-  active:{soft:'아직 {n}명이 {what} 투표를 안 했어요! 😆 위 투표 메시지에 이모지 하나만 콕 눌러주세요~ (마감 {deadline})',
-    firm:'{what} 투표 {n}명 남았어요!! 🙏 여러 개 골라도 돼요! 마감 {deadline}이에요~',
-    last:'투표 마감 임박!! ⏰ 아직 {n}명이에요! {dtime}까지 안 하시면 다수결로 정할게요!',
-    burst:['아직!!! {n}명!!! 이모지!!! 하나만!!! 눌러주세요!!! 😤😤', '{n}분!!! 투표 메시지 보신 거 다 알아요!!! 👀🔥'],
-    sorry:['앗 너무 흥분했네요 😅 {n}분 천천히 눌러주세요~ 🌸', 'ㅎㅎ 농담이에요~ 💕 {n}분 편하실 때 투표 부탁드려요!']},
-  shy:{soft:'자요?\n그냥… {what} 투표 아직 {n}분이라서요\n위에 이모지 하나만…',
-    firm:'우리 지난번 갔던 거기…\n이번에도 투표로 정해요\n아직 {n}분이요… ({deadline})',
-    last:'자요?\n오늘 {dtime}에 투표 끝나요…\n{n}분…',
-    burst:['자요?\n자요…?\n{n}분…', '답장 안 해도 돼요…\n…근데 투표는 해주세요'],
-    sorry:['미안해요 그냥 잊어주세요\nㅋㅋ 제가 왜 이러죠', '아 실수로 보냈네요…\n{n}분 천천히…']},
+  active:{soft:'우리 팬분들~✨ 아직 {n}분이 {what} 투표를 안 하셨어요오! 😆 위에 이모지 콕 눌러주세요💕 (마감 {deadline})',
+    firm:'{what} 투표 {n}분 남았어요오… 기다렸는데…🥺 여러 개 골라도 돼요 {deadline} 마감이에요💕',
+    last:'{what} 투표는 {dtime}에 끝나요.\n아직 {n}분 남았어요. 부탁드려요. 🎤',
+    burst:['우리 팬분들~ 투표하셨죠? 😆💕\n근데 읽은 거 다 보여요.\n…헤헤 농담이에요!! {n}분 콕 눌러주세요🫶', '{what} 투표 아직 {n}분이에요오✨\n매니저 형한테 말할 거예요.\n…히히 장난이에요💕 기다릴게요🥺'],
+    sorry:['흐잉 아까 건 실수예요💕\n{n}분 천천히 해주세요🫶', '헤헤 놀랐죠? 농담이에요오✨\n사랑해요💖']},
+  shy:{soft:'자니?\n그냥… {what} 투표 아직 {n}명이라서\n위에 이모지 하나만…',
+    firm:'우리 지난번 갔던 거기…\n이번에도 투표로 정하자\n아직 {n}명… ({deadline})',
+    last:'자니?\n오늘 {dtime}에 투표 끝나…\n{n}명…',
+    burst:['공지 읽었으면 이모티콘이라도 남기자, 응?', '투표 하나 누르는 데 3초면 된다. 3초', "'거의 다 왔어요'는 출발했을 때 하는 말이 아니다"],
+    sorry:['미안 그냥 잊어줘\nㅋㅋ 내가 왜 이러냐', '아 실수로 보냈네…\n천천히 해…']},
   oldie:{soft:'허허 여러분~ 아직 {n}명이 {what} 투표를 안 했어요^^ 뭘 먹어야 맛있게 먹었다고 소문이 날까~ 위 메시지에 이모지 하나만 눌러 줘요 (마감 {deadline})',
     firm:'지방방송 끄세요~~ {what} 투표 {n}명 남았다. 여러 개 골라도 된다~ 마감 {deadline}',
     last:'오늘 {dtime} 투표 마감이다. 아직 {n}명. 안 하면 다수결로 간다.',
@@ -657,16 +692,16 @@ const VOTE_GROUP = {
 };
 // 참석 조사 단체방 독촉 (이름 없이 인원만) · {n}: 미응답 인원
 const SURVEY_GROUP = {
-  active:{soft:'아직 {n}명이 참석 조사에 답하지 않았어요! 😆 아래 [응답하기] 한 번만 눌러주세요~ (마감 {deadline})',
-    firm:'{n}명 남았어요!! 🙏 [응답하기] 눌러서 참석이랑 1·2차 알려주세요! 마감 {deadline}이에요~',
-    last:'마감 임박!! ⏰ 아직 {n}명이에요! {dtime}까지 꼭 [응답하기] 부탁드려요!!',
-    burst:['아직!!! {n}명!!! 왜!!! 답이!!! 없으세요!!! 😤😤', '{n}분!!! 메시지 읽으신 거 다 보여요!!! 👀🔥'],
-    sorry:['앗 방금 너무 흥분했네요 😅 {n}분 천천히 눌러주세요~ 🌸', 'ㅎㅎ 농담이에요~ 💕 {n}분 편하실 때 부탁드려요!']},
-  shy:{soft:'자요?\n갑자기 생각나서요\n참석 조사 아직 {n}분… [응답하기] 한 번만…',
-    firm:'자요?\n제가 지난번에 너무 급하게 물어봤던 것 같아요…\n{n}분 남았어요 ({deadline})',
-    last:'자요?\n오늘 {dtime}에 참석 조사 끝나요…\n아직 {n}분…',
-    burst:['자요?\n자요…?\n{n}분…', '답장 안 해도 돼요…\n…근데 [응답하기]는 눌러주세요'],
-    sorry:['미안해요 그냥 잊어주세요\nㅋㅋ 제가 왜 이러죠', '아 실수로 보냈네요…\n{n}분 천천히…']},
+  active:{soft:'우리 팬분들~✨ 아직 {n}분이 참석 조사에 답을 안 하셨어요오! 😆 [응답하기] 한 번만 눌러주세요💕 (마감 {deadline})',
+    firm:'{n}분 남았어요… 답장 기다렸는데…🥺 [응답하기]로 팬미팅 오시는지 알려주세요오💕 {deadline}까지예요!',
+    last:'참석 조사는 {dtime}에 마감돼요.\n아직 {n}분 남았어요. [응답하기] 부탁드려요. 🎤',
+    burst:['우리 팬분들~ 팬미팅 오시죠? 😆💕\n근데 진짜 왜 답 안 해요?\n…헤헤 농담이에요!! {n}분 [응답하기] 눌러주세요🫶', '아직 {n}분이에요오✨\n읽은 거 다 보여요.\n…히히 장난이에요💕 기다릴게요🥺'],
+    sorry:['흐잉 아까 건 실수예요💕\n{n}분 천천히 해주세요🫶', '헤헤 놀랐죠? 농담이에요오✨\n사랑해요💖']},
+  shy:{soft:'자니?\n갑자기 생각나서\n참석 조사 아직 {n}명… [응답하기] 한 번만…',
+    firm:'자니?\n내가 지난번에 너무 급하게 물어봤던 것 같아…\n{n}명 남았어 ({deadline})',
+    last:'자니?\n오늘 {dtime}에 참석 조사 끝나…\n아직 {n}명…',
+    burst:['자니?\n자니…?\n{n}명…', '답장은 간단하게. \'참석\' 두 글자면 된다\n[응답하기] 아직 {n}명', '답장 안 해도 돼…\n…근데 [응답하기]는 눌러줘'],
+    sorry:['미안 그냥 잊어줘\nㅋㅋ 내가 왜 이러냐', '아 실수로 보냈네…\n천천히 해…']},
   oldie:{soft:'허허 여러분~ 아직 {n}명이 참석 조사에 답을 안 했어요^^ 아래 [응답하기] 한 번만 눌러 줘요~~ (마감 {deadline})',
     firm:'지방방송 끄세요~~ 아직 {n}명 남았다. [응답하기] 눌러서 참석이랑 1·2차 알려 줘라~ 마감 {deadline}',
     last:'오늘 {dtime} 마감이다. 아직 {n}명. 답 없으면 불참으로 적는다.',
@@ -680,12 +715,12 @@ const SURVEY_GROUP = {
 };
 // 참석 조사 개인 DM (총무가 대시보드에서 보낼 때만)
 const SURVEY_DM = {
-  active:{soft:'{name}님~ {event} 오시나요? 😆 [응답하기] 눌러서 참석이랑 1·2차만 알려주세요! (마감 {deadline})',
-    firm:'{name}님! 참석 조사 아직이세요 🙏 버튼 하나면 끝나요~ {deadline} 마감이에요!', last:'{name}님!! 오늘 {dtime} 마감이에요 ⏰ 꼭 [응답하기] 부탁드려요!',
-    burst:'{name}님!!!!! 왜!!! 답이!!! 없으세요!!! 😤😤 지금 당장 [응답하기]!!!'},
-  shy:{soft:'자요?\n갑자기 생각나서요\n{event}… 오실 수 있어요? [응답하기]로…',
-    firm:'자요?\n술 좀 마셨어요\n근데 {event}은 진심으로 물어보는 거예요', last:'자요?\n자요…?\n오늘 {dtime}까지만 기다릴게요',
-    burst:'…\n바빠요?\n[응답하기]만 눌러줘요'},
+  active:{soft:'{name}니이임~✨ {event} 팬미팅 보러 와주실 거죠오? 😆 [응답하기] 눌러서 참석이랑 1·2차 알려주세요💕 (마감 {deadline})',
+    firm:'{name}님만 안 왔어요ㅠㅠ 🥺 저 무대에서 {name}님 자리만 보고 있을 거예요… [응답하기] 부탁해요오💕 {deadline}까지!', last:'{name}님, 오늘 {dtime}이 마감이에요.\n[응답하기]로 꼭 알려 주세요. 늘 고마워요. 🎤',
+    burst:'{name}님~ {event} 오시는 거 맞죠? 😆💕\n근데 읽은 거 다 보여요.\n…헤헤 농담이에요!! [응답하기] 하트 받아요🫶'},
+  shy:{soft:'자니?\n갑자기 생각나서\n{event}… 올 수 있어? [응답하기]로…',
+    firm:'자니?\n술 좀 마셨어\n근데 {event}은 진심으로 물어보는 거야', last:'자니?\n자니…?\n오늘 {dtime}까지만 기다릴게',
+    burst:'…\n바빠?\n[응답하기]만 눌러줘'},
   oldie:{soft:'허허 {name}씨~ {event} 오는 거지?^^ [응답하기] 눌러서 참석이랑 1·2차만 알려 줘요~~ (마감 {deadline})',
     firm:'{name}씨, 참석 조사 아직이네~ 버튼 하나면 끝나잖아. {deadline}까지 눌러라~', last:'{name}씨. 오늘 {dtime} 마감이다. 답 없으면 불참으로 적는다.',
     burst:'{name}씨하고 나하고 아주 전생에 인연이 깊구나. 이 바닥 좁다. [응답하기] 눌러라. 대답 좀 해라.'},
@@ -749,7 +784,7 @@ function dailyMax(sec, q){ if (q.windows) return Math.floor(q.windows.reduce((a,
 function freqText(f){ const p = []; if (+f.h) p.push(`${+f.h}시간`); if (+f.m) p.push(`${+f.m}분`); if (+f.s) p.push(`${+f.s}초`); return p.join(' ') || '0초'; }
 
 // 설정 화면 성격 카드 예시에 부르는 이름
-const CARD_NAMES = {active:'채원', shy:'은규', oldie:'도형', strict:'은규'}; // 구남친은 이름 없이 '자요?'로 시작
+const CARD_NAMES = {active:'채원', shy:'은규', oldie:'도형', strict:'은규'}; // 구남친은 이름 없이 '자니?'로 시작
 function ctxFor(id){
   const e = S.event;
   return {name: id ? shortName(id) : '서준', event: e.name, fee: won(+e.fee||0), deadline: fmtDeadline(e.deadline),
@@ -770,22 +805,28 @@ function voteSequence(persona, strategy, ctx, seed){
   const mk = (k, i) => ({k, label:`투표 독촉 ${i + 1}차`, ch:'dm', mood:MOOD[k], text:fill(pick(k), ctx), facts:factOf(VOTE_LINES, k, ctx)});
   if (strategy === 'consistent') return ['soft', 'soft', 'soft'].map(mk);
   if (strategy === 'escalate') return escK(persona).map(mk);
-  const ks = ['soft']; let burst = false;
+  const ks = [persona === 'shy' ? chaosK(persona, '', rng(), true, 'soft') : 'soft']; let burst = ks[0] === 'burst';
   for (let i = 1; i < 3; i++){
-    const prev = ks[i - 1], r = rng(); let k;
-    if (prev === 'burst') k = r < .65 ? 'sorry' : 'burst';
-    else if (!burst && i === 2) k = 'burst';
-    else k = r < .5 ? 'burst' : 'firm';
+    const prev = ks[i - 1]; let k = chaosK(persona, prev, rng(), false, 'firm');
+    if (!burst && i === 2) k = 'burst';
     if (k === 'burst') burst = true; ks.push(k);
   }
   return ks.map(mk);
 }
 // 참석 조사 단체방 독촉 순서: 일관=친절 반복, 강화=친절→단호→엄격(이후 엄격), 급발진=무작위
 // 단체방 독촉 문구 공통: 일관=친절 반복, 강화=친절→단호→엄격(이후 엄격), 급발진=무작위
+// 급발진 강도 고르기. 구남친은 버럭(잔소리 수위)이 대부분(약 80%), 버럭 뒤 급사과는 가끔. 다른 성격은 친절·단호·버럭이 섞임
+const SHY_BURST = .8;
+function chaosK(persona, prev, r, first, calm){
+  if (persona === 'shy') return r < SHY_BURST ? 'burst' : prev === 'burst' ? 'sorry' : calm;
+  if (first) return 'soft';
+  if (prev === 'burst') return r < .65 ? 'sorry' : 'burst';
+  return r < .5 ? 'burst' : calm;
+}
 function groupMsgFrom(T, st, ctx, label){
   const L = T[S.persona], k0 = st.gstage || 0, rng = rngFrom(S.chaosSeed * 31 + k0);
   const k = S.strategy === 'consistent' ? 'soft' : S.strategy === 'escalate' ? escK(S.persona)[Math.min(k0, 2)]
-    : k0 === 0 ? 'soft' : (st.lastK === 'burst' ? (rng() < .65 ? 'sorry' : 'burst') : (rng() < .5 ? 'burst' : 'firm'));
+    : chaosK(S.persona, st.lastK, rng(), k0 === 0, 'firm');
   const t = Array.isArray(L[k]) ? L[k][Math.floor(rng() * L[k].length)] : L[k];
   return {k, label:`${label} ${k0 + 1}차`, ch:'group', mood:MOOD[k], text:fill(t, ctx), facts:factOf(T, k, ctx)};
 }
@@ -853,9 +894,10 @@ function sequence(persona, strategy, ctx, seed){
   const ks = ['g']; let burst = false;
   for (let i = 0; i < 3; i++){
     const prev = ks[ks.length-1], r = rng(); let k;
-    if (prev === 'burst') k = r < .65 ? 'sorry' : 'burst';
-    else if (!burst && i === 2) k = 'burst';
+    if (persona === 'shy') k = chaosK(persona, prev, r, false, r < .9 ? 'dm0' : 'dl0');
+    else if (prev === 'burst') k = r < .65 ? 'sorry' : 'burst';
     else k = r < .45 ? 'burst' : r < .75 ? 'dm0' : 'dl0';
+    if (!burst && i === 2) k = 'burst';
     if (k === 'burst') burst = true; ks.push(k);
   }
   return ks.map((k, i) => mk(k, i === 0 ? '1단계 · 단체 공지' : `랜덤 ${i+1}번째`, i === 0 ? 'group' : 'dm'));
@@ -868,7 +910,7 @@ const defaultDinner = () => ({
   dateMode:'fixed', date:'2026-10-24', time:'19:00', dateCands:[{at:'2026-10-23T19:00'}, {at:'2026-10-24T19:00'}],
   placeMode:'vote', placePick:0, voteDeadline:'2026-10-17T18:00',
   baseFee:{on:false, amount:20000}, byRound:true, nonDrink:{on:false, amount:5000},
-  account:{bank:'', number:'', holder:''},
+  account:{bank:'우리은행', number:'1002-000-000000', holder:'김도형'}, // 계좌번호는 시연용 가짜 번호
   dateVote:defaultPoll() // 날짜 투표 진행 상태 (장소 투표는 S.vote)
 });
 function defaultPoll(){ return {ts:null, channel:null, tally:null, closed:false, winner:null}; }
@@ -1065,6 +1107,7 @@ function renderStart(){
     </div>
     <div class="start-foot">
       <span>${S.started ? `진행 중인 모임: <b>${esc(S.event.name)}</b>` : '아직 만든 총무봇이 없어요'}</span>
+      ${loadHist().length ? `<button class="linkbtn" data-act="histOpen">📚 지난 모임 ${loadHist().length}개</button>` : ''}
       <button class="linkbtn" data-act="reset">데모 초기화</button>
     </div>
   </div>`;
@@ -1416,14 +1459,33 @@ function mapFocus(p, kind, i){
 }
 
 // 1단계 공지 (총무 확정 항목은 그대로, 투표 항목은 투표 안내)
+// 1단계 일정 공지 · 투표 메시지 머리말: 성격별 말투 (사실은 그대로, 이 문구 그대로 보냄)
+const NOTICE_TONE = {
+  active:{head:n => `우리 팬분들~✨ ${n} 팬미팅 열려요오!! 😆🎤`, date:w => `📅 ${w} 확정이에요오!`, dateVote:'📅 날짜는 투표로 정해요! 헤헤', placeVote:'📍 장소도 투표로 정해요오✨',
+    cta:(v, dl) => `아래 ${v} 투표 콕콕 눌러주세요오~ 여러 개 골라도 돼요! 사랑해요💕🫶 (마감 ${dl})`, later:'참석 여부는 곧 여쭤볼게요! 보고 싶어요🥺💕',
+    poll:l => [`🗳 *${l} 투표* 시작할게요오~! 😆🎤`, '번호 이모지 콕! *여러 개 골라도 돼요* 💕']},
+  shy:{head:n => `자니?\n${n}… 하려고`, date:w => `📅 ${w}`, dateVote:'📅 날짜는… 투표로 정하자', placeVote:'📍 장소도… 투표로',
+    cta:(v, dl) => `아래 ${v} 투표… 이모지 하나만 눌러줘\n여러 개 골라도 돼 (${dl}까지)`, later:'참석 여부는… 곧 물어볼게',
+    poll:l => [`🗳 *${l} 투표*…`, '번호 이모지 하나만 눌러줘… *여러 개 눌러도 돼*']},
+  oldie:{head:n => `허허 여러분~ ${n} 합니다^^`, date:w => `📅 ${w} 이야~`, dateVote:'📅 날짜는 투표로 정합시다~', placeVote:'📍 장소는 투표로 정하자고~ 뭘 먹어야 맛있게 먹었다고 소문이 날까~',
+    cta:(v, dl) => `아래 ${v} 투표 꾹꾹 눌러 줘요~~ 여러 개 눌러도 돼 (마감 ${dl})`, later:'참석 여부는 곧 물어볼게~^^',
+    poll:l => [`🗳 *${l} 투표* 합시다~^^`, '번호 이모지 꾹 눌러 줘요~~ *여러 개 눌러도 된다고*']},
+  strict:{head:n => `${n} 안내입니다.`, date:w => `📅 일시: ${w}`, dateVote:'📅 일시: 투표로 결정합니다.', placeVote:'📍 장소: 투표로 결정합니다.',
+    cta:(v, dl) => `아래 ${v} 투표에 참여하십시오. 복수 선택 가능합니다. 마감 ${dl}.`, later:'참석 여부는 별도로 확인하겠습니다.',
+    poll:l => [`🗳 *${l} 투표*`, '번호 이모지로 투표하십시오. *복수 선택 가능합니다.*']}
+};
+const toneOf = (persona = S.persona) => NOTICE_TONE[persona] || NOTICE_TONE.active;
+// 1단계 공지 (총무 확정 항목은 그대로, 투표 항목은 투표 안내)
 function dinnerNotice(){
-  const D = S.dinner, pl = dinnerPlace(), when = dinnerWhen();
+  const D = S.dinner, pl = dinnerPlace(), when = dinnerWhen(), T = toneOf();
   const votes = [D.dateMode === 'vote' && '날짜', D.placeMode === 'vote' && '장소'].filter(Boolean);
-  return [`🍻 ${S.event.name} 안내드려요!`,
-    `📅 ${when || '날짜는 투표로 정해요'}`,
-    `📍 ${pl ? pl.name + (pl.url ? `\n🗺 ${pl.url}` : '') : D.placeMode === 'fixed' ? '(장소 미정)' : '장소는 투표로 정해요'}`,
-    votes.length ? `아래 ${votes.join('·')} 투표에 참여해 주세요. 여러 개 골라도 돼요! (마감 ${fmtDeadline(voteDeadline())})` : [baseFeeLine(), '참석 여부는 곧 따로 여쭤볼게요.'].filter(Boolean).join('\n')].join('\n');
+  return [T.head(S.event.name),
+    when ? T.date(when) : T.dateVote,
+    pl ? `📍 ${pl.name}${pl.url ? `\n🗺 ${pl.url}` : ''}` : D.placeMode === 'fixed' ? '📍 (장소 미정)' : T.placeVote,
+    votes.length ? T.cta(votes.join('·'), fmtDeadline(voteDeadline())) : [baseFeeLine(), T.later].filter(Boolean).join('\n')].join('\n');
 }
+// 투표 메시지 미리보기 (서버가 보내는 것과 같은 머리말)
+const pollPreview = (label, rows) => [...toneOf().poll(label), ...rows, `⏰ 투표 마감: ${fmtDeadline(voteDeadline())}`].join('\n').replace(/\*/g, '');
 // 회식 대시보드: 단계 표시줄 + 단계별 카드
 const PHASES = [['plan', '날짜·장소'], ['survey', '참석 조사'], ['event', '모임'], ['settle', '정산']];
 function renderDinnerDash(){
@@ -1438,9 +1500,9 @@ function renderDinnerDash(){
     ${S.paused ? '<span class="tag o">⏸ 봇 일시정지</span>' : '<span class="tag g">● 봇 동작 중</span>'}
     <div class="grow"></div>
     <button class="btn" data-act="goSetup">⚙️ 전체 설정</button>
-    <button class="btn danger-o" data-act="cancelMeet">⏹ 모임 중단</button>
+    ${ph === 'settle' && S.settle && S.settle.done ? '<button class="btn yellow" data-act="finishMeet">🎉 모임 마무리</button>' : '<button class="btn danger-o" data-act="cancelMeet">⏹ 모임 중단</button>'}
   </div></header>
-  <main class="page">
+  <main class="page with-slack"><div class="dash-main">
     <div class="headline"><div>
       <div class="small muted" style="font-weight:700">🍻 회식</div>
       <h1>${esc(S.event.name)}</h1>
@@ -1486,8 +1548,59 @@ function renderDinnerDash(){
         ${ps.map(p => dinnerPersonRow(p, ph)).join('') || '<div class="card-b muted">참가자가 없어요.</div>'}
       </section>
     </div>
+  </div>
+  <aside class="slack-pane" id="slackPane">${slackPaneHtml()}</aside>
   </main>`;
+  slackPaneScroll();
 }
+// ---------- 오른쪽 Slack 패널: 단체방 · 내 DM 실제 메시지를 몇 초마다 읽어 와서 보여 줌 ----------
+const SLACK_EMOJI = {one:'1️⃣', two:'2️⃣', three:'3️⃣', four:'4️⃣', five:'5️⃣', six:'6️⃣', seven:'7️⃣', eight:'8️⃣', nine:'9️⃣', keycap_ten:'🔟', '+1':'👍', thumbsup:'👍', heart:'❤️', joy:'😂', pray:'🙏', fire:'🔥', tada:'🎉', ok_hand:'👌', clap:'👏', eyes:'👀', laughing:'😆', smile:'😄', sob:'😭', frog:'🐸', memo:'📝', ballot_box_with_ballot:'🗳️', pleading_face:'🥺', older_man:'👴', face_with_monocle:'🧐', white_check_mark:'✅', heavy_check_mark:'✔️'};
+const slackEmoji = n => SLACK_EMOJI[n] || `:${n}:`;
+function slackText(t){
+  let h = esc(t);
+  h = h.replace(/&lt;(https?:[^|&]+?)\|([^&]+?)&gt;/g, '<a href="$1" target="_blank" rel="noopener">$2</a>')
+       .replace(/&lt;(https?:[^&]+?)&gt;/g, '<a href="$1" target="_blank" rel="noopener">$1</a>')
+       .replace(/&lt;@(U[A-Z0-9]+)&gt;/g, (_, u) => '@' + esc(((MEMBERS.find(m => m.slackId === u) || {}).name) || u))
+       .replace(/&lt;!(channel|here|everyone)&gt;/g, '@$1')
+       .replace(/:([a-z0-9_+\-]+):/g, (m, n) => SLACK_EMOJI[n] || m)
+       .replace(/(^|[\s(])\*([^*\n]+)\*/g, '$1<b>$2</b>').replace(/(^|[\s(])_([^_\n]+)_/g, '$1<i>$2</i>');
+  return h.replace(/\n/g, '<br>');
+}
+function slackPaneHtml(){
+  const tab = UI.slackTab || 'ch', live = SLACK.status === 'on' && S.slackChannel;
+  const msgs = (UI.slackMsgs || {})[tab] || [];
+  const body = !live ? `<p class="small muted" style="padding:16px">${SLACK.status === 'on' ? '모임을 시작해 채널이 만들어지면 실제 Slack 메시지가 여기 보여요.' : 'Slack에 연결되면(서버 주소로 열면) 단체방과 내 DM 메시지가 실시간으로 여기 보여요. 지금은 데모 모드예요.'}</p>`
+    : !msgs.length ? `<p class="small muted" style="padding:16px">${UI.slackErr ? '⚠️ ' + esc(UI.slackErr) : '메시지를 불러오는 중…'}</p>`
+    : msgs.map(m => { const t = new Date(+m.ts * 1000);
+        return `<div class="sm-msg ${m.subtype ? 'sys' : ''}"><div class="sm-av">${m.avatar ? `<img src="${esc(m.avatar)}" alt="">` : esc(m.emoji ? (/^:.*:$/.test(m.emoji) ? slackEmoji(m.emoji.replace(/:/g, '')) : m.emoji) : (m.name || '?')[0])}</div>
+          <div class="sm-body"><div class="sm-meta"><b>${esc(m.name)}</b>${m.bot ? '<span class="app">APP</span>' : ''}<span>${pad(t.getHours())}:${pad(t.getMinutes())}</span></div>
+          <div class="sm-text">${slackText(m.text)}</div>
+          ${m.button ? '<span class="sm-btn">📝 응답하기</span>' : ''}
+          ${m.reactions.length ? `<div class="sm-reacts">${m.reactions.map(r => `<span>${r.char && !/^:.*:$/.test(r.char) ? esc(r.char) : slackEmoji(r.name)} ${r.count}</span>`).join('')}</div>` : ''}
+          ${m.replies ? `<div class="sm-replies">💬 댓글 ${m.replies}개</div>` : ''}</div></div>`; }).join('');
+  return `<div class="sm-head"><div class="sm-tabs"><button class="${tab === 'ch' ? 'on' : ''}" data-act="slackTab" data-val="ch"># ${esc(S.channel)}</button>
+      <button class="${tab === 'dm' ? 'on' : ''}" data-act="slackTab" data-val="dm">💬 내 DM</button></div>
+      <span class="small muted">${live ? '● 실시간' : ''}</span></div>
+    <div class="sm-list" id="slackMsgs">${body}</div>`;
+}
+// 패널만 다시 그림 (맨 아래를 보고 있었으면 새 메시지로 따라 내려감)
+function slackPaneScroll(){
+  const box = $('#slackMsgs'); if (!box) return;
+  box.scrollTop = UI.slackUp ? (UI.slackScroll || 0) : box.scrollHeight;
+  box.onscroll = () => { UI.slackUp = box.scrollTop + box.clientHeight < box.scrollHeight - 30; UI.slackScroll = box.scrollTop; };
+}
+function slackPaneRefresh(){ const el = $('#slackPane'); if (el){ el.innerHTML = slackPaneHtml(); slackPaneScroll(); } }
+async function slackPull(){
+  if (S.screen !== 'dash' || !voteOn() || SLACK.status !== 'on' || !S.slackChannel || !$('#slackPane')) return;
+  const tab = UI.slackTab || 'ch';
+  try {
+    const r = await slackApi(tab === 'dm' ? '/api/slack/history?dm=1' : `/api/slack/history?channel=${encodeURIComponent(S.slackChannel)}`);
+    const before = JSON.stringify(((UI.slackMsgs || {})[tab]) || []);
+    UI.slackMsgs = {...(UI.slackMsgs || {}), [tab]:r.messages}; UI.slackErr = '';
+    if (JSON.stringify(r.messages) !== before) slackPaneRefresh();
+  } catch(e){ UI.slackErr = slackErr(e.message); slackPaneRefresh(); }
+}
+setInterval(slackPull, 4000);
 function voteRemindBar(){
   if (!['date', 'place'].some(isOpen)) return '';
   const pend = votePending(), over = new Date(voteDeadline()) < new Date(), st = S.voteGroup || {};
@@ -1549,19 +1662,52 @@ function dinnerSheetCard(){
       ${payOn ? '<p class="small muted" style="margin:8px 0 0">💰 회비 열의 <b>입금 확인</b>으로 은행 문자·캡처를 한 번에 대조하거나, 사람별 회비 칸을 눌러 직접 처리할 수 있어요.</p>' : ''}</div></section>`;
 }
 // CSV (엑셀에서 한글이 깨지지 않게 BOM 포함)
-function downloadCsv(){
+function buildCsv(){
   const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const sc = S.phase === 'settle' ? dinnerSettle() : null;
   const head = [...S.schema.map(c => c.key), ...(sc ? ['1차 몫', '2차 몫', '기본회비', '낼 돈', '돌려받을 돈'] : []), '응답 시각'];
   const rows = people().map((p, i) => { const r = sc && sc.rows[p.id];
     return [...S.schema.map(c => { const v = fieldVal(p, c, i); return c.key === '이름' && p.id === 'me' ? (MEM.me.real || '나 (총무)') : v; }),
       ...(sc ? (r ? [r.a, r.b, r.base, r.owe, r.refund] : ['', '', '', '', '']) : []), p.surveyAt || '']; });
-  const csv = '﻿' + [head, ...rows].map(r => r.map(q).join(',')).join('\r\n');
+  return {csv:'﻿' + [head, ...rows].map(r => r.map(q).join(',')).join('\r\n'), n:rows.length};
+}
+function saveFile(text, filename, type){
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv;charset=utf-8'}));
-  a.download = `${S.event.name.replace(/[\\/:*?"<>|]/g, '')}_참가자.csv`;
+  a.href = URL.createObjectURL(new Blob([text], {type}));
+  a.download = filename.replace(/[\\/:*?"<>|]/g, '');
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  log('기록', `시트 CSV 다운로드 (${rows.length}명)`); toast('CSV를 내려받았어요');
+}
+function downloadCsv(){
+  const {csv, n} = buildCsv();
+  saveFile(csv, `${S.event.name}_참가자.csv`, 'text/csv;charset=utf-8');
+  log('기록', `시트 CSV 다운로드 (${n}명)`); toast('CSV를 내려받았어요');
+}
+// 정산 리포트 (마무리 때 내려받기 · 지난 모임 기록에 저장)
+function settleReport(){
+  const c = dinnerSettle(), d = decidedValue('date'), pl = decidedValue('place'), st = S.settle || {};
+  const nm = p => p.id === 'me' ? (MEM.me.real || '나 (총무)') : MEM[p.id].name;
+  return [`${S.event.name} 정산 리포트`, `일시 ${d ? d.label : '-'} · 장소 ${pl ? pl.label : '-'} · 채널 #${S.channel} · 총무봇 성격 ${PERSONAS[S.persona].label}`, '',
+    `총 결제 ${won(c.total)} (1차 ${won(+st.r1 || 0)} · 2차 ${won(+st.r2 || 0)})`,
+    `참석 ${c.att.length}명 (1차 ${c.r1}명 · 2차 ${c.r2}명) · 초대 ${people().length}명`,
+    `걷은 돈 ${won(c.collect)} · 기본회비 ${won(c.base)} · 돌려준 돈 ${won(c.refund)}${c.rest ? ` · 100원 반올림으로 더 걷힌 돈 ${won(c.rest)}` : ''}`, '',
+    '이름 | 1차 | 2차 | 기본회비 | 낸 돈 | 돌려받은 돈',
+    ...c.att.map(p => { const r = c.rows[p.id]; return `${nm(p)} | ${won(r.a)} | ${won(r.b)} | ${won(r.base)} | ${won(r.owe)} | ${won(r.refund)}`; }),
+    '', `마무리 ${fmtDeadline(new Date())}`].join('\n');
+}
+const HIST_KEY = 'chongmubot-history';
+const loadHist = () => { try { return JSON.parse(localStorage.getItem(HIST_KEY) || '[]'); } catch(e){ return []; } };
+const saveHist = h => { try { localStorage.setItem(HIST_KEY, JSON.stringify(h.slice(0, 30))); return true; } catch(e){ return false; } };
+function act_finishReopen(archive){
+  const b = document.createElement('button'); b.dataset.act = 'finishMeet'; document.body.appendChild(b); b.click(); b.remove();
+  const el = $('#finArchive'); if (el && archive === false) el.checked = false;
+}
+function historyModal(){
+  const h = loadHist();
+  modal(`<div class="mh"><h3 class="grow">📚 지난 모임</h3><button class="btn sm ghost" data-act="closeModal">✕</button></div>
+    <div class="mb">${h.length ? h.map((r, i) => `<div class="hist-row"><div><b>${esc(r.name)}</b><div class="small muted">${esc(r.date || '-')} · ${esc(r.place || '-')} · ${esc(r.persona || '')} · ${r.att}명 · 총 ${won(r.total || 0)}</div>
+        <div class="small muted">마무리 ${esc(r.finishedAt)}</div></div><span class="grow"></span><button class="btn sm" data-act="histView" data-i="${i}">보기</button></div>`).join('')
+      : '<p class="muted">아직 마무리한 모임이 없어요.</p>'}
+      <p class="small muted">이 브라우저에 저장돼요. 다른 컴퓨터·브라우저에서는 보이지 않아요.</p></div>`, true);
 }
 
 // ---------- B4: 입금 확인 (문자 붙여넣기 · 캡처 → Claude 가 읽음 → 대조 → 총무 확인) ----------
@@ -1723,15 +1869,20 @@ function settleCard(d, pl){
   return `<section class="card" style="margin-bottom:16px"><div class="card-h"><h3>💸 4단계 · 정산</h3><span class="tag ${st.done ? 'g' : 'b'}">${st.done ? '완료' : '송금 요청 보냄'}</span><span class="grow"></span>
       <b>${ps.filter(p => c.rows[p.id].owe).length - pend.length} / ${ps.filter(p => c.rows[p.id].owe).length}명 입금</b>
       ${pend.length && !st.done ? `<button class="btn sm" data-act="phaseDmAll">미입금자 ${pend.length}명에게 DM</button>` : ''}
-      ${done && !st.done ? '<span class="hitl">HITL</span><button class="btn yellow" data-act="settleDone">정산 완료 공지</button>' : ''}</div>
+      ${done && !st.done ? '<span class="hitl">HITL</span><button class="btn yellow" data-act="settleDone">정산 완료 공지</button>' : ''}
+      ${st.done ? '<button class="btn yellow" data-act="finishMeet">🎉 모임 마무리</button>' : ''}</div>
     <div class="card-b">${table}${sum}<p class="small" style="margin:8px 0 0">📣 ${note} · 마감 ${fmtDeadline(st.deadline)}</p>
       <p class="small muted" style="margin:6px 0 0">입금은 시트의 회비 열 <b>💰 입금 확인</b>이나 회비 칸을 눌러 처리해요. 금액은 각자 DM으로만 보냈어요.</p></div></section>`;
 }
 function settleDoneText(){
-  const c = dinnerSettle();
-  if (S.persona === 'oldie') return [`✅ 허허 ${S.event.name} 정산 깔끔하게 끝났습니다^^`, `총 ${won(c.total)} · ${c.att.length}명 참석${c.refund ? ` · 기본회비 남은 ${won(c.refund)}은 돌려줬어요` : ''}`,
-    '다들 고생 많았어요~ 다음 회식은 뭘 먹어야 맛있게 먹었다고 소문이 날지 또 고민해 보자고~ 허허'].join('\n');
-  return [`✅ ${S.event.name} 정산이 끝났어요!`, `총 ${won(c.total)} · ${c.att.length}명 참석${c.refund ? ` · 기본회비 남은 ${won(c.refund)}은 돌려드렸어요` : ''}`, '모두 고생 많으셨어요. 다음 모임에서 봬요! 🙌'].join('\n');
+  const c = dinnerSettle(), n = S.event.name, tot = won(c.total), att = c.att.length, rf = c.refund ? won(c.refund) : '';
+  const T = {
+    active:[`✅ ${n} 팬미팅 정산 끝났어요오!! 🎉💖`, `총 ${tot} · ${att}명 와주셨어요${rf ? ` · 남은 사랑 ${rf}은 돌려드렸어요` : ''}`, '보러 와줘서 고마워요 사랑해요💕 오늘 꿈에서 만나요🌙🫶'],
+    shy:[`…${n} 정산 다 끝났어`, `총 ${tot} · ${att}명 왔어${rf ? `\n남은 기본회비 ${rf}은 돌려줬어` : ''}`, '다들 고마워… 진짜로\n이제 좀 잘 수 있겠다 ㅎ'],
+    oldie:[`✅ 허허 ${n} 정산 깔끔하게 끝났습니다^^`, `총 ${tot} · ${att}명 참석${rf ? ` · 기본회비 남은 ${rf}은 돌려줬어요` : ''}`, '다들 고생 많았어요~ 다음 회식은 뭘 먹어야 맛있게 먹었다고 소문이 날지 또 고민해 보자고~ 허허'],
+    strict:[`✅ ${n} 정산이 완료되었습니다.`, `총액 ${tot} · 참석 ${att}명${rf ? ` · 기본회비 잔액 ${rf} 환급 완료` : ''}`, '미입금 0명. 기한 내 협조에 감사드립니다.']
+  };
+  return (T[S.persona] || T.active).join('\n');
 }
 
 // 2단계 참석 조사: 이름·회비를 뺀 조사 항목을 Slack [응답하기] 입력창으로 받음
@@ -1745,7 +1896,8 @@ function surveyText(){
 function surveyCard(d, pl){
   const sv = S.survey || {}, ps = people(), done = ps.filter(p => p.surveyAt).length;
   const head = `<p style="margin:0">📅 ${esc(d ? d.label : '-')} · 📍 ${esc(pl ? pl.label : '-')}${pl && pl.url ? ` · <a href="${esc(pl.url)}" target="_blank" rel="noopener">카카오맵 ›</a>` : ''}</p>`;
-  const sock = SLACK.status !== 'on' ? '<span class="tag">데모</span>' : UI.socket && UI.socket.connected ? '<span class="tag g">● 응답 받기 연결됨</span>' : `<span class="tag o" title="${esc((UI.socket || {}).error || '')}">응답 받기 꺼짐</span>`;
+  if (SLACK.status === 'on' && !UI.socket && !UI.sockAsk){ UI.sockAsk = true; slackApi('/api/socket').then(r => { UI.socket = r; render(); }).catch(() => {}); }
+  const sock = SLACK.status !== 'on' ? '<span class="tag">데모</span>' : !UI.socket ? '<span class="tag">응답 받기 확인 중</span>' : UI.socket.connected ? '<span class="tag g">● 응답 받기 연결됨</span>' : `<span class="tag o" title="${esc((UI.socket || {}).error || '')}">응답 받기 꺼짐</span>`;
   if (!sv.ts) return `<section class="card" style="margin-bottom:16px"><div class="card-h"><h3>📋 2단계 · 참석 조사</h3>${sock}<span class="grow"></span>
       <span class="hitl">HITL</span><button class="btn yellow" data-act="surveySend">참석 조사 보내기</button></div>
     <div class="card-b">${head}
@@ -1768,6 +1920,23 @@ function eventCard(d, pl){
     <div class="card-b"><p style="margin:0">📅 ${esc(d ? d.label : '-')} · 📍 ${esc(pl ? pl.label : '-')}${pl && pl.url ? ` · <a href="${esc(pl.url)}" target="_blank" rel="noopener">카카오맵 ›</a>` : ''}</p>
       <div class="row wrap" style="margin-top:10px"><span class="tag g">1차 ${t.r1}명</span><span class="tag g">2차 ${t.r2}명</span>${t.nodrink ? `<span class="tag">술 안 마심 ${t.nodrink}명</span>` : ''}<span class="tag">불참 ${t.no}명</span>${S.dinner.baseFee.on ? `<span class="tag ${t.paid === t.att ? 'g' : 'o'}">기본회비 ${t.paid}/${t.att}</span>` : ''}</div>
       <p class="small muted" style="margin:8px 0 0">늦게 오거나 2차에 빠지는 등 바뀐 내용은 아래 시트의 칸을 눌러 바로 고쳐 주세요. 정산은 이 기록대로 나눠요.</p></div></section>`;
+}
+// 참석 조사 보내기 (일정 확정 공지 뒤 자동, 또는 버튼). 마감 기본값은 모임 시작 3시간 전
+function surveyDefaultDeadline(){
+  const at = eventAt(); if (!at) return '';
+  const dl = new Date(at).getTime() - 3 * 3600 * 1000;
+  return toLocalInput(dl > Date.now() + 3600 * 1000 ? dl : Date.now() + 24 * 3600 * 1000); // 이미 지났거나 너무 가까우면 하루 뒤
+}
+async function sendSurvey(dl, auto){
+  dl = dl || UI.surveyDeadline || surveyDefaultDeadline();
+  UI.surveyDeadline = dl;
+  const base = {deadline:dl, gstage:0, lastGroup:Date.now(), nextFake:Date.now() + 5000};
+  if (SLACK.status === 'on' && S.slackChannel){
+    try {
+      const r = await slackApi('/api/survey/start', {channel:S.slackChannel, title:`${S.event.name} 참석 조사`, text:surveyText(), questions:surveyQuestions(), persona:S.persona});
+      S.survey = {...base, ts:r.ts}; log('소통', `#${S.channel} 참석 조사 메시지 발송${auto ? ' (일정 확정 후 자동)' : ''} · 마감 ${fmtDeadline(dl)}`); toast('참석 조사를 보냈어요'); render(); surveyPull();
+    } catch(e){ toast(`참석 조사 실패: ${slackErr(e.message)} · 2단계 카드에서 다시 보낼 수 있어요`); render(); }
+  } else { S.survey = {...base, ts:'demo'}; log('소통', `#${S.channel} 참석 조사 메시지 (데모${auto ? ', 자동' : ''})`); toast('참석 조사를 보냈어요 (데모)'); render(); }
 }
 // 응답 읽어 오기 (5초마다) → 참석·조사 항목에 반영
 async function surveyPull(){
@@ -1815,7 +1984,7 @@ function meetSync(){
       : ph === 'survey' ? (p.surveyAt ? '' : '참석 조사 응답 아직 ([응답하기] 버튼)')
       : ph === 'settle' ? ((p.owe || 0) > 0 && p.pay !== '입금' ? '정산 입금 아직 (금액은 개인 DM 확인)' : '') : '';
     if (t) todo[m.slackId] = t; });
-  const body = {channel:S.slackChannel, persona:S.persona, info:meetInfo(), names, todo, flavor:flavorOf()}, key = JSON.stringify(body);
+  const body = {channel:S.slackChannel, persona:S.persona, info:meetInfo(), names, todo, flavor:flavorOf(), ended:meetDone()}, key = JSON.stringify(body);
   if (key === UI.meetSent) return;
   UI.meetSent = key; slackApi('/api/meet', body).catch(() => { UI.meetSent = ''; });
 }
@@ -2012,7 +2181,7 @@ setInterval(async () => {
 // 라떼·감성 멘트 엔진 (1초마다): 모임이 시작됐고 모드가 켜져 있으면 정한 간격마다 단체방에 문구 그대로 올림
 let flavorBusy = false;
 setInterval(async () => {
-  if (!flavorOn() || !S.started || S.paused || flavorBusy) return;
+  if (!flavorOn() || !S.started || S.paused || flavorBusy || meetDone()) return; // 정산이 끝나면 멘트도 그만
   const now = Date.now();
   if (!S.flavorNext){ S.flavorNext = now + flavorEvery() * 1000; return; }
   if (now < S.flavorNext || inQuiet(new Date(), quietOf(S.persona))) return;
@@ -2082,7 +2251,7 @@ function setupPersona(n){ const s = S; return `
             <section class="sec" data-pv="msg">
         <div class="sec-h"><span class="n">${n}</span><div><h3>총무 기본 성격</h3><p>봇이 대화방에서 쓰는 기본 말투입니다.</p></div></div>
         <div class="grid4">${Object.entries(PERSONAS).map(([k,p]) => `
-          <button class="opt ${s.persona === k ? 'on' : ''}" data-act="set" data-path="persona" data-val="${k}"><b>${p.ic} ${p.label}</b><span>${esc(fill(LINES[k].dm0, {...ctxFor('hw'), name:CARD_NAMES[k] || '채원'}).slice(0, 30))}…</span></button>`).join('')}</div>
+          <button class="opt pcard ${s.persona === k ? 'on' : ''}" data-act="set" data-path="persona" data-val="${k}"><span class="pav">${p.ic.replace('class="pic"', '')}</span><span class="ptx"><b>${p.label}</b><span>${esc(fill(LINES[k].dm0, {...ctxFor('hw'), name:CARD_NAMES[k] || '채원'}).slice(0, 30))}…</span></span></button>`).join('')}</div>
       </section>`; }
 function setupStrategy(n){ const s = S; return `
             <section class="sec" data-pv="msg">
@@ -2095,7 +2264,7 @@ function setupPersonaStrategy(n){ const s = S; return `
         <div class="sec-h"><span class="n">${n}</span><div><h3>총무 성격 · 독촉 전략</h3><p>봇이 쓰는 기본 말투와, 독촉이 반복될 때 말투가 어떻게 바뀔지 정합니다.</p></div></div>
         <label class="f">성격</label>
         <div class="grid4">${Object.entries(PERSONAS).map(([k,p]) => `
-          <button class="opt ${s.persona === k ? 'on' : ''}" data-act="set" data-path="persona" data-val="${k}"><b>${p.ic} ${p.label}</b><span>${esc(fill(LINES[k].dm0, {...ctxFor('hw'), name:CARD_NAMES[k] || '채원'}).slice(0, 30))}…</span></button>`).join('')}</div>
+          <button class="opt pcard ${s.persona === k ? 'on' : ''}" data-act="set" data-path="persona" data-val="${k}"><span class="pav">${p.ic.replace('class="pic"', '')}</span><span class="ptx"><b>${p.label}</b><span>${esc(fill(LINES[k].dm0, {...ctxFor('hw'), name:CARD_NAMES[k] || '채원'}).slice(0, 30))}…</span></span></button>`).join('')}</div>
         <label class="f" style="margin-top:14px">독촉 전략</label>
         <div class="grid3">${Object.entries(STRATEGIES).map(([k,t]) => `
           <button class="opt ${s.strategy === k ? 'on' : ''}" data-act="set" data-path="strategy" data-val="${k}"><b>${t.ic} ${t.label}</b><span>${t.desc}</span></button>`).join('')}</div>
@@ -2145,22 +2314,14 @@ function renderPreview(){
       ${S.invited.length > 6 ? `<tr><td colspan="${S.schema.length}" class="muted">… 외 ${S.invited.length - 6}명</td></tr>` : ''}</tbody></table></div>
       <p class="small muted">시작하면 Google Sheets에 이 열 구조로 시트가 만들어지고, 봇이 답변·입금을 읽을 때마다 채워집니다. (데모: 예시 값)</p>`;
   } else if (UI.pvTab === 'msg' && voteOn()){
-    const D = S.dinner, ps = votePlaces(), pl = dinnerPlace(), when = dinnerWhen();
-    const dateVote = D.dateMode === 'vote' ? `🗳 *날짜 투표* (중복 가능 · 마감 ${fmtDeadline(voteDeadline())})\n` + D.dateCands.map((c, i) => `${NUMS[i]}  ${fmtDeadline(c.at)}`).join('\n') : '';
-    const placeVote = D.placeMode === 'vote' ? `🗳 *장소 투표* (중복 가능 · 마감 ${fmtDeadline(voteDeadline())})\n` + (ps.length ? ps.map((p, i) => `${NUMS[i]}  ${p.name}${p.url ? '\n      🗺 카카오맵에서 보기' : ''}`).join('\n') : '(후보를 넣어 주세요)') : '';
+    // 메시지 미리보기: 독촉 예시와 성격별 추가 모드(감성 ON · 라떼모드)만. 1단계 공지·투표는 시작 확인창에서 보여 줌
+    const D = S.dinner;
     pv.innerHTML = `
-      <div class="row" style="margin-bottom:12px"><b>1단계 · 일정·장소</b><span class="grow"></span><span class="tag">${PERSONAS[S.persona].ic} ${PERSONAS[S.persona].label}</span></div>
-      <div class="slack">
-        <div class="stage-lb">시작하면 · #${esc(S.channel)}</div>
-        ${bubble(dinnerNotice(), '', false)}
-        ${dateVote ? bubble(dateVote.replace(/\*/g, ''), '', false) : ''}
-        ${placeVote ? bubble(placeVote.replace(/\*/g, ''), '', false) : ''}
-      </div>
-      <div class="row" style="margin:18px 0 8px"><b>독촉 예시 · ${PERSONAS[S.persona].ic} ${PERSONAS[S.persona].label} × ${STRATEGIES[S.strategy].ic} ${STRATEGIES[S.strategy].label}</b><span class="grow"></span>
+      <div class="row" style="margin:0 0 8px"><b>독촉 예시 · ${PERSONAS[S.persona].ic} ${PERSONAS[S.persona].label} × ${STRATEGIES[S.strategy].ic} ${STRATEGIES[S.strategy].label}</b><span class="grow"></span>
         ${S.strategy === 'chaos' ? '<button class="btn sm" data-act="reroll">🎲 다시 뽑기</button>' : ''}</div>
       <div class="slack">${dinnerNagSample().map(m => `<div class="stage-lb">${m.label} · #${esc(S.channel)}</div>${bubble(m.text, m.mood, m.k === 'burst')}`).join('')}</div>
       ${flavorPreview()}
-      <p class="small muted" style="margin-top:14px">공지·독촉 문구는 실제로 보낼 때 Claude가 성격에 맞게 다시 써요. 투표 메시지는 그대로 올라가요. 독촉은 단체방에 이름 없이 인원만 말해요(예: 3명).<br>
+      <p class="small muted" style="margin-top:14px">독촉 문구는 실제로 보낼 때 Claude가 성격에 맞게 다시 써요. 독촉은 단체방에 이름 없이 인원만 말해요(예: 3명). 시작할 때 올라갈 공지·투표는 시작 확인창에서 보여 드려요.<br>
         다음 단계: ${D.dateMode === 'vote' || D.placeMode === 'vote' ? '투표 마감 → 총무 확정 → ' : ''}참석 조사(시트 생성${D.baseFee.on ? ` · 기본회비 ${won(+D.baseFee.amount || 0)}` : ''}) → 모임 → 정산</p>`;
   } else if (UI.pvTab === 'msg'){
     const seq = sequence(S.persona, S.strategy, ctxFor('sj'), S.chaosSeed * 97);
@@ -2187,12 +2348,26 @@ function renderPreview(){
   }
 }
 // 성격 아이콘이 그림이면(부장님) 말풍선 프로필도 그 그림, 아니면 개구리 (투표·참석 조사도 Slack 에서 같은 성격 이름으로 보냄)
-const BOT_IMG = {oldie:'assets/bujang.jpg', shy:'assets/exbf.jpg', strict:'assets/mnk.jpg'};
+const BOT_IMG = {active:'assets/ykk.jpg', oldie:'assets/kwak.jpg', shy:'assets/exbf.jpg', strict:'assets/mnk.jpg'};
 // 회식 미리보기용: 투표를 안 한 사람이 있을 때 단체방 독촉 3번 (성격·전략대로)
 function dinnerNagSample(){
   const ctx = {n:3, what:['date', 'place'].filter(k => S.dinner[k + 'Mode'] === 'vote').map(k => VOTES[k].label).join('·') || '날짜·장소', event:S.event.name, ...dlCtx(voteDeadline())};
-  let prev = '';
-  return [0, 1, 2].map(i => { const m = groupMsgFrom(VOTE_GROUP, {gstage:i, lastK:prev}, ctx, '투표 단체 독촉'); prev = m.k; return m; });
+  // 급발진 예시는 단호 → 버럭 → 급사과 순서로 (문구는 다시 뽑기마다 바뀜)
+  if (S.strategy === 'chaos'){
+    const L = VOTE_GROUP[S.persona] || VOTE_GROUP.active, rng = rngFrom(S.chaosSeed * 31 + 7);
+    return ['firm', 'burst', 'sorry'].map((k, i) => { const t = Array.isArray(L[k]) ? L[k][Math.floor(rng() * L[k].length)] : L[k];
+      return {k, label:`투표 단체 독촉 ${i + 1}차`, ch:'group', mood:MOOD[k], text:fill(t, ctx), facts:factOf(VOTE_GROUP, k, ctx)}; });
+  }
+  let prev = '', burst = false;
+  return [0, 1, 2].map(i => {
+    let m = groupMsgFrom(VOTE_GROUP, {gstage:i, lastK:prev}, ctx, '투표 단체 독촉');
+    if (m.k === 'burst' && burst){ // 예시에서는 버럭을 한 번만: 두 번째부터는 급사과(버럭 바로 뒤) 또는 단호로
+      const k = prev === 'burst' ? 'sorry' : 'firm', L = VOTE_GROUP[S.persona] || VOTE_GROUP.active, t = Array.isArray(L[k]) ? L[k][i % L[k].length] : L[k];
+      m = {...m, k, mood:MOOD[k], text:fill(t, ctx), facts:factOf(VOTE_GROUP, k, ctx)};
+    }
+    if (m.k === 'burst') burst = true;
+    prev = m.k; return m;
+  });
 }
 function bubble(text, mood, burst, time, persona = S.persona){
   const av = BOT_IMG[persona] ? `<img src="${BOT_IMG[persona]}" alt="">` : '🐸';
@@ -2464,8 +2639,8 @@ function dinnerStartModal(){
       </dl>
       ${S.started ? '' : `<div style="margin-top:16px" class="slack"><div class="stage-lb">시작하면 #${esc(S.channel)}에 올라갈 메시지</div>
         ${bubble(dinnerNotice(), '', false)}
-        ${D.dateMode === 'vote' ? bubble(`🗳 날짜 투표 (여러 개 선택 가능)\n${vote('date')}`, '', false) : ''}
-        ${D.placeMode === 'vote' ? bubble(`🗳 장소 투표 (여러 개 선택 가능)\n${vote('place')}`, '', false) : ''}
+        ${D.dateMode === 'vote' ? bubble(pollPreview('날짜', vote('date').split('\n')), '', false) : ''}
+        ${D.placeMode === 'vote' ? bubble(pollPreview('장소', vote('place').split('\n')), '', false) : ''}
         <p class="small muted">${bothFixed ? '날짜·장소가 모두 정해져 있어 투표 없이 바로 참석 조사 단계로 넘어가요.' : '공지는 Claude가 성격에 맞게 다시 써요. 투표 메시지는 그대로 올라가요.'}</p></div>`}
     </div>
     <div class="mf"><button class="btn" data-act="closeModal">더 고치기</button><button class="btn yellow" data-act="doStart">${S.started ? '저장' : '확인하고 시작하기'}</button></div>`);
@@ -2655,12 +2830,15 @@ document.addEventListener('click', e => {
     case 'startSurvey':
       modal(`<div class="mh"><span class="hitl">HITL 2</span><h3 class="grow">확정 공지를 보내고 참석 조사로 넘어갈까요?</h3><button class="btn sm ghost" data-act="closeModal">✕</button></div>
         <div class="mb"><div class="slack">${bubble(dinnerConfirmText(), '', false)}</div><p class="small muted">이 문구 그대로 #${esc(S.channel)}에 올라가요.</p></div>
-        <div class="mf"><button class="btn" data-act="closeModal">취소</button><button class="btn yellow" data-act="doSurvey">공지하고 넘어가기</button></div>`); return;
+        <div class="mf"><span class="small muted grow">공지 뒤 바로 참석 조사([응답하기])가 이어서 올라가요</span><button class="btn" data-act="closeModal">취소</button><button class="btn yellow" data-act="doSurvey">공지하고 참석 조사 시작</button></div>`); return;
     case 'doSurvey':
       closeModal(); S.phase = 'survey'; people().forEach(p => { if (p.dmPlan) p.dmPlan.done = true; p.sdm = 0; });
       log('총무', '일정·장소 확정 → 참석 조사 단계 (HITL 2)');
-      if (SLACK.status === 'on' && S.slackChannel) slackSend({channel:S.slackChannel}, {text:dinnerConfirmText(), label:'일정 확정 공지', mood:''}, S.persona, '일정 확정 공지', {raw:true});
-      else log('소통', `#${S.channel} 일정 확정 공지 (데모)`);
+      (async () => {
+        if (SLACK.status === 'on' && S.slackChannel) await slackSend({channel:S.slackChannel}, {text:dinnerConfirmText(), label:'일정 확정 공지', mood:''}, S.persona, '일정 확정 공지', {raw:true});
+        else log('소통', `#${S.channel} 일정 확정 공지 (데모)`);
+        await sendSurvey('', true); // 일정이 정해지면 바로 참석 조사
+      })();
       break;
     case 'surveySend':
       UI.surveyDeadline = UI.surveyDeadline || (eventAt() ? toLocalInput(new Date(eventAt()).getTime() - 3 * 3600 * 1000) : '');
@@ -2674,14 +2852,7 @@ document.addEventListener('click', e => {
     case 'doSurveySend': {
       const dl = ($('#surveyDeadline') || {}).value || UI.surveyDeadline;
       if (!(new Date(dl) > new Date())){ toast('마감을 지금 이후로 정해 주세요'); return; }
-      UI.surveyDeadline = dl; closeModal();
-      const base = {deadline:dl, gstage:0, lastGroup:Date.now(), nextFake:Date.now() + 5000};
-      if (SLACK.status === 'on' && S.slackChannel){
-        slackApi('/api/survey/start', {channel:S.slackChannel, title:`${S.event.name} 참석 조사`, text:surveyText(), questions:surveyQuestions(), persona:S.persona})
-          .then(r => { S.survey = {...base, ts:r.ts}; log('소통', `#${S.channel} 참석 조사 메시지 발송 ([응답하기] 버튼)`); toast('참석 조사를 보냈어요'); render(); surveyPull(); })
-          .catch(e => toast(`참석 조사 실패: ${slackErr(e.message)}`));
-      } else { S.survey = {...base, ts:'demo'}; log('소통', `#${S.channel} 참석 조사 메시지 (데모)`); toast('참석 조사를 보냈어요 (데모)'); render(); }
-      return; }
+      closeModal(); sendSurvey(dl); return; }
     case 'cancelMeet': {
       const live = SLACK.status === 'on' && S.slackChannel;
       modal(`<div class="mh"><span class="hitl">HITL</span><h3 class="grow">이번 모임을 중단할까요?</h3><button class="btn sm ghost" data-act="closeModal">✕</button></div>
@@ -2706,6 +2877,47 @@ document.addEventListener('click', e => {
       } else finish('모임을 중단했어요');
       return; }
     case 'csv': downloadCsv(); return;
+    case 'reportDl': saveFile(settleReport(), `${S.event.name}_정산리포트.txt`, 'text/plain;charset=utf-8'); toast('정산 리포트를 내려받았어요'); return;
+    case 'finishMeet': {
+      const c = dinnerSettle(), live = SLACK.status === 'on' && S.slackChannel;
+      modal(`<div class="mh"><span class="hitl">HITL</span><h3 class="grow">🎉 모임을 마무리할까요?</h3><button class="btn sm ghost" data-act="closeModal">✕</button></div>
+        <div class="mb">
+          <div class="row wrap" style="margin-bottom:10px"><span class="tag g">총 결제 ${won(c.total)}</span><span class="tag">참석 ${c.att.length}명 (1차 ${c.r1} · 2차 ${c.r2})</span>
+            <span class="tag">걷은 돈 ${won(c.collect)}</span>${c.base ? `<span class="tag">기본회비 ${won(c.base)}</span>` : ''}${c.refund ? `<span class="tag b">돌려준 돈 ${won(c.refund)}</span>` : ''}<span class="tag g">미입금 ${settlePending().length}명</span></div>
+          <pre class="report">${esc(settleReport())}</pre>
+          <div class="row" style="margin:10px 0"><button class="btn sm" data-act="csv">⬇ 시트 CSV</button><button class="btn sm" data-act="reportDl">⬇ 정산 리포트</button></div>
+          ${live ? `<label class="row small" style="margin-bottom:8px"><input type="checkbox" id="finArchive" checked> #${esc(S.channel)} 채널 보관(archive) — 목록에서 사라지고 더는 글을 쓸 수 없어요</label>` : ''}
+          <label class="f">마무리한 다음</label>
+          <div class="seg sm"><button class="${UI.finNext !== 'again' ? 'on' : ''}" data-act="finNext" data-val="start">시작 화면으로</button><button class="${UI.finNext === 'again' ? 'on' : ''}" data-act="finNext" data-val="again">같은 멤버·설정으로 새 모임</button></div>
+          <p class="small muted" style="margin-top:8px">이 모임은 <b>지난 모임</b>에 저장돼요(시작 화면에서 다시 볼 수 있어요).</p></div>
+        <div class="mf"><button class="btn" data-act="closeModal">취소</button><button class="btn yellow" data-act="doFinishMeet">마무리</button></div>`, true); return; }
+    case 'finNext': { UI.finNext = d.val; const ar = ($('#finArchive') || {}).checked; act_finishReopen(ar); return; }
+    case 'doFinishMeet': {
+      const archive = !!($('#finArchive') || {}).checked, ch = S.slackChannel, live = SLACK.status === 'on' && ch;
+      const c = dinnerSettle(), d0 = decidedValue('date'), pl0 = decidedValue('place');
+      const rec = {id:Date.now(), name:S.event.name, channel:S.channel, date:d0 ? d0.label : '', place:pl0 ? pl0.label : '', persona:PERSONAS[S.persona].label,
+        att:c.att.length, total:c.total, finishedAt:fmtDeadline(new Date()), report:settleReport(), csv:buildCsv().csv};
+      const saved = saveHist([rec, ...loadHist()]);
+      closeModal();
+      const keep = UI.finNext === 'again' ? {size:S.size, template:S.template, schema:S.schema, invited:S.invited, persona:S.persona, strategy:S.strategy, freq:S.freq, quiet:S.quiet,
+        dayDrink:S.dayDrink, emo:S.emo, latte:S.latte, flavorEvery:S.flavorEvery, dinner:{...defaultDinner(), baseFee:S.dinner.baseFee, byRound:S.dinner.byRound, nonDrink:S.dinner.nonDrink, account:S.dinner.account}, channel:`${S.channel}-2`} : null;
+      const done = msg => { S = defaults(); if (keep){ Object.assign(S, keep); S.screen = 'setup'; } UI.open = null; UI.surveyDeadline = ''; UI.dmPlan = null; UI.slackMsgs = null; UI.finNext = null;
+        render(); window.scrollTo(0, 0); toast(msg + (saved ? '' : ' · 지난 모임 저장 실패(브라우저 저장소)')); };
+      if (live && archive){
+        toast('채널을 보관하는 중…');
+        slackApi('/api/slack/archive', {channel:ch}).then(() => done('모임을 마무리하고 채널을 보관했어요 🎉')).catch(e => done(`마무리했어요 · 채널 보관 실패 (${slackErr(e.message)})`));
+      } else done('모임을 마무리했어요 🎉');
+      return; }
+    case 'histOpen': historyModal(); return;
+    case 'histView': {
+      const r = loadHist()[+d.i]; if (!r) return;
+      modal(`<div class="mh"><h3 class="grow">📚 ${esc(r.name)}</h3><button class="btn sm ghost" data-act="histOpen">← 목록</button><button class="btn sm ghost" data-act="closeModal">✕</button></div>
+        <div class="mb"><pre class="report">${esc(r.report)}</pre>
+          <div class="row"><button class="btn sm" data-act="histCsv" data-i="${d.i}">⬇ 시트 CSV</button><button class="btn sm" data-act="histReport" data-i="${d.i}">⬇ 정산 리포트</button><span class="grow"></span>
+          <button class="btn sm ghost danger" data-act="histDel" data-i="${d.i}">기록 삭제</button></div></div>`, true); return; }
+    case 'histCsv': { const r = loadHist()[+d.i]; if (r) saveFile(r.csv, `${r.name}_참가자.csv`, 'text/csv;charset=utf-8'); return; }
+    case 'histReport': { const r = loadHist()[+d.i]; if (r) saveFile(r.report, `${r.name}_정산리포트.txt`, 'text/plain;charset=utf-8'); return; }
+    case 'histDel': { const h = loadHist(); h.splice(+d.i, 1); saveHist(h); toast('기록을 지웠어요'); render(); historyModal(); return; }
     case 'cellEdit': {
       const p = S.people[d.id], col = S.schema.find(c => c.key === d.k); if (!p || !col) return;
       const cur = d.k === '참석' ? p.attend : (p.fields[d.k] || '');
@@ -2823,6 +3035,7 @@ document.addEventListener('click', e => {
     case 'toggleEmo': S.emo = !S.emo; UI.pvTab = 'msg'; S.flavorNext = Date.now() + flavorEvery() * 1000; log('총무', `구남친 감성 ${S.emo ? 'ON' : 'OFF'}`); break;
     case 'toggleLatte': S.latte = !S.latte; UI.pvTab = 'msg'; S.flavorNext = Date.now() + flavorEvery() * 1000; log('총무', `부장님 라떼모드 ${S.latte ? 'ON' : 'OFF'}`); break;
     case 'dayDrink': S.dayDrink = !S.dayDrink; log('총무', `구남친 낮술하기 ${S.dayDrink ? '켬 (09:00~18:00 추가)' : '끔'}`); break;
+    case 'slackTab': UI.slackTab = d.val; UI.slackUp = false; slackPaneRefresh(); slackPull(); return;
     case 'phaseDm': openDmPlan([d.id]); return;
     case 'phaseDmAll': openDmPlan(phasePending().map(p => p.id)); return;
     case 'dmSet': {
@@ -2878,6 +3091,7 @@ document.addEventListener('click', e => {
         if (voteOn() && SLACK.status !== 'on'){
           log('소통', `#${S.channel} 일정 안내 공지 (데모)`);
           ['date', 'place'].forEach(k => { if (VOTES[k].mode() === 'vote') log('소통', `#${S.channel} ${VOTES[k].label} 투표 메시지 (데모)`); });
+          if (S.phase === 'survey') setTimeout(() => sendSurvey('', true), 0); // 날짜·장소가 정해져 있으면 바로 참석 조사
         }
       }
       else { syncPeople(); log('총무', '설정 변경 저장'); toast('설정을 저장했어요'); }
@@ -2966,11 +3180,13 @@ const HERO_SRC = 'assets/start-hero.jpg'; // 시작화면 그림 (버튼까지 �
 const flavorOf = () => ({emo:!!S.emo, latte:!!S.latte});
 // 독촉과 상관없이 단체방에 주기적으로 올리는 멘트 (부장님 라떼모드 · 구남친 감성 ON). 문구 그대로 보냄
 const FLAVOR_LINES = {oldie:["나 때는 회식 투표 이런게 어딨어, 부장이 다 정했다", "회식 끝나고 슈퍼 가서 하드 하나씩 먹자^^", "다들 건배사 준비했나???", "옛날엔 총무가 장부에 볼펜으로 다 적었다, 계산기 두드리면서. 세상 참 편하다 편해", "우리 때는 적금 이자가 10%가 넘었어~ 그땐 그냥 넣어두면 됐다고^^", "나 신입 때는 삐삐로 연락받았다~ 8282 알지? 빨리빨리!", "MZ는 회식 싫어한다며~ 근데 이게 다 사회생활이야", "나 때는 여기 주변 다 논밭이었다"],
-  shy:["여러분… 자요?\n다 자겠죠…\n단톡방에 이런 거 보내면 안 되는 거 아는데\n그냥… 오늘은 좀 보내고 싶었어요\n아침에 보면 못 본 척해주세요", "자요…?\n…\n다들 읽기만 하시네요\n숫자 줄어드는 거 보고 있어요\n{인원}명 중에 {읽은 수}명…\n…다 보고 있는 거 알아요", "술 좀 마셨어요\n그래서 하는 말인데요\n저 이 방 진짜 좋아해요\n…내일 이 메시지 지울 수도 있어요\n근데 진심이에요", "고백할 게 있어요…\n저 사실 이 모임 처음 만들어질 때부터\n제일 기대한 사람이 저예요\n다들 그냥 회식이라고 생각하셨겠지만\n저한테는… 아니었어요", "우리 지난번 모였던 날\n다들 기억하세요?\n저는 그날 사진 아직도 가끔 봐요\n누가 고기 태웠는지까지 기억나요\n…이거 저만 그래요?", "솔직히 말할게요…\n요즘 다른 모임도 나가봤어요\n다들 괜찮은 사람들이었어요\n근데 이 방 같은 데는 없더라고요\n…돌아와도 될까요 저", "이 방 공지 올릴 때마다 떨려요\n읽씹당할까 봐서요\n반응 하나 달리면 하루 종일 기분 좋고\n아무도 안 달면…\n…그냥 그런 날도 있는 거죠 ㅎ", "이 방에 있는 누군가한테 하는 말인데요…\n누군지는 말 안 할게요\n본인은 알 거예요\n…아마 모르겠죠\n그래서 더 말 못 하겠어요", "지난 모임 때 제 옆자리 앉으셨던 분…\n아 아니에요\n그냥 고기 잘 구우셨다고요\n그 말이 하고 싶었어요\n…진짜 그것뿐이에요", "답장 제일 빨리 해주시는 분 있잖아요\n늘 고마웠어요\n이름은 안 부를게요\n부르면 다들 아실 테니까…\n…아 다들 이미 아시겠네요", "아 방금 메시지 무시해주세요\n잘못 보냈어요\n…라고 하기엔 너무 길게 썼네요\n그냥 읽어주세요\n다 진심이니까요", "죄송해요 여러분\n새벽 감성이었어요\n아침 되면 다 괜찮아질 거예요\n…괜찮아질까요?\n모르겠어요", "방 나가기 누를 뻔했어요\n근데 못 누르겠더라고요\n총무가 방 나가면 안 되잖아요…\n…그게 이유의 전부는 아니지만요", ["다들 바쁘세요?", "숫자는 줄었는데…", "이모티콘 하나만 달아주시면 안 될까요", "…", "괜찮아요 혼자 떠들게요", "근데 진짜 아무도 안 자요?", "ㅋㅋ 제가 왜 이러죠\n이 방에서 이러면 안 되는데\n…내일 다들 모른 척해주세요"]]};
-const FLAVOR_EVERY = [[3600, '1시간'], [1800, '30분'], [600, '10분'], [30, '🔥 30초']];
+  shy:["얘들아… 자니?\n다 자겠지…\n단톡방에 이런 거 보내면 안 되는 거 아는데\n그냥… 오늘은 좀 보내고 싶었어\n아침에 보면 못 본 척해줘", "자니…?\n…\n다들 읽기만 하네\n숫자 줄어드는 거 보고 있어\n{인원}명 중에 {읽은 수}명…\n…다 보고 있는 거 알아", "술 좀 마셨어\n그래서 하는 말인데\n나 이 방 진짜 좋아해\n…내일 이 메시지 지울 수도 있어\n근데 진심이야", "고백할 게 있어…\n나 사실 이 모임 처음 만들어질 때부터\n제일 기대한 사람이 나야\n다들 그냥 회식이라고 생각했겠지만\n나한테는… 아니었어", "우리 지난번 모였던 날\n다들 기억나?\n나는 그날 사진 아직도 가끔 봐\n누가 고기 태웠는지까지 기억나\n…이거 나만 그래?", "나 전역하고 처음 나간 모임이 여기였잖아…\n그때 다들 나 어색해했는데\n이제는 좀 편해진 것 같아서\n…그냥 고마워서", "학교 앞 그 술집 아직 있더라\n우리 처음 회식했던 데\n지나가다가 한참 서 있었어\n…다음에 거기 갈래?", "솔직히 말할게…\n요즘 다른 모임도 나가봤어\n다들 괜찮은 사람들이었어\n근데 이 방 같은 데는 없더라\n…돌아와도 되냐 나", "이 방 공지 올릴 때마다 떨려\n읽씹당할까 봐\n반응 하나 달리면 하루 종일 기분 좋고\n아무도 안 달면…\n…그냥 그런 날도 있는 거지 ㅎ", "이 방에 있는 누군가한테 하는 말인데…\n누군지는 말 안 할게\n본인은 알 거야\n…아마 모르겠지\n그래서 더 말 못 하겠어", "지난 모임 때 내 옆자리 앉았던 사람…\n아 아니야\n그냥 고기 잘 굽더라고\n그 말이 하고 싶었어\n…진짜 그것뿐이야", "답장 제일 빨리 해주는 사람 있잖아\n늘 고마웠어\n이름은 안 부를게\n부르면 다들 알 테니까…\n…아 다들 이미 알겠네", "아 방금 메시지 무시해줘\n잘못 보냈어\n…라고 하기엔 너무 길게 썼네\n그냥 읽어줘\n다 진심이니까", "미안 얘들아\n새벽 감성이었어\n아침 되면 다 괜찮아질 거야\n…괜찮아질까?\n모르겠다", "방 나가기 누를 뻔했어\n근데 못 누르겠더라\n총무가 방 나가면 안 되잖아…\n…그게 이유의 전부는 아니지만", ["다들 바빠?", "숫자는 줄었는데…", "이모티콘 하나만 달아주면 안 되냐", "…", "괜찮아 혼자 떠들게", "근데 진짜 아무도 안 자?", "ㅋㅋ 내가 왜 이러냐\n이 방에서 이러면 안 되는데\n…내일 다들 모른 척해줘"]]};
+const FLAVOR_EVERY = [[3600, '1시간'], [1800, '30분'], [600, '10분'], [60, '🔥 1분']];
+// 모임이 완전히 끝났는지(정산 완료): 끝나면 단체방 멘트·대화 대답을 모두 멈춤
+const meetDone = () => !!((S.settle && S.settle.done) || S.settled);
 const flavorOn = () => (S.persona === 'oldie' && S.latte) || (S.persona === 'shy' && S.emo);
 const flavorName = () => S.persona === 'oldie' ? '☕ 라떼 멘트' : '🌙 새벽 감성 멘트';
-const flavorEvery = () => +S.flavorEvery || 3600;
+const flavorEvery = () => { const v = +S.flavorEvery || 3600; return v === 30 ? 60 : v; }; // 예전에 고른 30초는 1분으로
 const flavorEveryPicker = () => `<div class="row wrap" style="gap:6px;margin:6px 0 0 24px"><span class="small muted">독촉과 별개로 단체방에</span>${FLAVOR_EVERY.map(([sec, l]) =>
   `<button class="btn sm ${flavorEvery() === sec ? 'primary' : ''}" data-act="flavorEvery" data-sec="${sec}">${l}</button>`).join('')}<span class="small muted">마다</span></div>`;
 // {인원}·{읽은 수} 채우기 (읽은 수는 인원보다 적게)
@@ -2993,7 +3209,7 @@ function flavorPreview(){
   const every = (FLAVOR_EVERY.find(x => x[0] === flavorEvery()) || [0, ''])[1];
   return `<div class="row" style="margin:18px 0 8px"><b>${flavorName()} · 독촉과 별개로 ${every}마다</b></div>
     <div class="slack">${flavorSample(S.persona === 'oldie' ? 3 : 2).map(parts => `<div class="stage-lb">#${esc(S.channel)}</div>${parts.map(p => bubble(p, '', false)).join('')}`).join('')}</div>
-    <p class="small muted" style="margin-top:8px">${S.persona === 'shy' ? '🌙 구남친 전송 시간에만 올라가요. ' : ''}멘트 ${(FLAVOR_LINES[S.persona] || []).length}개를 섞어서 한 바퀴 돌 때까지 겹치지 않게 보내요.</p>`;
+    <p class="small muted" style="margin-top:8px">${S.persona === 'shy' ? '🌙 구남친 전송 시간에만 올라가요. ' : ''}정산이 끝나면 멈춰요. 멘트 ${(FLAVOR_LINES[S.persona] || []).length}개를 섞어서 한 바퀴 돌 때까지 겹치지 않게 보내요.</p>`;
 }
 const emoToggle = () => `<label class="row" style="gap:6px;margin-top:6px;cursor:pointer"><input type="checkbox" data-act="toggleEmo" ${S.emo ? 'checked' : ''}><b>🌙 감성 ON</b><span class="small muted">추억·비유 가득한 새벽 감성 + 단체방 새벽 멘트</span></label>${S.emo ? flavorEveryPicker() : ''}`;
 const latteToggle = () => `<label class="row" style="gap:6px;margin-top:6px;cursor:pointer"><input type="checkbox" data-act="toggleLatte" ${S.latte ? 'checked' : ''}><b>☕ 라떼모드 ON</b><span class="small muted">메시지마다 '라떼는 말이야~' 한 줄 + 단체방 라떼 멘트</span></label>${S.latte ? flavorEveryPicker() : ''}`;
@@ -3004,7 +3220,7 @@ function sendHint(m){
 }
 async function slackSend(to, m, persona, what, opts = {}){
   try {
-    const r = await slackApi('/api/slack/send', {...to, ...opts, text:m.text, persona, situation:`${m.label} (${m.mood})`, mood:m.k || '', kind:S.template, phase:S.phase, facts:m.facts || '', hint:sendHint(m), flavor:flavorOf()});
+    const r = await slackApi('/api/slack/send', {...to, ...opts, text:m.text, persona, situation:`${m.label} (${m.mood})`, mood:m.k || '', kind:S.template, phase:S.phase, facts:m.facts || '', hint:sendHint(m), flavor:flavorOf(), strategy:S.strategy});
     log('소통', `Slack 발송 ✓ ${what}${r.llm ? ` · Claude 작성${r.parts > 1 ? ` · ${r.parts}개로 나눠 보냄` : ''}` : ''}: “${r.text.slice(0, 70)}${r.text.length > 70 ? '…' : ''}”`);
     toast(`Slack으로 보냈어요${r.llm ? ' (Claude 작성)' : ''}`);
   } catch(e){ log('소통', `Slack 발송 실패 · ${what}: ${slackErr(e.message)}`); toast(`Slack 발송 실패: ${slackErr(e.message)}`); }
@@ -3039,12 +3255,13 @@ async function slackStart(){
 }
 // 회식 시작: 일정 공지 → (투표로 정하는 항목만) 날짜·장소 투표 메시지
 async function dinnerKickoff(){
-  await slackSend({channel:S.slackChannel}, {text:dinnerNotice(), label:'1단계 · 일정 안내 공지', mood:''}, S.persona, '일정 안내 공지');
+  await slackSend({channel:S.slackChannel}, {text:dinnerNotice(), label:'1단계 · 일정 안내 공지', mood:''}, S.persona, '일정 안내 공지', {raw:true});
+  if (S.phase === 'survey' && !(S.survey && S.survey.ts)) await sendSurvey('', true); // 날짜·장소가 이미 정해졌으면 바로 참석 조사
   for (const kind of ['date', 'place']){
     const V = VOTES[kind], c = V.cfg();
     if (V.mode() !== 'vote' || c.ts) continue;
     try {
-      const r = await slackApi('/api/slack/poll', {channel:S.slackChannel, title:`${S.event.name} ${V.label} 투표`, options:V.options(), deadline:fmtDeadline(voteDeadline()), persona:S.persona});
+      const r = await slackApi('/api/slack/poll', {channel:S.slackChannel, title:`${S.event.name} ${V.label} 투표`, intro:toneOf().poll(V.label), options:V.options(), deadline:fmtDeadline(voteDeadline()), persona:S.persona});
       c.ts = r.ts; c.channel = r.channel; c.tally = null;
       log('소통', `#${S.channel} ${V.label} 투표 메시지 발송 (${V.options().length}개)`);
     } catch(e){ log('소통', `${V.label} 투표 메시지 실패: ${slackErr(e.message)}`); toast(`${V.label} 투표 메시지 실패: ${slackErr(e.message)}`); }

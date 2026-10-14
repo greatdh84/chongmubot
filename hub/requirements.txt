@@ -1,3 +1,4 @@
 # 공용 서버 = LARGE 백엔드 의존성 + SMALL 의 Socket Mode(선택)
 -r ../large/backend/requirements.txt
 slack_bolt
+emoji  # Slack 패널: :clipboard: 같은 이모지 코드를 실제 이모지로
