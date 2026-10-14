@@ -15,7 +15,7 @@ export function AppHeader() {
       <div className="top-in">
         {/* 공용 시작 화면은 React 밖(총무봇 공용 서버)이라 일반 링크로 이동. 정적 데모판은 demo/large/ 에 있으므로 한 단계 위 demo/ */}
         <a className="btn ghost small" href={STATIC ? "../" : "/"}>← 시작 화면</a>
-        <Link className="brand" to="/"><span className="logo" aria-hidden="true">🐸</span>대모임 총무봇</Link>
+        <Link className="brand" to="/"><span className="logo" aria-hidden="true"><img src={`${import.meta.env.BASE_URL}logo.jpg`} alt="" /></span>대모임 총무봇</Link>
         <span className="event" title={name ?? ""}>{name ?? ""}</span>
         {meta && (
           <span className="modes" role="status" aria-label="실행 모드">
@@ -131,7 +131,7 @@ export function Chat({ base, title, examples, chips, subtitle, onReply, classNam
       {thread && STATE_LABEL[thread.state] && <div className="notice warn">{STATE_LABEL[thread.state]}</div>}
       {thread?.state === "awaiting_confirmation" && (
         <div className="row">
-          <button className="primary" disabled={busy} onClick={() => send("네")}>네</button>
+          <button className="yellow" disabled={busy} onClick={() => send("네")}>네</button>
           <button disabled={busy} onClick={() => send("아니요")}>아니요</button>
         </div>
       )}
@@ -140,7 +140,7 @@ export function Chat({ base, title, examples, chips, subtitle, onReply, classNam
       )}
       <form onSubmit={submit}>
         <input value={text} onChange={(e) => setText(e.target.value)} placeholder={busy ? "Agent 가 보고서를 보는 중…" : "메시지 입력"} aria-label="메시지" maxLength={1000} />
-        <button className="primary" disabled={busy}>보내기</button>
+        <button className="yellow" disabled={busy}>보내기</button>
       </form>
       {error && <p className="error">{error}</p>}
     </div>

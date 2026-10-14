@@ -92,7 +92,7 @@ function DashboardTab({ base, go }: { base: string; go: (t: Tab) => void }) {
             {rep && <p className="muted" style={{ marginBottom: 0 }}>보고서 v{rep.version} · {fmtTime(rep.created_at)} · 계기: {triggerLabel(rep.trigger)}</p>}
           </div>
           <div className="card">
-            <h2>사람이 결정할 것 (HITL)</h2>
+            <h2>사람이 결정할 것 <span className="hitl" title="Human-in-the-loop: 사람이 확인해야 반영">HITL</span></h2>
             <ul className="todo">
               <li><span>마감 후·당일 변경 승인 대기 <b>{d.pending_changes}건</b></span><button className="small" onClick={() => go("입금·확인")}>보기</button></li>
               <li><span>Agent 입금 배정 제안 <b>{d.transactions.proposed_allocations}건</b> · 미배정 거래 {d.transactions.unallocated}건</span><button className="small" onClick={() => go("입금·확인")}>보기</button></li>
