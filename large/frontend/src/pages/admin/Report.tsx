@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, CHOICE_LABEL, fmtTime, won } from "../../api";
+import { api, CHOICE_LABEL, fmtTime, STATIC, won } from "../../api";
 import { Msg, StatusPill } from "../../components/common";
 import { useAction, useLoad } from "../../hooks";
 import { TeamStatement } from "./AdminMoney";
@@ -78,7 +78,8 @@ export function ReportTab({ base }: { base: string }) {
           </div>
           <div className="row">
             <button disabled={busy} onClick={() => run(() => api.post(`${base}/report/refresh`), "보고서를 다시 만들었습니다(바뀐 내용이 없으면 버전 유지).").then(reload)}>다시 만들기</button>
-            <a className="btn" href={`${base}/report.csv`}>CSV 내려받기</a>
+            {/* 정적 데모판은 녹화 때 함께 저장한 report.csv(demo/large/) */}
+            <a className="btn" href={STATIC ? "report.csv" : `${base}/report.csv`} download={STATIC ? `settlement_report_v${rep.version}.csv` : undefined}>CSV 내려받기</a>
           </div>
         </div>
         <Msg m={message} />

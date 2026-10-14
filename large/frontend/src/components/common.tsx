@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type FormEvent, type JSX, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { api, CHOICE_LABEL, type ChatMessage, type ChatThread, type Meta } from "../api";
+import { api, CHOICE_LABEL, STATIC, type ChatMessage, type ChatThread, type Meta } from "../api";
 
 export const MetaContext = createContext<Meta | null>(null);
 export const useMeta = () => useContext(MetaContext);
@@ -13,12 +13,13 @@ export function AppHeader() {
   return (
     <header className="top">
       <div className="top-in">
-        {/* 공용 시작 화면은 React 밖(총무봇 공용 서버)이라 일반 링크로 이동 */}
-        <a className="btn ghost small" href="/">← 시작 화면</a>
+        {/* 공용 시작 화면은 React 밖(총무봇 공용 서버)이라 일반 링크로 이동. 정적 데모판은 demo/large/ 에 있으므로 한 단계 위 demo/ */}
+        <a className="btn ghost small" href={STATIC ? "../" : "/"}>← 시작 화면</a>
         <Link className="brand" to="/"><span className="logo" aria-hidden="true">🐸</span>대모임 총무봇</Link>
         <span className="event" title={name ?? ""}>{name ?? ""}</span>
         {meta && (
           <span className="modes" role="status" aria-label="실행 모드">
+            {STATIC && <span className="pill bad" title="미리 녹화한 가상 데이터로 화면만 보여 줍니다. 저장·발송은 공용 서버에서">정적 데모 · 저장 안 됨</span>}
             <span className={`pill ${demo ? "warn" : "ok"}`}>{demo ? "시연 모드" : "운영 모드"}</span>
             <span className={`pill ${meta.notify_mode === "slack" ? "ok" : ""}`} title={meta.notify_mode === "mock" ? "실제로 보내지 않고 개발용 수신함에만 기록" : "소모임과 같은 Slack 봇으로 실제 DM 발송"}>Slack DM {meta.notify_mode === "mock" ? "모의" : "실제"}</span>
             <span className={`pill ${meta.llm_mode !== "mock" ? "ai" : ""}`} title={meta.llm_mode !== "mock" ? "LLM 이 요청 해석·도구 선택. 실패하면 규칙 기반으로 대체(메시지에 표시)" : "API 키 없이 규칙 기반으로 요청 해석"}>
@@ -26,8 +27,8 @@ export function AppHeader() {
             </span>
             {meta.scheduler && <span className="pill" title="Slack DM 발송 큐 자동 실행">발송 스케줄러 {meta.scheduler.enabled ? `켜짐·${meta.scheduler.interval_seconds}초` : "꺼짐"}</span>}
             {import.meta.env.DEV && <span className="pill bad" title="최종 실행은 공용 서버 127.0.0.1:8787">Vite 개발 서버</span>}
-            {meta.demo_tools && <Link className="pill" to="/">역할 전환</Link>}
-            {meta.demo_tools && <Link className="pill" to="/dev/inbox">개발용 수신함</Link>}
+            {meta.demo_tools && !STATIC && <Link className="pill" to="/">역할 전환</Link>}
+            {meta.demo_tools && !STATIC && <Link className="pill" to="/dev/inbox">개발용 수신함</Link>}
           </span>
         )}
       </div>

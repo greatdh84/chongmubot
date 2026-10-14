@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:static": "tsc -b && node -e \"require('fs').rmSync('../../demo/large/assets',{recursive:true,force:true})\" && vite build --mode static"
   },
   "dependencies": {
     "react": "^19.3.0",

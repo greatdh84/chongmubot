@@ -1,6 +1,6 @@
 import { useState, type JSX } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, CHOICE_LABEL, fmtTime, won, type Change, type EventInfo } from "../../api";
+import { api, CHOICE_LABEL, fmtTime, STATIC, won, type Change, type EventInfo } from "../../api";
 import { Chat, Msg, Page, StatusPill, useEventName } from "../../components/common";
 import { useAction, useLoad } from "../../hooks";
 import { PaymentsTab, RosterTab, TasksTab } from "./AdminMoney";
@@ -34,7 +34,7 @@ export default function AdminPage() {
     <Page>
       <div className="topbar">
         <h1>총무 · {ev.name}</h1>
-        <button onClick={() => api.post("/api/large/auth/admin/logout").then(() => nav("/"))}>로그아웃</button>
+        {!STATIC && <button onClick={() => api.post("/api/large/auth/admin/logout").then(() => nav("/"))}>로그아웃</button>}
       </div>
       <nav className="tabs" aria-label="총무 메뉴">
         {TABS.map((t) => <button key={t} className={t === tab ? "active" : ""} onClick={() => setTab(t)}>{t}</button>)}
