@@ -4,8 +4,9 @@
 
 - 시연 날짜 고정(KST): 참석 응답 마감 2026-10-05 18:00 · 회비 납부 마감 2026-10-08 18:00 · 행사 2026-10-14 09:00
   (시연용 응답·변경·거래내역 CSV 의 날짜와 맞춤. 초기설정 화면의 서버 없을 때 기본값도 같다)
-- 회비 버스 20,000 / 자차 15,000 / 불참 0, 환불 규칙 4개(납부 마감 전 불참 100% · 납부 마감~행사 3일 전 불참 50%
-  · 버스→자차 납부 마감 전 100% · 이후 0%). 명단은 초기설정 화면(워크샵)에서 CSV 로 올린다.
+- 회비 버스 20,000 / 자차 15,000 / 불참 0, 환불 규칙 3개(납부 마감 전 불참 100% · 납부 마감~행사 3일 전 불참 50%
+  · 버스→자차 차액 5,000 환불(당일 포함)). 행사 3일 전 이후의 불참(당일 노쇼 포함)은 규칙이 없어 총무가 정한다.
+  명단은 초기설정 화면(워크샵)에서 CSV 로 올린다.
 - 이미 행사가 있는 DB 면 거부한다(시드 DB·운영 DB 보호). 지우고 다시 만들려면 large/scripts/start_live.sh --reset
 """
 from __future__ import annotations
@@ -55,8 +56,7 @@ def main() -> None:
         for ctype, until, pct, desc in [
             ("attend_to_absent", payment, 100, "입금 마감 전 불참 전환: 전액 환불"),
             ("attend_to_absent", event_at - timedelta(days=3), 50, "입금 마감 후 ~ 행사 3일 전 불참: 50% 환불"),
-            ("bus_to_car", payment, 100, "입금 마감 전 버스→자차: 차액 전액 환불"),
-            ("bus_to_car", None, 0, "입금 마감 후 버스→자차: 버스 좌석 확정으로 환불 없음"),
+            ("bus_to_car", None, 100, "버스→자차: 차액 5,000원 환불(당일 포함)"),
         ]:
             db.add(RefundRule(event_id=ev.id, change_type=ctype, valid_until=until, refund_percent=pct, description=desc))
         db.merge(DbMeta(key="purpose", value=LIVE_PURPOSE))

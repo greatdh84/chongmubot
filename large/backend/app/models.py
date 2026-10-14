@@ -483,3 +483,25 @@ class AdminChatMessage(Base):
     text: Mapped[str] = mapped_column(Text)
     meta: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(default=_now)
+
+
+class EvidenceMessage(Base):
+    """근거 메시지(슬랙 대화). 시연용 슬랙 대화 CSV 한 행 = source 'demo_slack'.
+    정산 Agent 가 읽어 analysis 에 해석(무엇을 감지했고 무엇을 했는지)을 남기고, 관련 변경 기록이면 change_id 로 잇는다.
+    실제로 보낸 DM(EmailJob/DevMail)은 여기에 저장하지 않고 조회할 때 source 'dm_job' 으로 합친다."""
+
+    __tablename__ = "evidence_messages"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), index=True)
+    source: Mapped[str] = mapped_column(String(20), default="demo_slack")  # demo_slack
+    line: Mapped[int] = mapped_column(default=0)  # CSV 줄 번호
+    sent_at: Mapped[datetime]
+    sender: Mapped[str] = mapped_column(String(50))
+    recipient: Mapped[str] = mapped_column(String(50), default="")
+    sender_participant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("participants.id"))
+    team_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teams.id"), index=True)
+    participant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("participants.id"), index=True)  # 관련 ID(비어도 됨)
+    text: Mapped[str] = mapped_column(Text)
+    analysis: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # 정산 Agent 해석: kind·to·confidence·by·outcome…
+    change_id: Mapped[Optional[int]] = mapped_column(ForeignKey("change_logs.id"))
+    created_at: Mapped[datetime] = mapped_column(default=_now)

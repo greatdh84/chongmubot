@@ -57,6 +57,7 @@ seedmod.seed(base, stage="after-event")
 QUESTIONS = [
     "경영지원팀의 추가 회비 납부자를 알려줘", "환불할 부서 목록", "확인 필요한 부서", "당일 변동 있던 사람", "지난 보고서 이후 바뀐 것", "전체 요약",
     "인사팀 현황", "재무팀 현황", "영업1팀 현황", "해외영업팀 현황", "추가 납부할 부서 목록", "승인 대기 사람 목록", "응답 미확정 사람 목록",
+    "데이터팀 왜 추가 납부야?", "환불 대상 부서 알려줘", "확인 필요한 부서와 이유", "박채원 팀 현황", "재무팀 왜 정산 완료야?",
 ]
 CONFIRM = ["환불 대상 담당자에게 안내 보내줘", "추가 납부 대상 담당자에게 안내 보내줘"]
 
@@ -95,6 +96,8 @@ with TestClient(create_app()) as c:
         *[(f"{b}/agent-runs", {"agent": a}) for a in ("", "admin", "settlement", "communication")],
         *[(f"{b}/emails", {"status": s}) for s in ("", "queued", "retry_wait", "sending", "sent", "skipped", "failed")],
         *[(f"{b}/settlements/{t['id']}", {}) for t in teams],
+        *[(f"{b}/report/teams/{t['id']}/evidence", {}) for t in teams],
+        (f"{b}/agent/timeline", {}), (f"{b}/agent/settlement-card", {}), (f"{b}/emails/sent", {}),
     ]
     for p, q in plan:  # 한 번 돌려 기준표·보고서를 먼저 만들어 두고(첫 열람 때 생기는 버전), 두 번째 결과를 녹화
         get(p, q)

@@ -188,6 +188,9 @@ const TASK_KIND: Record<string, string> = {
   overpayment_unexplained: "초과 수납 원인 불명", multiple_team_reference: "여러 팀 표기",
 };
 
+interface SlackSug { team: string; sender: string; sent_at: string; text: string; why: string }
+const sugOf = (t: Task) => (t.evidence as { slack_suggestion?: SlackSug }).slack_suggestion ?? null;
+
 export function TasksTab({ base }: { base: string }) {
   const [status, setStatus] = useState("active");
   const [assignee, setAssignee] = useState("");
@@ -212,6 +215,16 @@ export function TasksTab({ base }: { base: string }) {
           {t.rule && <p className="muted">규칙: {t.rule}</p>}
           {t.answer && <p className="muted">답변: {t.options.find((o) => o.key === t.answer)?.label ?? t.answer} {t.answer_note}</p>}
           {t.resolution && <p className="muted">처리: {t.resolution}</p>}
+          {sugOf(t) && !["resolved", "cancelled"].includes(t.status) && (
+            <div className="notice">
+              <b>정산 Agent 배정 후보(슬랙 근거)</b> → <b>{sugOf(t)!.team}</b><br />
+              {sugOf(t)!.sender} {fmtTime(sugOf(t)!.sent_at)}: “{sugOf(t)!.text}” <span className="muted">· {sugOf(t)!.why}</span>
+              <div className="row" style={{ marginTop: 6 }}>
+                <button className="small primary" disabled={busy} onClick={() => run(() => api.post(`${base}/tasks/${t.id}/accept-suggestion`), `${sugOf(t)!.team} 입금으로 지정·확정했습니다.`).then(reload)}>근거 확인 → {sugOf(t)!.team} 입금으로 지정</button>
+                <span className="muted">자동으로 배정하지 않습니다. 총무가 지정하면 확정 배정 + 이 거래의 과제를 닫습니다.</span>
+              </div>
+            </div>
+          )}
           <details><summary className="muted">근거</summary><pre className="mail">{JSON.stringify(t.evidence, null, 1)}</pre></details>
           {t.assignee === "admin" && t.kind !== "change_approval" && !["resolved", "cancelled"].includes(t.status) && (
             <div className="row">

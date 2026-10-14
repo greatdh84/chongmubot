@@ -6,6 +6,7 @@
   → clock 원래대로 → 정산 보고서 다시 만들기.
 같은 파일을 다시 넣어도 결과가 같도록, 넣을 때마다 그 행사의 응답·변경 기록과 기준표·보고서를 지우고 처음부터 다시 만든다.
 변경 CSV 는 마지막에 넣은 응답 CSV(db_meta 에 보관) 위에 다시 쌓는다. 한 행이라도 틀리면 아무것도 반영하지 않는다.
+슬랙 대화 CSV(services/slack.py)를 이미 넣었다면 응답·변경을 다시 넣은 뒤 정산 Agent 가 메시지를 다시 읽어 새 기록에 잇는다.
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ from sqlalchemy.orm import Session
 from .. import clock
 from ..errors import AppError, invalid
 from ..models import CHOICE_LABELS, Admin, ChangeLog, ConfirmTask, DbMeta, DeadlineSnapshot, Event, Participant, Response, SettlementReport, TeamBilling
-from . import report, responses
+from . import report, responses, slack
 from .common import audit
 from .roster import _decode
 
@@ -154,6 +155,7 @@ def parse_changes(db: Session, event: Event, data: bytes) -> list[dict[str, Any]
 def _reset(db: Session, event: Event) -> None:
     """그 행사의 응답·변경 기록과 마감 기준표·청구표·보고서를 지운다(입금 기록·배정은 그대로)."""
     pids = select(Participant.id).where(Participant.event_id == event.id)
+    slack.unlink_changes(db, event)
     db.execute(delete(ConfirmTask).where(ConfirmTask.event_id == event.id, ConfirmTask.kind == "change_approval"))
     db.execute(delete(ChangeLog).where(ChangeLog.event_id == event.id))
     db.execute(delete(Response).where(Response.participant_id.in_(pids)))
@@ -196,6 +198,8 @@ def _run(db: Session, event: Event, actor: str, trigger: str, fn) -> dict[str, A
         fn(real_now)
     finally:
         clock.freeze(prev)
+    if slack.demo_messages(db, event):  # 슬랙 대화를 먼저 넣어 뒀다면 새 응답·변경 기록에 맞춰 다시 읽는다(연결 또는 제안)
+        slack.process_messages(db, event, trigger=f"{trigger}:slack_reread")
     report.refresh(db, event, trigger)
     out = _summary(db, event)
     audit(db, event.id, actor, trigger, detail={"counts": out["counts"], "changes": out["changes"]})

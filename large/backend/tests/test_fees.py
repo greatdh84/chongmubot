@@ -12,8 +12,7 @@ EVENT = datetime(2026, 10, 20)
 RULES = [
     SimpleNamespace(id=1, change_type="attend_to_absent", valid_until=PAY_DL, refund_percent=100, description="마감 전 100%"),
     SimpleNamespace(id=2, change_type="attend_to_absent", valid_until=EVENT - timedelta(days=3), refund_percent=50, description="3일 전까지 50%"),
-    SimpleNamespace(id=3, change_type="bus_to_car", valid_until=PAY_DL, refund_percent=100, description="마감 전 차액 100%"),
-    SimpleNamespace(id=4, change_type="bus_to_car", valid_until=None, refund_percent=0, description="마감 후 0%"),
+    SimpleNamespace(id=3, change_type="bus_to_car", valid_until=None, refund_percent=100, description="버스→자차: 차액 5,000원 환불(당일 포함)"),
 ]
 
 
@@ -40,9 +39,14 @@ def test_cancel_too_late_has_no_rule_and_no_refund():
     assert ev.refund_amount == 0 and ev.liability_after == 20000 and ev.needs_admin_rule
 
 
-def test_bus_to_car_after_payment_deadline_no_refund():
+def test_bus_to_car_after_payment_deadline_refunds_difference():
     ev = fees.evaluate_post_deadline_change(EV, RULES, "bus", "car", 20000, PAY_DL + timedelta(hours=1))
-    assert ev.refund_amount == 0 and ev.liability_after == 20000 and ev.rule_id == 4
+    assert ev.refund_amount == 5000 and ev.liability_after == 15000 and ev.rule_id == 3
+
+
+def test_bus_to_car_on_event_day_refunds_difference():
+    ev = fees.evaluate_post_deadline_change(EV, RULES, "bus", "car", 20000, EVENT + timedelta(hours=1))
+    assert (ev.refund_amount, ev.liability_after, ev.needs_admin_rule) == (5000, 15000, False)
 
 
 def test_bus_to_car_before_payment_deadline_refunds_difference():

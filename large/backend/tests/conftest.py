@@ -62,8 +62,7 @@ def make_world(db, *, n_teams=3, size=4, after_attend=False, after_payment=False
     db.add_all([
         RefundRule(event_id=ev.id, change_type="attend_to_absent", valid_until=payment, refund_percent=100, description="입금 마감 전 불참 100%"),
         RefundRule(event_id=ev.id, change_type="attend_to_absent", valid_until=ev.event_at - timedelta(days=3), refund_percent=50, description="행사 3일 전까지 50%"),
-        RefundRule(event_id=ev.id, change_type="bus_to_car", valid_until=payment, refund_percent=100, description="입금 마감 전 버스→자차 100%"),
-        RefundRule(event_id=ev.id, change_type="bus_to_car", valid_until=None, refund_percent=0, description="입금 마감 후 버스→자차 0%"),
+        RefundRule(event_id=ev.id, change_type="bus_to_car", valid_until=None, refund_percent=100, description="버스→자차: 차액 5,000원 환불(당일 포함)"),
     ])
     teams, members = [], {}
     n = 0

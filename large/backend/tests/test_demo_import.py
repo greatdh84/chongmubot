@@ -73,8 +73,7 @@ def demo(db, client):
     db.add_all([
         RefundRule(event_id=ev.id, change_type="attend_to_absent", valid_until=PAYMENT, refund_percent=100, description="납부 마감 전 불참 100%"),
         RefundRule(event_id=ev.id, change_type="attend_to_absent", valid_until=EVENT_AT - timedelta(days=3), refund_percent=50, description="행사 3일 전까지 50%"),
-        RefundRule(event_id=ev.id, change_type="bus_to_car", valid_until=PAYMENT, refund_percent=100, description="납부 마감 전 버스→자차 100%"),
-        RefundRule(event_id=ev.id, change_type="bus_to_car", valid_until=None, refund_percent=0, description="이후 0%"),
+        RefundRule(event_id=ev.id, change_type="bus_to_car", valid_until=None, refund_percent=100, description="버스→자차: 차액 5,000원 환불(당일 포함)"),
     ])
     db.commit()
     assert client.post("/api/large/auth/admin/login", json={"email": "admin@example.com", "password": "pw-123456"}).status_code == 200

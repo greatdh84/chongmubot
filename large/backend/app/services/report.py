@@ -21,14 +21,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import clock
-from ..models import CHOICE_LABELS, AgentRun, Allocation, BankTransaction, ChangeLog, Event, Participant, SettlementReport, Team, TeamBilling
+from ..models import CHOICE_LABELS, AgentRun, Allocation, BankTransaction, ChangeLog, DeadlineSnapshot, Event, EvidenceMessage, Participant, SettlementReport, Team, TeamBilling
 from . import responses
 from .common import active_manager, audit
 from .settlement import compute_team
@@ -39,7 +39,13 @@ STAGES = {
     "payment_closed": "납부 마감 → 행사 전",
     "event_done": "행사 종료 → 정산",
 }
-SOURCE_LABEL = {"web": "참가자 응답", "chat": "참가자 Agent 채팅", "admin": "총무 직접 입력", "seed": "시드"}
+SOURCE_LABEL = {"web": "참가자 응답", "chat": "참가자 Agent 채팅", "admin": "총무 직접 입력", "seed": "시드", "slack": "슬랙 대화(정산 Agent 제안)", "admin_approved": "총무 승인"}
+
+
+def on_event_day(event: Event, at: datetime) -> bool:
+    """행사 당일(KST 날짜 기준) 이후의 일인지. 출발 전 아침 변동(08:35 버스 탑승 등)도 당일로 본다."""
+    start = clock.kst(event.event_at).replace(hour=0, minute=0, second=0, microsecond=0)
+    return at >= clock.to_utc_naive(start)
 
 
 def stage_of(event: Event, now: datetime | None = None) -> str:
@@ -107,20 +113,40 @@ def ensure_checkpoints(db: Session, event: Event, now: datetime | None = None) -
 
 # ---------------------------------------------------------------- 보고서 계산
 
-def _people_and_team(db: Session, event: Event, team: Team, billing: TeamBilling | None) -> tuple[dict, list[dict]]:
+def _related_messages(msgs: list, team: Team, pid: int, name: str) -> list:
+    """한 사람과 관련된 슬랙 메시지: 관련 ID·이름 언급·받는/보낸 사람 + 그 메시지 받은 사람의 1시간 안 답장(같은 부서)."""
+    direct = [m for m in msgs if m.participant_id == pid or (m.team_id == team.id and (m.recipient == name or m.sender == name or f"{name}님" in m.text))]
+    follow = [m for m in msgs if m.team_id == team.id and m not in direct and any(r.recipient and m.sender == r.recipient and timedelta(0) <= m.sent_at - r.sent_at <= timedelta(hours=1) for r in direct)]
+    return sorted(direct + follow, key=lambda m: (m.sent_at, m.id))
+
+
+def _basis(c: ChangeLog) -> tuple[str, str]:
+    """변동 근거 구분: rule(환불 규칙·추가 전액 청구) | admin(총무 결정) | pending(규칙 없음 → 총무 판단 필요)"""
+    if c.admin_refund_decided:
+        return "admin", f"총무 결정: 환불 {c.refund_amount:,}원" + (f" ({c.note.split(' / ')[-1]})" if c.note else "")
+    if c.rule_missing:
+        return "pending", "환불 규칙 없음 → 총무 판단 필요"
+    return "rule", c.rule_text
+
+
+def _people_and_team(db: Session, event: Event, team: Team, billing: TeamBilling | None, msgs: list | None = None) -> tuple[dict, list[dict]]:
     calc = compute_team(db, event, team)
     mgr = active_manager(db, team.id)
     mp = db.get(Participant, mgr.participant_id) if mgr else None
     billed_fee = {l["participant_id"]: l for l in (billing.lines if billing else [])}
     deadline = event.payment_deadline
+    msgs = msgs or []
 
-    # 납부 마감 이후의 변동(당일 변동 포함)
+    # 납부 마감 이후의 변동(당일 변동 포함) + 참석 마감~납부 마감 사이에 승인돼 청구에 이미 들어간 변동
     late_changes: dict[int, list[ChangeLog]] = {}
+    included: dict[int, list[ChangeLog]] = {}
     for c in db.scalars(
         select(ChangeLog).where(ChangeLog.participant_id.in_([l["participant_id"] for l in calc["lines"]]), ChangeLog.after_deadline.is_(True)).order_by(ChangeLog.id)
     ):
         if c.status == "pending_approval" or (c.status == "applied" and (billing is None or (c.decided_at or c.requested_at) > deadline)):
             late_changes.setdefault(c.participant_id, []).append(c)
+        elif c.status == "applied" and billing is not None:
+            included.setdefault(c.participant_id, []).append(c)
 
     people = []
     for l in calc["lines"]:
@@ -145,21 +171,30 @@ def _people_and_team(db: Session, event: Event, team: Team, billing: TeamBilling
             kind = "refund"
         elif billing is None and changes:
             kind = "changed"
+        elif pid in included:
+            kind, changes = "included", included[pid]
         if kind is None:
             continue
-        on_day = [c for c in changes if c.requested_at >= event.event_at]
+        on_day = [c for c in changes if on_event_day(event, c.requested_at)]
+        rel = _related_messages(msgs, team, pid, l["name"])
+        last = changes[-1] if changes else None
+        basis_kind, basis_text = _basis(last) if last else ("none", "응답 없음 — 총무 확인 필요" if kind == "unresolved" else "")
         people.append(
             {
                 "participant_id": pid, "name": l["name"], "team_id": team.id, "team_code": team.code, "team_name": team.name, "kind": kind,
+                "manager_name": mp.name if mp else None,
                 "snapshot_choice": l["snapshot_choice"], "billed_choice": b["choice"] if b else None, "choice": l["choice"],
                 "billed_fee": base_fee, "final_fee": l["fee"], "amount": abs(diff) if diff else 0,
-                "on_event_day": bool(on_day),
+                "on_event_day": bool(on_day), "basis_kind": basis_kind, "basis": basis_text,
+                "slack": ({"at": clock.fmt(rel[-1].sent_at), "sender": rel[-1].sender, "text": rel[-1].text, "id": rel[-1].id} if rel else None),
+                "message_ids": [m.id for m in rel],
                 "changes": [
                     {
                         "change_id": c.id, "from": CHOICE_LABELS[c.from_choice], "to": CHOICE_LABELS[c.to_choice], "status": c.status,
-                        "requested_at": clock.fmt(c.requested_at), "source": SOURCE_LABEL.get(c.source, c.source), "rule": c.rule_text,
+                        "requested_at": clock.fmt(c.requested_at), "decided_at": clock.fmt(c.decided_at), "source": SOURCE_LABEL.get(c.source, c.source), "rule": c.rule_text,
+                        "basis_kind": _basis(c)[0], "basis": _basis(c)[1],
                         "refund_amount": c.refund_amount, "extra_charge": c.extra_charge, "note": c.note,
-                        "on_event_day": c.requested_at >= event.event_at,
+                        "on_event_day": on_event_day(event, c.requested_at),
                     }
                     for c in changes
                 ],
@@ -178,20 +213,47 @@ def _people_and_team(db: Session, event: Event, team: Team, billing: TeamBilling
         status = "refund"
     else:
         status = "done"
+    last_paid = max((r["txn_at"] for r in calc["receipts"] if r["status"] == "confirmed" and r["txn_at"]), default=None)
+    for p in people:
+        p["process"] = _process(p, status, last_paid, calc["refunds_paid"])
     row = {
         "team_id": team.id, "code": team.code, "name": team.name, "headcount": calc["headcount"],
         "manager": {"participant_id": mp.id, "name": mp.name, "slack_id": mp.slack_id} if mp else None,
         "counts": _counts(calc["lines"]),
         "billed": billed, "final_fee": calc["final_fee"], "received": calc["received"], "received_proposed": proposed,
-        "paid_by_deadline": paid_by_deadline, "late_paid": calc["received"] - paid_by_deadline,
+        "paid_by_deadline": paid_by_deadline, "late_paid": calc["received"] - paid_by_deadline, "last_paid_at": last_paid,
         "refunds_paid": calc["refunds_paid"],
         # 정산 잔액 = (청구액 − 확정 입금) + (최종 회비 − 청구액) + 지급 환불
         "payment_gap": None if billed is None else billed - calc["received"],
         "change_delta": None if billed is None else calc["final_fee"] - billed,
         "balance": balance, "status": status, "blockers": calc["blockers"],
-        "people_counts": {k: sum(1 for p in people if p["kind"] == k) for k in ("extra", "refund", "pending", "unresolved", "rule_missing", "changed")},
+        "people_counts": {k: sum(1 for p in people if p["kind"] == k) for k in PEOPLE_KINDS},
     }
     return row, people
+
+
+PEOPLE_KINDS = ("extra", "refund", "pending", "unresolved", "rule_missing", "changed", "included")
+
+
+def _process(p: dict, team_status: str, last_paid: str | None, refunds_paid: int) -> str:
+    """사람별 변동의 처리 상태(팀 단위 정산 기준)."""
+    k = p["kind"]
+    if k == "pending":
+        return "승인 대기"
+    if k == "unresolved":
+        return "응답 미확정"
+    if k == "rule_missing":
+        return "총무 환불액 결정 필요"
+    if k == "included":
+        return "청구에 이미 포함"
+    if team_status == "check":
+        return "팀 확인 필요"
+    day = f"({last_paid[5:10].replace('-', '/')})" if last_paid else ""
+    if k == "extra":
+        return {"done": f"팀 납부 완료{day}", "extra": "추가 납부 대기", "refund": "팀 환불액에서 차감"}.get(team_status, "")
+    if k == "refund":
+        return {"done": "환불 완료" if refunds_paid else "팀 정산 완료", "refund": "환불 대기", "extra": "팀 추가 납부에서 차감"}.get(team_status, "")
+    return ""
 
 
 def _counts(lines: list[dict]) -> dict[str, int]:
@@ -205,9 +267,10 @@ def build(db: Session, event: Event, now: datetime | None = None) -> dict[str, A
     """저장하지 않고 보고서 내용을 계산한다."""
     now = now or clock.now()
     billings = {b.team_id: b for b in db.scalars(select(TeamBilling).where(TeamBilling.event_id == event.id))}
+    msgs = list(db.scalars(select(EvidenceMessage).where(EvidenceMessage.event_id == event.id).order_by(EvidenceMessage.sent_at, EvidenceMessage.id)))
     teams, people = [], []
     for team in db.scalars(select(Team).where(Team.event_id == event.id).order_by(Team.code)):
-        row, ppl = _people_and_team(db, event, team, billings.get(team.id))
+        row, ppl = _people_and_team(db, event, team, billings.get(team.id), msgs)
         teams.append(row)
         people.extend(ppl)
     counts = {k: sum(t["counts"][k] for t in teams) for k in ("bus", "car", "absent", "undecided", "none")}
@@ -228,10 +291,22 @@ def build(db: Session, event: Event, now: datetime | None = None) -> dict[str, A
         "refund_total": -sum(t["balance"] for t in teams if t["status"] == "refund"),
         "check_total": sum(abs(t["balance"]) for t in teams if t["status"] == "check"),
         "team_status": {k: sum(1 for t in teams if t["status"] == k) for k in ("extra", "refund", "check", "done")},
-        "people_counts": {k: sum(1 for p in people if p["kind"] == k) for k in ("extra", "refund", "pending", "unresolved", "rule_missing", "changed")},
+        "people_counts": {k: sum(1 for p in people if p["kind"] == k) for k in PEOPLE_KINDS},
         "on_event_day_changes": sum(1 for p in people if p["on_event_day"]),
+        "deadline_counts": _deadline_counts(db, event),
+        "billed_final_delta": None if billed_total is None else sum(t["final_fee"] for t in teams) - billed_total,
     }
     return {"summary": summary, "teams": teams, "people": people}
+
+
+def _deadline_counts(db: Session, event: Event) -> dict[str, int] | None:
+    """참석 마감 기준 응답(DeadlineSnapshot) 인원. 마감 전이면 None."""
+    if event.snapshot_taken_at is None:
+        return None
+    out = {k: 0 for k in ("bus", "car", "absent", "undecided", "none")}
+    for ch in db.scalars(select(DeadlineSnapshot.choice).where(DeadlineSnapshot.event_id == event.id)):
+        out[ch or "none"] += 1
+    return out
 
 
 def _hash(content: dict[str, Any]) -> str:
@@ -306,7 +381,7 @@ def report_out(rep: SettlementReport) -> dict[str, Any]:
     }
 
 
-KIND_LABEL = {"extra": "추가 납부", "refund": "환불", "pending": "승인 대기", "unresolved": "응답 미확정", "rule_missing": "환불액 미정(총무 결정)", "changed": "변경 있음"}
+KIND_LABEL = {"extra": "추가 납부", "refund": "환불", "pending": "승인 대기", "unresolved": "응답 미확정", "rule_missing": "환불액 미정(총무 결정)", "changed": "변경 있음", "included": "청구에 포함"}
 STATUS_LABEL = {"extra": "추가 납부", "refund": "환불", "check": "확인 필요", "done": "정산 완료"}
 
 
@@ -322,7 +397,14 @@ def to_csv(rep: SettlementReport) -> str:
     for t in rep.teams:
         w.writerow([t["code"], t["name"], (t["manager"] or {}).get("name", "미지정"), t["headcount"], t["billed"] if t["billed"] is not None else "", t["final_fee"], t["received"], t["refunds_paid"], t["balance"], STATUS_LABEL[t["status"]], " / ".join(t["blockers"])])
     w.writerow([])
-    w.writerow(["부서", "이름", "구분", "청구 때 회비", "최종 회비", "차액", "변동 내역"])
+    w.writerow(["부서", "담당자", "이름", "구분", "시점", "청구 때 회비", "최종 회비", "차액", "근거", "처리 상태", "슬랙(가장 최근)", "변동 내역"])
     for p in rep.people:
-        w.writerow([p["team_name"], p["name"], KIND_LABEL[p["kind"]], p["billed_fee"] if p["billed_fee"] is not None else "", p["final_fee"] if p["final_fee"] is not None else "미확정", p["amount"], " / ".join(f"{c['from']}→{c['to']}({c['source']}, {c['rule']})" for c in p["changes"])])
+        sl = p.get("slack")
+        w.writerow([
+            p["team_name"], p.get("manager_name") or "", p["name"], KIND_LABEL[p["kind"]], "행사 당일" if p["on_event_day"] else "일반",
+            p["billed_fee"] if p["billed_fee"] is not None else "", p["final_fee"] if p["final_fee"] is not None else "미확정",
+            (-p["amount"] if p["kind"] == "refund" else p["amount"]), p.get("basis", ""), p.get("process", ""),
+            f"{sl['sender']} {sl['at'][5:16].replace('T', ' ')}: {sl['text']}" if sl else "",
+            " / ".join(f"{c['from']}→{c['to']}({c['source']}, {c['rule']})" for c in p["changes"]),
+        ])
     return buf.getvalue()

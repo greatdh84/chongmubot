@@ -57,6 +57,8 @@ export interface Change {
   from_label: string; to_label: string; after_deadline: boolean; status: string; source: string; requested_at: string;
   decided_at: string | null; liability_before: number | null; liability_after: number | null; refund_amount: number;
   extra_charge: number; rule_text: string; note: string; rule_missing: boolean; admin_refund_decided: boolean;
+  evidence?: { id: number; sender: string; sent_at: string; text: string; analysis: { confidence?: string } | null }[];
+  suggested_refund?: number | null; suggested_note?: string;
 }
 
 export interface Me {

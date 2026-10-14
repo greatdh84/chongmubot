@@ -170,3 +170,60 @@ details summary { cursor: pointer; }
 .dept .bar span { display: block; height: 100%; background: var(--green); border-radius: 99px; }
 tr.sel td { background: var(--green-l); }
 td > button.small, td .row > button.small { white-space: nowrap; }
+
+/* ---------- 정산 보고서: 머리 요약·근거 패널·담당자 안내 ---------- */
+.headline { display: grid; gap: 6px; margin: 4px 0 8px; }
+.headline .money { font-size: 17px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.headline .money b { font-variant-numeric: tabular-nums; }
+.headline .arrow, .flow .arrow { color: var(--muted); }
+.status-chip.active { outline: 2px solid var(--green); }
+.status-chip.tone-warn { background: var(--yellow-l); } .status-chip.tone-info { background: var(--blue-l); }
+.status-chip.tone-bad { background: var(--red-l); } .status-chip.tone-ok { background: var(--green-l); }
+tr.clickable { cursor: pointer; }
+tr.changed td:first-child { box-shadow: inset 3px 0 0 var(--blue); }
+tr.ev-row > td { background: var(--soft); padding: 12px; }
+tbody tr.ev-row:hover td { background: var(--soft); }
+.caret { color: var(--muted); display: inline-block; width: 12px; }
+b.diffv { color: #8a6400; }
+.plus { color: #8a6400; } .minus { color: #245b92; }
+.evidence { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.evidence section { background: var(--card); border: var(--bw) solid var(--line); border-radius: 14px; padding: 10px 12px; min-width: 0; }
+.evidence h3 { margin: 0 0 8px; }
+@media (max-width: 860px) { .evidence { grid-template-columns: minmax(0, 1fr); } }
+.calc { display: grid; gap: 0; }
+.calc-row { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.6fr) auto; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--line); align-items: start; }
+.calc-row > :last-child { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.calc-row.pending { background: var(--red-l); border-radius: 8px; padding: 6px; }
+.calc-row.total { border-bottom: none; border-top: var(--bw) solid var(--line); font-weight: 700; }
+.calc-row.total.diff { background: var(--yellow-l); border-radius: 8px; padding: 6px; }
+.slack-log { display: grid; gap: 6px; max-height: 360px; overflow-y: auto; }
+.sbubble { background: #fff; border: var(--bw) solid var(--line); border-radius: 14px; border-bottom-left-radius: 4px; padding: 7px 10px; max-width: 95%; }
+.sbubble.bot { justify-self: end; background: var(--green-l); border-bottom-left-radius: 14px; border-bottom-right-radius: 4px; }
+.sbubble.hl { border-color: var(--green); }
+.sbubble .who { font-size: 12px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.sbubble .txt { white-space: pre-wrap; font-size: 14px; }
+.sbubble .trace, .agent-tl .step { font-size: 11px; color: var(--muted); }
+.notify { display: grid; gap: 6px; margin: 6px 0; }
+.preview-box { border: var(--bw) solid #d9b52c; background: var(--yellow-l); border-radius: 14px; padding: 10px 12px; display: grid; gap: 8px; }
+.preview-box .pv-item { background: var(--card); border-radius: 10px; padding: 6px 10px; }
+.sent-list .sent { border-top: 1px dashed var(--line); padding: 6px 0; }
+table.people td.slack1 { max-width: 260px; }
+/* ---------- 대시보드: 최종 현황·정산 Agent 카드·활동 기록 ---------- */
+.final-card { border-color: #cfe3c6; }
+.flow { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.fstep { background: var(--grey-l); border-radius: 10px; padding: 4px 9px; }
+.fstep.ok { background: var(--green-l); } .fstep.warn { background: var(--yellow-l); }
+.meter { height: 8px; border-radius: 99px; background: var(--grey-l); overflow: hidden; margin-top: 8px; }
+.meter span { display: block; height: 100%; background: var(--green); }
+.agent-tl { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.agent-tl li { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 10px; padding: 8px 0; border-bottom: 1px dashed var(--line); }
+.agent-tl li:last-child { border-bottom: none; }
+.agent-tl .when { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
+.agent-tl .chain { display: grid; gap: 2px; margin-top: 3px; }
+.agent-tl .step { display: block; color: var(--ink); font-size: 13px; }
+.ph { display: inline-block; min-width: 34px; text-align: center; font-size: 11px; font-weight: 800; border-radius: 6px; padding: 0 4px; background: var(--grey-l); color: #44513f; }
+.ph-감지 { background: var(--blue-l); color: #245b92; } .ph-판단 { background: var(--yellow-l); color: #8a6400; }
+.ph-실행 { background: var(--green-l); color: var(--green-d); } .ph-넘김 { background: var(--wood); color: #fff; }
+.bubble .trace.tools code { font-size: 11px; }
+@media (max-width: 520px) { .agent-tl li { grid-template-columns: minmax(0, 1fr); gap: 2px; } .calc-row { grid-template-columns: minmax(0, 1fr) auto; } .calc-row > :nth-child(2) { grid-column: 1 / -1; grid-row: 2; } }
+.todo li > button { flex: none; }

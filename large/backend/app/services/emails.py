@@ -150,6 +150,39 @@ def enqueue_settlement_notices(db: Session, event: Event, kind: str, team_ids: l
     return {"created": created, "teams": teams, "teams_without_manager": no_manager, "teams_blocked": blocked}
 
 
+def preview_settlement_notices(db: Session, event: Event, kind: str) -> dict:
+    """보내기 전 미리보기: enqueue_settlement_notices 와 같은 대상·같은 금액으로, 실제로 보낼 문구까지 만든다(저장·발송 안 함).
+    같은 금액으로 이미 보낸 부서는 already_sent=True(보내기를 눌러도 다시 가지 않음)."""
+    from .settlement import compute_team
+
+    assert kind in ("refund_notice", "extra_notice")
+    targets, skipped, no_manager = [], [], []
+    for team in db.scalars(select(Team).where(Team.event_id == event.id).order_by(Team.code)):
+        calc = compute_team(db, event, team)
+        if (kind == "refund_notice" and calc["balance"] >= 0) or (kind == "extra_notice" and calc["balance"] <= 0):
+            continue
+        if calc["blockers"]:
+            skipped.append({"team": team.name, "amount": abs(calc["balance"]), "blockers": calc["blockers"]})
+            continue
+        mgr = active_manager(db, team.id)
+        if mgr is None:
+            no_manager.append(team.name)
+            continue
+        p = db.get(Participant, mgr.participant_id)
+        job = EmailJob(event_id=event.id, kind=kind, participant_id=p.id, team_id=team.id, to_email=p.slack_id)  # 세션에 넣지 않는 임시 작업(문구 렌더링용)
+        subject, body = _render(db, job)
+        members = [
+            {"name": l["name"], "change": f"{LABELS.get(c['from'], '미응답')} → {LABELS.get(c['to'], c['to'])}", "amount": (-c["refund_amount"] if c["refund_amount"] else c["extra_charge"])}
+            for l in calc["lines"] for c in l["changes"] if c["status"] == "applied" and (c["refund_amount"] or c["extra_charge"])
+        ]
+        sent = db.scalar(select(EmailJob).where(EmailJob.dedupe_key == f"{kind}:{team.id}:{calc['balance']}"))
+        targets.append({
+            "team_id": team.id, "team": team.name, "manager": p.name, "slack_id_masked": p.slack_id[:3] + "…" if p.slack_id else "", "amount": abs(calc["balance"]),
+            "members": members, "subject": subject, "body": body, "already_sent": sent is not None and sent.status == "sent", "job_status": sent.status if sent else None,
+        })
+    return {"kind": kind, "targets": targets, "skipped_check": skipped, "no_manager": no_manager, "notify_mode": settings.email_mode}
+
+
 def send_manager_code(db: Session, participant: Participant, code_id: int, code: str) -> EmailJob:
     job, _ = _enqueue(db, dedupe_key=f"manager_code:{code_id}", event_id=participant.event_id, kind="manager_code", participant_id=participant.id, team_id=participant.team_id, to_email=participant.slack_id)
     _dispatch_one(db, job, clock.now(), code=code)

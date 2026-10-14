@@ -145,8 +145,10 @@ def submit_change(
     evidence_message_id: int | None = None,
     note: str = "",
     now: datetime | None = None,
+    task_evidence: dict | None = None,
 ) -> ChangeLog:
-    """명시적 제출로만 호출. 마감 전이면 즉시 반영, 마감 후면 총무 승인 대기 + 확인 과제 생성."""
+    """명시적 제출로만 호출. 마감 전이면 즉시 반영, 마감 후면 총무 승인 대기 + 확인 과제 생성.
+    task_evidence: 승인 과제에 함께 남길 근거(예: 정산 Agent 가 읽은 슬랙 메시지)."""
     now = now or clock.now()
     pv = preview_change(db, event, participant, to_choice, now)
     change = ChangeLog(
@@ -192,8 +194,8 @@ def submit_change(
             question=f"{participant.name}님 마감 후 변경 요청: {pv['from_label']} → {pv['to_label']} ({amount_txt}, 규칙: {change.rule_text}). 승인할까요?",
             options=[{"key": "approve", "label": "승인"}, {"key": "reject", "label": "반려"}],
             rule=change.rule_text,
-            evidence={"preview": pv, "evidence_message_id": evidence_message_id},
-            created_by="communication_agent" if source == "chat" else "system",
+            evidence={"preview": pv, "evidence_message_id": evidence_message_id, **(task_evidence or {})},
+            created_by={"chat": "communication_agent", "slack": "settlement_agent"}.get(source, "system"),
         )
     audit(db, event.id, actor, "change_submitted", f"change:{change.id}", {"status": change.status, "to": to_choice})
     return change

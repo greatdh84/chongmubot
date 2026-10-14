@@ -54,7 +54,7 @@ def test_make_empty_event_creates_one_event_and_refuses_second(db):
         ev = s.scalars(select(Event)).one()
         assert ev.attend_deadline < ev.payment_deadline < ev.event_at
         assert s.scalar(select(func.count()).select_from(Participant)) == 0
-        assert s.scalar(select(func.count()).select_from(RefundRule)) == 4
+        assert s.scalar(select(func.count()).select_from(RefundRule)) == 3
         assert s.get(DbMeta, "purpose").value == "demo-live"
     with pytest.raises(SystemExit, match="이미 행사가"):
         _run_empty_event()

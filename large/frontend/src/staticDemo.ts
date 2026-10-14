@@ -109,7 +109,8 @@ export async function staticRequest<T>(method: string, path: string, body?: unkn
   }
   if (method !== "GET") throw new ApiError(409, "STATIC_DEMO", READ_ONLY);
   if (p === `${fx.event_base}/participants`) return participants(fx, path) as T;
-  const key = fixtureKey(path);
+  // 보고서 비교 기준(since)은 녹화하지 않았다 → 바로 앞 버전과 비교한 녹화본을 보여 준다
+  const key = fixtureKey(path.replace(/([?&])since=\d+&?/, "$1").replace(/[?&]$/, ""));
   if (!(key in fx.get)) throw new ApiError(404, "NOT_RECORDED", "정적 데모에 녹화되지 않은 화면이에요. 공용 서버에서 열어 주세요.");
   const out = structuredClone(fx.get[key]);
   if (BOT && key === "/api/large/admin/events") (out as { bot?: unknown }[]).forEach((e) => (e.bot = BOT));

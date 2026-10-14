@@ -63,17 +63,18 @@
 | 담당자 | POST `/teams/{team_id}/manager` `{participant_id}` (그 팀원만, 기존 담당자 해제) |
 | 초대 | POST `/participants/{id}/invite/reissue` (기존 전부 폐기 + 새 초대 DM) · `/invite/revoke` |
 | 응답 | POST `/participants/{id}/response` `{choice, note}` (총무 직접 입력·당일 변동. 마감 후면 규칙으로 금액이 정해지는 건 즉시 승인, 규칙이 없는 건(예: 당일 불참)은 승인 대기) · POST `/snapshot` |
-| 변경 | GET `/changes?status=` · POST `/changes/{id}/approve|reject` `{note, refund_amount?}` — 환불 규칙이 없는 건은 `refund_amount`+`note` 없이는 승인 불가 |
+| 변경 | GET `/changes?status=` (+ `evidence[]` 슬랙 근거, `suggested_refund`/`suggested_note` 총무 슬랙 결정) · POST `/changes/{id}/approve|reject` `{note, refund_amount?}` — 환불 규칙이 없는 건은 `refund_amount`+`note` 없이는 승인 불가 |
 | 입금 | POST `/transactions` (CSV: 거래일시,입금자명,금액,메모) · GET `/transactions` · POST `/transactions/{id}/allocations` `{team_id, participant_id?, amount, basis, confirm}` · POST `/allocations/{id}/confirm|cancel` · POST `/allocations/confirm-high` |
-| Agent | POST `/agent/settlement-review` · GET `/agent-runs?agent=` |
-| 과제 | GET `/tasks?status=active|…&assignee=` · POST `/tasks/{id}/resolve` `{resolution}` |
+| Agent | POST `/agent/settlement-review` · GET `/agent-runs?agent=` · GET `/agent/timeline`(감지→판단→실행→넘김, 원래 시각) · GET `/agent/settlement-card`(자동 처리율·사람 확인 사유) |
+| 과제 | GET `/tasks?status=active|…&assignee=` · POST `/tasks/{id}/resolve` `{resolution}` · POST `/tasks/{id}/accept-suggestion`(슬랙 근거의 배정 후보를 총무가 지정 → 확정 배정 + 그 거래 과제 닫기) |
 | 정산 | GET `/settlements/{team_id}` · POST `/settlements/compute` · POST `/settlements/{team_id}/confirm` · POST `/settlements/{team_id}/payouts` `{amount, memo}` |
-| 정산 보고서 | GET `/report`(최신 + `versions[]`, `event`) · POST `/report/refresh` · GET `/report.csv` (§14) |
+| 정산 보고서 | GET `/report?since=N`(최신 + `versions[]`, `event`, `diff_base`; since 면 vN 대비 diff) · GET `/report/teams/{team_id}/evidence`(근거 패널) · POST `/report/refresh` · GET `/report.csv` (§14) |
+| 근거 메시지 | GET `/evidence/messages?team_id&participant_id` — 슬랙(`demo_slack`) + 보낸 DM(`dm_job`) 시간순 (§16) |
 | 총무 Agent | GET/POST `/agent/chat` `{text}` → `{thread, reply}` (§15) |
-| 알림(Slack DM) | POST `/emails/enqueue` `{kind: invite|attend_reminder|payment_reminder|refund_notice|extra_notice}` · POST `/emails/dispatch` · GET `/emails` |
+| 알림(Slack DM) | POST `/emails/enqueue` `{kind: invite|attend_reminder|payment_reminder|refund_notice|extra_notice}` · POST `/emails/preview` `{kind: refund_notice|extra_notice}`(보내지 않고 대상·금액·팀원·문구, `already_sent`) · POST `/emails/dispatch` · GET `/emails` · GET `/emails/sent?kind=`(본문 포함) |
 | 감사 | GET `/audit` |
 
-시연 전용(`APP_MODE=demo` 일 때만 등록): GET `/api/large/dev/inbox?to=`, GET `/api/large/dev/people`, POST `/api/large/dev/switch {role, participant_id?}`.
+시연 전용(`APP_MODE=demo` 일 때만 등록): GET `/api/large/dev/inbox?to=`, GET `/api/large/dev/people`, POST `/api/large/dev/switch {role, participant_id?}`. 총무 경로 POST `/demo/responses` · `/demo/changes` · `/demo/slack`(운영 모드 404).
 
 ## 6. 채팅 상태 계약
 `ChatThread(participant_id, role)` 당 하나. 서버에 저장되어 나중에 이어집니다.
@@ -140,7 +141,7 @@
 | `audit_logs` | actor, action, target, detail | |
 
 ## 8. 확인 과제 종류
-`change_approval`(총무) · `unknown_depositor` · `ambiguous_depositor` · `unclear_deposit` · `possible_duplicate` · `unresolved_response`(담당자, 정산 차단 안 함) · `correction_request` · `deposit_unresolved` · `overpayment_unexplained` · `multiple_team_reference`(총무 이관).
+`change_approval`(총무) · `unknown_depositor` · `ambiguous_depositor` · `unclear_deposit` · `possible_duplicate` · `unresolved_response`(담당자, 정산 차단 안 함) · `correction_request` · `deposit_unresolved` · `overpayment_unexplained` · `multiple_team_reference`(총무 이관). 입금자 확인 과제의 `evidence.slack_suggestion{team_id, team, message_id, sender, sent_at, text, why}` = 정산 Agent R7(슬랙 입금 단서, 배정은 총무 지정).
 상태: `open → answered → resolved` 또는 `escalated → resolved(총무)`.
 
 ## 9. 알림 작업 (Slack DM, `NOTIFY_MODE=mock|slack`)
@@ -182,11 +183,20 @@
 - 변동 기록(추가만): `change_logs`(마감 후·당일 변동), `bank_transactions`+`allocations`, `payouts`.
 - 보고서 `settlement_reports`: 기준표+변동 기록을 정산 Agent 가 다시 계산. 돈·인원에 영향을 주는 POST(변경 승인·반려, 거래 업로드, 배정 확정·취소, 과제 처리, 담당자 답변, 정산 확정, 송금 기록, 명단 업로드, 총무 직접 입력, 총무 Agent 질문) 뒤에 `refresh(trigger)` → `content_hash` 가 같으면 버전 유지, 다르면 `version+1` + `diff{teams[], people_added[], people_removed[]}` + `agent_runs(agent='settlement', trigger='report:…')`.
 - 부서 행: `billed, final_fee, received, received_proposed, paid_by_deadline, late_paid, refunds_paid, payment_gap(=billed−received), change_delta(=final−billed), balance, status(extra|refund|check|done), blockers[]`. `balance = payment_gap + change_delta + refunds_paid`.
-- 사람 행: 청구 때 회비와 최종 회비가 다르거나 미확정인 사람만. `kind ∈ extra|refund|pending|unresolved|rule_missing|changed`, `amount`, `on_event_day`, `changes[]`(from/to·source·requested_at·rule·note).
+- 사람 행: 참석 마감 이후 모든 변동. `kind ∈ extra|refund|pending|unresolved|rule_missing|changed|included`(included = 납부 마감 전에 승인돼 청구에 이미 포함), `amount`, `on_event_day`(행사 날짜 KST 0시 이후), `basis_kind(rule|admin|pending)`·`basis`, `slack{at,sender,text}`(가장 최근 관련 메시지), `process`(팀 납부 완료(날짜)/추가 납부 대기/환불 대기/승인 대기/…), `changes[]`(from/to·source·requested_at·decided_at·rule·note).
+- summary 추가: `deadline_counts`(참석 마감 기준 인원), `billed_final_delta`(최종−청구).
 - `stage`: `collecting`(참석 마감 전) → `attend_closed` → `payment_closed` → `event_done`(행사 시작 후).
 
 ## 15. 총무 Agent
 - 매 질문마다 보고서를 `refresh` 한 뒤 그 버전으로 답합니다. 숫자는 보고서에서만(코드 계산).
-- 조회 도구: `get_report_summary{}` · `get_department{team}` · `list_people{kind?, team?, on_event_day?}` · `list_teams{status?}` · `find_person{name}` · `what_changed{}`. `team` 은 부서 이름·일부·팀코드.
+- 조회 도구: `get_report_summary{}` · `get_department{team}` · `list_people{kind?, team?, on_event_day?}` · `list_teams{status?}` · `find_person{name}` · `what_changed{}` · `get_evidence{team?|person?}`(청구→최종 변동 줄·규칙/총무 결정·요청/승인 일시·슬랙 메시지, 입금, 확인 필요). `team` 은 부서 이름·일부·팀코드·'담당자 이름 + 팀'.
+- 답변 메시지의 `tools[]` 는 이번 턴에 부른 도구 순서(화면: `get_department → get_evidence`).
 - 갱신 도구: `notify_managers{kind: refund|extra, team?}` — dry run 으로 대상·금액을 보여 주고 `awaiting_confirmation`. '네/아니요'는 코드가 판정. 실행 시 `refund_notice/extra_notice` 작업 생성 + 발송. 담당자에게만.
 - LLM: `LLM_MODE=mock`(규칙 기반 해석) | `claude`(루트 `.env` 의 `LLM_API_KEY`) | `gemini`. 실패하면 규칙 기반 대체, `decisions[].by` 에 기록.
+
+## 16. 슬랙 대화 근거(`evidence_messages`, 시연용)
+- POST `/demo/slack` (CSV 열: **일시, 보낸 사람, 받는 사람, 부서, 관련 ID(비어도 됨), 내용**). 부서·ID 가 명단에 없거나 ID 가 그 부서 소속이 아니면 줄 번호와 함께 전체 반려(422 `CSV_ROWS`). 넣을 때마다 그 행사의 `demo_slack` 행과 거기서 나온 미승인 제안을 지우고 다시 넣는다(멱등).
+- 정산 Agent 해석(`analysis`): `kind ∈ change|admin_refund|deposit_hint|payment_promise|bot_dm|admin_note|note`, `to`, `confidence(high|medium|low)`, `by(rule|claude:모델|gemini:모델|mock_fallback)`, `outcome ∈ linked|proposed|no_change|conflict|suggest_refund|before_deadline|rejected|deposit_hint|recorded`, `change_id`.
+- `LLM_MODE=claude|gemini` 면 LLM 이 JSON(`items[{message_id, kind, employee_no, from, to, at, amount, depositor, channel, confidence}]`)으로 추출 → 코드가 명단·관련 ID·현재 응답과 대조해 통과한 것만 사용. 실패하면 규칙 추출(`mock_fallback`).
+- 변경: 이미 같은 변경 기록이 있으면 연결(`linked`), 없으면 `submit_change(source='slack', 요청 시각=메시지 시각)` → **승인 대기 제안**(자동 확정 없음). 금액은 요청 시각의 환불 규칙으로 코드가 계산.
+- 응답·변경 CSV 를 다시 넣으면 메시지를 새 기록에 다시 잇는다. 보낸 DM(`email_jobs` sent)은 저장하지 않고 조회 때 `source='dm_job'` 으로 합친다.

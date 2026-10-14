@@ -409,6 +409,13 @@ h1,h2,h3,.brand,.card-h h3,.sec-h h3,.headline b{font-family:Jua,Pretendard,sans
 .lg-dept .members{grid-template-columns:repeat(auto-fill,minmax(96px,1fr))}
 .lg-dept .mem{padding:4px 6px;font-size:12px}
 .lg-dept .mem .av{width:22px;height:22px;font-size:11px}
+/* 부서 카드: 제목 = 부서명, 담당자 줄·칩 이름은 칩 글자 크기(12px)와 같게. 담당자 칩은 맨 앞·볼드(색·크기는 같음) */
+.lg-dept .lg-dname{font-size:20px;font-weight:800;color:var(--ink)}
+.lg-dept .lg-mgr{font-size:12px;color:var(--ink);margin-top:6px}
+.lg-dept .lg-mgr b{display:inline;font-size:12px;font-weight:800}
+.lg-dept .lg-mgr .lg-nomgr{color:var(--red)}
+.lg-dept .mem .lg-mname{font-size:12px;color:var(--ink)}
+.lg-dept .mem.lg-me .lg-mname{font-weight:800}
 .lg-demo{margin-top:14px;padding:10px 12px;border:2px dashed var(--line);border-radius:12px;background:var(--soft)}
 .lg-demo summary{cursor:pointer}
 .lg-rule{display:grid;grid-template-columns:120px minmax(0,1fr) 80px minmax(0,1.2fr) auto;gap:6px;align-items:center;margin-top:10px}
@@ -1177,7 +1184,7 @@ const LARGE = {
   // 서버에서 읽은 값(저장 안 함): meta, 행사(ev), 환불 규칙, 부서, 펼친 부서의 명단
   meta:null, ev:null, rules:[], teams:[], people:[], loading:false, loaded:false, needLogin:false, busy:false, error:'',
   defaults(){
-    return {eventId:null, open:null, result:null, rowErrors:[], demo:null, demoErrors:[], form:{}, rule:{change_type:'attend_to_absent', valid_until:'', refund_percent:'50', description:''}};
+    return {eventId:null, open:null, result:null, rowErrors:[], demo:null, slack:null, demoErrors:[], form:{}, rule:{change_type:'attend_to_absent', valid_until:'', refund_percent:'50', description:''}};
   },
   st(){ // 예전 저장 상태에도 필요한 칸이 있게
     const d = LARGE.defaults(), L = S.large = S.large || d;
@@ -1237,7 +1244,7 @@ const LARGE = {
   sampleRules(){
     const A = LARGE.SAMPLE_AT;
     return [['attend_to_absent', A.payment, 100, '입금 마감 전 불참 전환: 전액 환불'], ['attend_to_absent', A.minus3, 50, '입금 마감 후 ~ 행사 3일 전 불참: 50% 환불'],
-      ['bus_to_car', A.payment, 100, '입금 마감 전 버스→자차: 차액 전액 환불'], ['bus_to_car', null, 0, '입금 마감 후 버스→자차: 버스 좌석 확정으로 환불 없음']]
+      ['bus_to_car', null, 100, '버스→자차: 차액 5,000원 환불(당일 포함)']]
       .map(([change_type, valid_until, refund_percent, description], i) => ({id:-i - 1, change_type, valid_until, refund_percent, description}));
   },
 
@@ -1298,14 +1305,17 @@ const LARGE = {
   av(name, color, big){ const n = String(name || '?'); return `<span class="av" style="background:${color};color:#fff;${big ? 'width:40px;height:40px;font-size:18px;border-radius:12px' : 'font-size:11px'}">${esc(isKorName(n) ? n[1] : n[0].toUpperCase())}</span>`; },
   CHIPS:8,
   deptCard(t, open){
-    const c = LARGE.color(t), ps = LARGE.people.filter(p => p.team.id === t.id), shown = open ? ps : ps.slice(0, LARGE.CHIPS), more = ps.length - shown.length;
-    const mgr = t.manager ? t.manager.name : null;
+    // 제목 = 부서명(크게), 그 아래 '9명 · T01'. 담당자는 멤버 칩 바로 위 한 줄 '담당자 **이름**'(칩 이름과 같은 크기), 칩 목록에서도 맨 앞·볼드
+    const c = LARGE.color(t), mgrId = t.manager ? t.manager.participant_id : null, mgr = t.manager ? t.manager.name : null;
+    const ps = LARGE.people.filter(p => p.team.id === t.id).sort((a, b) => (b.id === mgrId) - (a.id === mgrId));
+    const shown = open ? ps : ps.slice(0, LARGE.CHIPS), more = ps.length - shown.length;
     return `
           <div class="opt lg-dept" style="border-top:4px solid ${c}">
-            <div class="row">${LARGE.av(mgr || t.name, c, true)}
-              <div style="min-width:0"><b style="font-size:20px;font-weight:800">${mgr ? esc(mgr) : '담당자 미지정'}</b>
-                <span>${esc(t.name)} · ${t.headcount}명 · ${esc(t.code)}${mgr ? ' · 담당자' : ''}</span></div></div>
-            <div class="members" style="margin-top:8px">${shown.map(p => `<span class="mem">${LARGE.av(p.name, c)}<span style="color:var(--ink)">${esc(p.name)}</span></span>`).join('')}</div>
+            <div class="row"><span class="av" style="background:${c};color:#fff;width:40px;height:40px;font-size:18px;border-radius:12px">${esc(t.name[0] || '?')}</span>
+              <div style="min-width:0"><b class="lg-dname">${esc(t.name)}</b>
+                <span>${t.headcount}명 · ${esc(t.code)}</span></div></div>
+            <div class="lg-mgr">담당자 ${mgr ? `<b>${esc(mgr)}</b>` : '<b class="lg-nomgr">미지정</b>'}</div>
+            <div class="members">${shown.map(p => `<span class="mem${p.id === mgrId ? ' lg-me' : ''}">${LARGE.av(p.name, c)}<span class="lg-mname">${esc(p.name)}</span></span>`).join('')}</div>
             ${more > 0 ? `<button class="btn sm ghost" data-act="large:openTeam" data-id="${t.id}">+${more}명 더보기</button>`
               : open && ps.length > LARGE.CHIPS ? `<button class="btn sm ghost" data-act="large:openTeam" data-id="${t.id}">접기</button>` : ''}
           </div>`;
@@ -1316,12 +1326,14 @@ const LARGE = {
     return `
         <details class="lg-demo" ${d || L.demoErrors.length ? 'open' : ''}>
           <summary><b>시연용 데이터</b> <span class="small muted">참석 응답·마감 후 변경 CSV (시연 모드에서만)</span></summary>
-          <p class="small muted lg-note">응답 CSV(ID, 이름, 소속 부서, 응답, 응답일시) → 참석 마감 기준 응답 저장 → 변경 CSV(ID … 변경 전, 변경 후, 요청일시, 경로, 처리, 처리일시 …)를 시각 순서대로 다시 만듭니다. 넣을 때마다 응답·변경 기록을 지우고 처음부터 다시 만들어 같은 파일은 같은 결과입니다.</p>
+          <p class="small muted lg-note">① 응답 CSV(ID, 이름, 소속 부서, 응답, 응답일시) → 참석 마감 기준 응답 저장 → ② 변경 CSV(ID … 변경 전, 변경 후, 요청일시, 경로, 처리, 처리일시 …)를 시각 순서대로 → ③ 슬랙 대화 CSV(일시, 보낸 사람, 받는 사람, 부서, 관련 ID, 내용)를 정산 Agent 가 읽어 변경 제안·입금자 근거로. 넣을 때마다 지우고 다시 만들어 같은 파일은 같은 결과입니다.</p>
           <div class="row wrap">
             <button class="btn" data-act="large:pickDemo" data-kind="responses" ${LARGE.busy ? 'disabled' : ''}>📄 응답 CSV 올리기</button>
             <button class="btn" data-act="large:pickDemo" data-kind="changes" ${LARGE.busy || !d ? 'disabled' : ''}>📄 변경 CSV 올리기</button>
+            <button class="btn" data-act="large:pickDemo" data-kind="slack" ${LARGE.busy || !d ? 'disabled' : ''}>💬 슬랙 대화 CSV 올리기</button>
             <input type="file" id="lgDemoFile" accept=".csv,text/csv" hidden>
           </div>
+          ${L.slack ? `<div class="lg-result">🤖 ${esc(L.slack.summary || '')}${L.slack.fallback ? ` <span class="small">(LLM 실패 → 규칙: ${esc(L.slack.fallback)})</span>` : ''}</div>` : ''}
           ${c ? `<div class="lg-result">${esc(d.basis)}: 버스 ${c.bus} · 자차 ${c.car} · 불참 ${c.absent} · 미정 ${c.undecided} · 미응답 ${c.none} <span class="small">· 현재 참석 ${d.attending_now}명</span>
             <br>변경 승인 ${d.changes.applied} · 대기 ${d.changes.pending}${d.changes.rejected ? ` · 반려 ${d.changes.rejected}` : ''}</div>` : ''}
           ${L.demoErrors.length ? `<div class="err lg-note"><b>반영하지 않은 이유 (전체 반려)</b><ul class="lg-errs">${L.demoErrors.map(x => `<li>${esc(x.line)}행: ${esc(x.error)}</li>`).join('')}</ul></div>` : ''}
@@ -1474,9 +1486,15 @@ const LARGE = {
     LARGE.busy = true; L.demoErrors = []; render();
     const fd = new FormData(); fd.append('file', file);
     try {
-      L.demo = await LARGE.api('POST', `${LARGE.base()}/demo/${kind === 'changes' ? 'changes' : 'responses'}`, fd);
+      if (kind === 'slack'){
+        L.slack = await LARGE.api('POST', `${LARGE.base()}/demo/slack`, fd);
+        toast(`슬랙 ${L.slack.counts.messages}건을 정산 Agent 가 읽었어요`);
+      } else {
+        L.demo = await LARGE.api('POST', `${LARGE.base()}/demo/${kind === 'changes' ? 'changes' : 'responses'}`, fd);
+        if (kind === 'responses') L.slack = null;
+        toast(kind === 'changes' ? `변경 ${L.demo.changes.applied + L.demo.changes.pending}건을 시각 순서대로 넣었어요` : `응답을 넣고 참석 마감 기준 응답을 저장했어요`);
+      }
       await LARGE.reload();
-      toast(kind === 'changes' ? `변경 ${L.demo.changes.applied + L.demo.changes.pending}건을 시각 순서대로 넣었어요` : `응답을 넣고 참석 마감 기준 응답을 저장했어요`);
     } catch (e){
       if (Array.isArray(e.detail)) L.demoErrors = e.detail.filter(x => x && x.line !== undefined);
       toast(e.message);
@@ -1489,7 +1507,7 @@ const LARGE = {
     const fd = new FormData(); fd.append('file', file);
     try {
       L.result = await LARGE.api('POST', `${LARGE.base()}/roster`, fd);
-      L.open = null; L.demo = null; L.demoErrors = []; await LARGE.reload(); UI.pvTab = 'sheet';
+      L.open = null; L.demo = null; L.slack = null; L.demoErrors = []; await LARGE.reload(); UI.pvTab = 'sheet';
       toast(`명단 ${L.result.rows}명 → ${L.result.teams}개 부서로 묶었어요`);
     } catch (e){
       if (Array.isArray(e.detail)) L.rowErrors = e.detail.filter(x => x && x.line !== undefined);

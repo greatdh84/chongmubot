@@ -18,7 +18,7 @@ from ..models import (
     Participant, RefundRule, Response, Settlement, Team, TeamManager,
 )
 from ..schemas import AdminResponseSet, AllocationIn, BotSettings, ChatSend as ChatIn, Decision, EmailEnqueue, EventUpdate, ManagerAssign, PayoutIn, RefundRuleIn, SchedulerToggle, TaskResolve
-from ..services import demo_import, emails, invites, payments, report as rpt, responses as resp_svc, roster, settlement as stl
+from ..services import demo_import, emails, evidence as evid, invites, payments, report as rpt, responses as resp_svc, roster, settlement as stl, slack as slack_svc
 from ..services.common import active_manager, audit, get_participant_in_event, get_team_in_event
 from .util import change_out, event_out, task_out
 
@@ -177,6 +177,16 @@ async def demo_changes(file: UploadFile = File(...), ev: Event = Depends(admin_e
     return out
 
 
+@router.post("/events/{event_id}/demo/slack")
+async def demo_slack(file: UploadFile = File(...), ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
+    """시연용 슬랙 대화 CSV → 근거 메시지. 정산 Agent 가 읽어 변경 제안·입금자 근거를 만든다(확정은 총무)."""
+    if not settings.is_demo:
+        raise not_found("API")
+    out = slack_svc.import_csv(db, ev, _actor(admin), await _read_upload(file))
+    db.commit()
+    return out
+
+
 @router.get("/events/{event_id}/teams")
 def list_teams(ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
     out = []
@@ -301,7 +311,19 @@ def list_changes(status: str | None = None, ev: Event = Depends(admin_event), db
     q = select(ChangeLog, Participant.name).join(Participant, Participant.id == ChangeLog.participant_id).where(ChangeLog.event_id == ev.id)
     if status:
         q = q.where(ChangeLog.status == status)
-    return [change_out(c, name) for c, name in db.execute(q.order_by(ChangeLog.id.desc()).limit(300))]
+    rows = list(db.execute(q.order_by(ChangeLog.id.desc()).limit(300)))
+    msgs = slack_svc.messages_by_change(db, [c.id for c, _ in rows])
+    out = []
+    for c, name in rows:
+        o = change_out(c, name)
+        ms = msgs.get(c.id, [])
+        o["evidence"] = [slack_svc.message_out(m) for m in ms]
+        sug = next(((m.analysis or {}).get("suggested_refund") for m in ms if (m.analysis or {}).get("outcome") == "suggest_refund"), None)
+        if sug is not None:
+            m = next(m for m in ms if (m.analysis or {}).get("outcome") == "suggest_refund")
+            o["suggested_refund"], o["suggested_note"] = sug, f"총무 슬랙 결정({clock.kst(m.sent_at):%m/%d %H:%M}): {m.text[:80]}"
+        out.append(o)
+    return out
 
 
 def _get_change(db: Session, ev: Event, change_id: int) -> ChangeLog:
@@ -444,6 +466,39 @@ def resolve_task(task_id: int, body: TaskResolve, ev: Event = Depends(admin_even
     return task_out(t)
 
 
+@router.post("/events/{event_id}/tasks/{task_id}/accept-suggestion")
+def accept_suggestion(task_id: int, ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
+    """입금자 확인 과제: 정산 Agent 가 붙인 슬랙 근거의 배정 후보를 총무가 보고 지정 → 확정 배정 + 그 거래의 과제 닫기."""
+    t = db.get(ConfirmTask, task_id)
+    if t is None or t.event_id != ev.id:
+        raise not_found("확인 과제")
+    a = settlement_agent.accept_slack_suggestion(db, ev, t, admin.id)
+    audit(db, ev.id, _actor(admin), "slack_suggestion_accepted", f"task:{t.id}", {"allocation_id": a.id})
+    _refresh(db, ev, "slack_suggestion_accepted")
+    db.commit()
+    return {"allocation_id": a.id, "team_id": a.team_id, "amount": a.amount}
+
+
+@router.get("/events/{event_id}/agent/timeline")
+def agent_timeline(ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
+    return evid.timeline(db, ev)
+
+
+@router.get("/events/{event_id}/agent/settlement-card")
+def agent_settlement_card(ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
+    return evid.settlement_card(db, ev)
+
+
+@router.get("/events/{event_id}/evidence/messages")
+def evidence_messages(team_id: int | None = None, participant_id: int | None = None, ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
+    """근거 메시지: 슬랙 대화(demo_slack) + 실제로 보낸 DM(dm_job)을 시간순으로."""
+    if team_id is not None:
+        get_team_in_event(db, ev.id, team_id)
+    if participant_id is not None:
+        get_participant_in_event(db, ev.id, participant_id)
+    return evid.messages(db, ev, team_id=team_id, participant_id=participant_id)
+
+
 @router.get("/events/{event_id}/agent-runs")
 def list_runs(agent: str | None = None, ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
     q = select(AgentRun).where(AgentRun.event_id == ev.id)
@@ -491,14 +546,27 @@ def record_payout(team_id: int, body: PayoutIn, ev: Event = Depends(admin_event)
 # ---------------------------------------------------------------- 정산 보고서·총무 Agent
 
 @router.get("/events/{event_id}/report")
-def get_report(ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
-    """최신 정산 보고서. 빠진 기준표가 있거나 아직 보고서가 없으면 지금 만든다."""
+def get_report(since: int | None = None, ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
+    """최신 정산 보고서. 빠진 기준표가 있거나 아직 보고서가 없으면 지금 만든다.
+    since=N 이면 diff 를 바로 앞 버전 대신 vN 과 비교해 준다(예: 총무가 마지막으로 본 버전 이후 바뀐 부서)."""
     rep = rpt.latest(db, ev)
     if rep is None or rpt.ensure_checkpoints(db, ev):
         rep = rpt.refresh(db, ev, "report_view")
         db.commit()
     versions = [{"version": r.version, "trigger": r.trigger, "created_at": clock.fmt(r.created_at), "stage": r.stage} for r in db.scalars(select(rpt.SettlementReport).where(rpt.SettlementReport.event_id == ev.id).order_by(rpt.SettlementReport.version.desc()).limit(30))]
-    return rpt.report_out(rep) | {"versions": versions, "event": event_out(ev)}
+    out = rpt.report_out(rep) | {"versions": versions, "event": event_out(ev), "diff_base": rep.version - 1}
+    if since is not None and since < rep.version:
+        base = db.scalar(select(rpt.SettlementReport).where(rpt.SettlementReport.event_id == ev.id, rpt.SettlementReport.version == since))
+        if base is not None:
+            out["diff"] = rpt._diff(base, rep.teams, rep.people)
+            out["diff_base"] = since
+    return out
+
+
+@router.get("/events/{event_id}/report/teams/{team_id}/evidence")
+def report_team_evidence(team_id: int, ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
+    """부서 근거 패널: 청구 → 변동 → 최종, 입금 내역, 슬랙 대화, 확인 필요 사유."""
+    return evid.team_evidence(db, ev, get_team_in_event(db, ev.id, team_id))
 
 
 @router.post("/events/{event_id}/report/refresh")
@@ -545,6 +613,32 @@ def enqueue(body: EmailEnqueue, ev: Event = Depends(admin_event), admin: Admin =
     audit(db, ev.id, _actor(admin), "emails_enqueued", detail={"kind": body.kind, **result})
     db.commit()
     return result
+
+
+@router.post("/events/{event_id}/emails/preview")
+def preview_notices(body: EmailEnqueue, ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
+    """담당자 안내 미리보기(보내지 않음): 부서·담당자·금액·대상 팀원·실제 문구."""
+    if body.kind not in ("refund_notice", "extra_notice"):
+        raise invalid("INVALID_KIND", "미리보기는 환불 안내·추가 납부 안내만 됩니다")
+    return emails.preview_settlement_notices(db, ev, body.kind)
+
+
+@router.get("/events/{event_id}/emails/sent")
+def sent_notices(kind: str | None = None, ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
+    """보낸 메시지(모의 발송이면 개발용 수신함 본문까지)."""
+    from ..models import DevMail
+
+    q = select(EmailJob).where(EmailJob.event_id == ev.id, EmailJob.status == "sent")
+    if kind:
+        q = q.where(EmailJob.kind == kind)
+    jobs = list(db.scalars(q.order_by(EmailJob.sent_at.desc(), EmailJob.id.desc()).limit(100)))
+    bodies = {d.email_job_id: d.body for d in db.scalars(select(DevMail).where(DevMail.email_job_id.in_([j.id for j in jobs])))} if jobs else {}
+    names = {p.id: p.name for p in db.scalars(select(Participant).where(Participant.event_id == ev.id))}
+    teams = {t.id: t.name for t in db.scalars(select(Team).where(Team.event_id == ev.id))}
+    return [
+        {"id": j.id, "kind": j.kind, "team": teams.get(j.team_id), "to": names.get(j.participant_id), "subject": j.subject, "body": bodies.get(j.id), "sent_at": clock.fmt(j.sent_at), "mode": settings.email_mode}
+        for j in jobs
+    ]
 
 
 @router.post("/events/{event_id}/emails/dispatch")

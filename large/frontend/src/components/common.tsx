@@ -115,11 +115,11 @@ export function Chat({ base, title, examples, chips, subtitle, onReply, classNam
             {m.text}
             {m.sender === "agent" && <LlmBadge llm={m.llm} />}
             {(m.tools.length > 0 || m.rules.length > 0) && (
-              <div className="trace">
+              <div className="trace tools" aria-label="호출한 도구 순서">
+                {m.tools.length > 0 && <span>도구:</span>}
                 {m.tools.map((t, i) => (
-                  <span key={i}>
-                    {t.dry_run ? "코드 검증" : "코드 실행"}:{t.tool}
-                    {t.ok ? "" : "(거절)"}{" "}
+                  <span key={i} title={t.dry_run ? "코드가 미리 검증(실행 전 확인 질문)" : "코드가 실행"}>
+                    {i > 0 && "→ "}<code>{t.tool}</code>{t.dry_run ? "(검증)" : ""}{t.ok ? "" : "(거절)"}
                   </span>
                 ))}
                 {m.rules.length > 0 && <span>· 규칙: {m.rules.join(" / ")}</span>}
