@@ -70,7 +70,7 @@
 | 정산 | GET `/settlements/{team_id}` · POST `/settlements/compute` · POST `/settlements/{team_id}/confirm` · POST `/settlements/{team_id}/payouts` `{amount, memo}` |
 | 정산 보고서 | GET `/report?since=N`(최신 + `versions[]`, `event`, `diff_base`; since 면 vN 대비 diff) · GET `/report/teams/{team_id}/evidence`(근거 패널) · POST `/report/refresh` · GET `/report.csv` (§14) |
 | 근거 메시지 | GET `/evidence/messages?team_id&participant_id` — 슬랙(`demo_slack`) + 보낸 DM(`dm_job`) 시간순 (§16) |
-| 총무 Agent | GET/POST `/agent/chat` `{text}` → `{thread, reply}` (§15) |
+| 총무 Agent | GET/POST `/agent/chat` `{text}` → `{thread, reply}`(메시지마다 `card`) · GET `/agent/briefing`(먼저 하는 보고, 조회만) · POST `/agent/briefing/seen` (§15) |
 | 알림(Slack DM) | POST `/emails/enqueue` `{kind: invite|attend_reminder|payment_reminder|refund_notice|extra_notice}` · POST `/emails/preview` `{kind: refund_notice|extra_notice}`(보내지 않고 대상·금액·팀원·문구, `already_sent`) · POST `/emails/dispatch` · GET `/emails` · GET `/emails/sent?kind=`(본문 포함) |
 | 감사 | GET `/audit` |
 
@@ -191,6 +191,10 @@
 - 매 질문마다 보고서를 `refresh` 한 뒤 그 버전으로 답합니다. 숫자는 보고서에서만(코드 계산).
 - 조회 도구: `get_report_summary{}` · `get_department{team}` · `list_people{kind?, team?, on_event_day?}` · `list_teams{status?}` · `find_person{name}` · `what_changed{}` · `get_evidence{team?|person?}`(청구→최종 변동 줄·규칙/총무 결정·요청/승인 일시·슬랙 메시지, 입금, 확인 필요). `team` 은 부서 이름·일부·팀코드·'담당자 이름 + 팀'.
 - 답변 메시지의 `tools[]` 는 이번 턴에 부른 도구 순서(화면: `get_department → get_evidence`).
+- **보고 카드** `card`(agents/admin_cards.py): `{type: team|teams|people|person|summary|confirm|result|briefing, greeting, headline, status{key,label}, story[{at, who, text, quote}], money{billed, final, diff, if_approved?, received?, balance?, show_received, total?}, rows[], first?, todo[{label, action, target_id?, team?, kind?}], sources{slack, changes, receipts, team_id}, tools[]}`.
+  숫자는 코드 계산. mock 은 템플릿, claude/gemini 는 `reply.card{greeting, headline, story}` 문장만 받아 금액이 도구 결과에 없으면 버리고 템플릿(`llm_note`).
+  승인 대기·입금 대조 전이면 headline 에 그 사실, 거래내역 전에는 `received/balance` 를 넣지 않는다. `todo.action`: approve_change·accept_suggestion·confirm_allocation(화면에서 한 번 더 확인 후 실행) / open_changes·open_task·open_payments·open_roster·open_evidence(이동) / notify_preview(채팅 '네' 확인 흐름).
+- **행동 뒤 결과 보고**: 변경 승인·반려, 배정 확정·일괄 확정, 정산 Agent 점검, 슬랙 근거 지정 응답에 `agent_report`(같은 카드가 총무 채팅에도 남음) — "승인했어요. ○○팀 최종 회비가 …원이 됐고 보고서 vN 에 반영했어요. … 안내를 보낼까요?"
 - 갱신 도구: `notify_managers{kind: refund|extra, team?}` — dry run 으로 대상·금액을 보여 주고 `awaiting_confirmation`. '네/아니요'는 코드가 판정. 실행 시 `refund_notice/extra_notice` 작업 생성 + 발송. 담당자에게만.
 - LLM: `LLM_MODE=mock`(규칙 기반 해석) | `claude`(루트 `.env` 의 `LLM_API_KEY`) | `gemini`. 실패하면 규칙 기반 대체, `decisions[].by` 에 기록.
 
@@ -200,3 +204,9 @@
 - `LLM_MODE=claude|gemini` 면 LLM 이 JSON(`items[{message_id, kind, employee_no, from, to, at, amount, depositor, channel, confidence}]`)으로 추출 → 코드가 명단·관련 ID·현재 응답과 대조해 통과한 것만 사용. 실패하면 규칙 추출(`mock_fallback`).
 - 변경: 이미 같은 변경 기록이 있으면 연결(`linked`), 없으면 `submit_change(source='slack', 요청 시각=메시지 시각)` → **승인 대기 제안**(자동 확정 없음). 금액은 요청 시각의 환불 규칙으로 코드가 계산.
 - 응답·변경 CSV 를 다시 넣으면 메시지를 새 기록에 다시 잇는다. 보낸 DM(`email_jobs` sent)은 저장하지 않고 조회 때 `source='dm_job'` 으로 합친다.
+
+## 17. 슬랙 실시간 연동 `POST /api/large/slack/events`
+- 한 메시지 = `services.slack.ingest_slack_message(event, sender_slack_id|sender, channel, text, ts, …)` → 근거 저장 → 정산 Agent 해석 → 대조 → 연결/제안·입금자 근거 → Agent 실행 기록. 슬랙 대화 CSV 업로드(§16)는 이 함수를 행마다 원래 시각으로 부르는 **재생기**.
+- Slack Events API 형식: `url_verification` → `{challenge}`. `event_callback` 의 `message`(DM `message.im`·채널)만, `subtype`·`bot_id` 무시. 보낸 사람 Slack ID 로 대모임 명단 매칭(없으면 200 `ignored`). 같은 `event_id` 는 한 번만(`duplicate`). 메시지 속 같은 부서 팀원 'OO님'이 한 명이면 그 사람의 변경, 아니면 보낸 사람 본인.
+- 보안: **서명 검증 필수** — `X-Slack-Signature == "v0=" + HMAC_SHA256(SLACK_SIGNING_SECRET, "v0:{X-Slack-Request-Timestamp}:{body}")`, 5분 넘은 요청 거부. 비밀값이 없거나 틀리면 403. 쿠키를 쓰지 않으므로 이 경로만 `X-Requested-With` 검사에서 빠진다.
+- 설정 키(기본 꺼짐): `SLACK_EVENTS=on`, `SLACK_SIGNING_SECRET=…`(backend/.env 또는 루트 .env). Slack 앱 설정: Event Subscriptions → Request URL `https://<공개 주소>/api/large/slack/events`, Bot events `message.im`(필요하면 `message.channels`), 스코프 `im:history`(`channels:history`). 공용 서버(hub)·소모임 코드는 바꿀 필요 없음(`/api/large/*` 는 이미 대모임으로 연결).

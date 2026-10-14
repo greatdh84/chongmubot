@@ -207,7 +207,13 @@ def test_agent_explains_why_with_slack_and_time(db, client, demo):
     up(client, f"{base}/demo/slack", slack_csv())
     r = client.post(f"{base}/agent/chat", json={"text": "개발팀 왜 추가 납부야?"}).json()["reply"]
     assert [x["tool"] for x in r["tools"]] == ["get_evidence"]
-    assert "정마루님이 불참이었는데" in r["text"] and "당일" in r["text"] and "최라온 담당자 슬랙" in r["text"] and "+20,000원" in r["text"]
+    c = r["card"]
+    assert c["greeting"] == "총무님, 개발팀 정리해 드릴게요." and c["status"]["label"] == "추가 납부"
+    assert "입금 대조 전" in c["headline"]  # 거래내역 전: 잔액 줄은 숨기고 그 사실을 결론에
+    assert "received" not in c["money"] and (c["money"]["billed"], c["money"]["final"], c["money"]["diff"]) == (40000, 55000, 15000)
+    hong = next(x for x in c["story"] if x["text"].startswith("정마루님"))
+    assert hong["who"] == "담당자 최라온님 슬랙" and "버스 탔어요" in hong["quote"] and "+20,000원" in hong["text"]
+    assert c["sources"]["slack"] >= 2 and c["todo"][0]["action"] == "open_payments"
     r = client.post(f"{base}/agent/chat", json={"text": "최라온 팀 현황"}).json()["reply"]
     assert [x["tool"] for x in r["tools"]] == ["get_department", "get_evidence"]
 
@@ -247,19 +253,21 @@ def test_llm_extraction_is_validated_before_use(db, client, demo, monkeypatch):
     monkeypatch.setattr(settings, "llm_mode", "claude")
     seen = {}
 
-    def fake(system, payload):
-        seen["payload"] = payload
-        mid = lambda word: next(m["message_id"] for m in payload["messages"] if word in m["text"])  # noqa: E731
-        return {"items": [
-            {"message_id": mid("정마루님"), "kind": "change", "employee_no": "E005", "from": "absent", "to": "bus", "confidence": "high", "reason": "버스 탔어요"},
-            {"message_id": mid("한바다님"), "kind": "change", "employee_no": "E999", "to": "car", "confidence": "high"},  # 명단에 없는 사람 → 버림
-            {"message_id": mid("이나래님"), "kind": "change", "employee_no": "E006", "to": "absent", "confidence": "high"},  # 관련 ID(E002)와 다른 사람 → 버림
-        ]}, "claude-test"
+    def fake(system, payload):  # 실시간과 같이 메시지 한 건씩 호출된다
+        seen.setdefault("people", set()).update(p["employee_no"] for p in payload["people"])
+        m = payload["messages"][0]
+        items = {
+            "정마루님": {"kind": "change", "employee_no": "E005", "from": "absent", "to": "bus", "confidence": "high", "reason": "버스 탔어요"},
+            "한바다님": {"kind": "change", "employee_no": "E999", "to": "car", "confidence": "high"},  # 명단에 없는 사람 → 버림
+            "이나래님": {"kind": "change", "employee_no": "E006", "to": "absent", "confidence": "high"},  # 관련 ID(E002)와 다른 사람 → 버림
+        }
+        hit = next((v for k, v in items.items() if k in m["text"]), None)
+        return {"items": [{"message_id": m["message_id"], **hit}] if hit else []}, "claude-test"
 
     monkeypatch.setattr("app.services.slack.complete_json", fake)
     out = up(client, f"{base}/demo/slack", slack_csv()).json()
     assert out["by"] == "claude:claude-test" and out["outcomes"] == {"proposed": 1}
-    assert {p["employee_no"] for p in seen["payload"]["people"]} >= {"E005", "E006", "E002"}
+    assert seen["people"] >= {"E005", "E002"}
     pend = client.get(f"{base}/changes?status=pending_approval").json()
     assert [c["participant_name"] for c in pend] == ["정마루"]
 

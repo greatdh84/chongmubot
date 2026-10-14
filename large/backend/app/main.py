@@ -21,7 +21,7 @@ from .config import API_PREFIX, BACKEND_DIR, UI_PREFIX, settings
 from .db import SessionLocal, init_db
 from .errors import AppError
 from .models import Admin
-from .routers import admin, auth, manager, participant
+from .routers import admin, auth, manager, participant, slack_events
 from .security import RedactSecretsFilter, hash_password
 from .services.scheduler import scheduler
 
@@ -95,7 +95,9 @@ def configure_large(app: FastAPI) -> None:
         # LARGE API 에만 적용한다(SMALL API 의 기존 동작은 건드리지 않음).
         # 쿠키 세션 + SameSite=Lax 에 더해, 상태 변경 요청은 앱이 붙이는 헤더가 있어야 받는다.
         large = is_large_api(request.url.path)
-        if large and request.method in UNSAFE_METHODS and request.headers.get("x-requested-with") != "chongmu":
+        # 예외: Slack Events API 수신(쿠키 세션을 쓰지 않고 Slack 서명으로만 받는다 — routers/slack_events.py)
+        signed_webhook = request.url.path == API_PREFIX + "/slack/events"
+        if large and not signed_webhook and request.method in UNSAFE_METHODS and request.headers.get("x-requested-with") != "chongmu":
             return JSONResponse(status_code=403, content={"error": {"code": "CSRF_HEADER_MISSING", "message": "허용되지 않은 요청입니다"}})
         response = await call_next(request)
         if large:
@@ -122,6 +124,7 @@ def configure_large(app: FastAPI) -> None:
     app.include_router(participant.router)
     app.include_router(manager.router)
     app.include_router(admin.router)
+    app.include_router(slack_events.router)
     if settings.is_demo:
         from .routers import dev
 

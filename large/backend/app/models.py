@@ -493,7 +493,8 @@ class EvidenceMessage(Base):
     __tablename__ = "evidence_messages"
     id: Mapped[int] = mapped_column(primary_key=True)
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), index=True)
-    source: Mapped[str] = mapped_column(String(20), default="demo_slack")  # demo_slack
+    source: Mapped[str] = mapped_column(String(20), default="demo_slack")  # demo_slack(CSV 재생) | slack_event(Events API 실시간)
+    external_id: Mapped[str] = mapped_column(String(100), default="", server_default="")  # Slack event_id(재전송 중복 방지)
     line: Mapped[int] = mapped_column(default=0)  # CSV 줄 번호
     sent_at: Mapped[datetime]
     sender: Mapped[str] = mapped_column(String(50))

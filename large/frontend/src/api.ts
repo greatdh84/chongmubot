@@ -70,7 +70,7 @@ export interface Me {
   is_manager: boolean;
 }
 
-export interface ChatMessage { id: number; sender: "user" | "agent" | "system"; text: string; created_at: string; tools: { tool: string; ok: boolean; dry_run: boolean }[]; rules: string[]; llm?: { configured: string; used: string[]; model: string; fallback: string } | null }
+export interface ChatMessage { id: number; sender: "user" | "agent" | "system"; text: string; created_at: string; card?: unknown; tools: { tool: string; ok: boolean; dry_run: boolean }[]; rules: string[]; llm?: { configured: string; used: string[]; model: string; fallback: string } | null }
 export interface ChatThread { id: number; role: string; state: "idle" | "awaiting_info" | "awaiting_confirmation"; pending: Record<string, unknown> | null; messages: ChatMessage[] }
 
 export interface Task {

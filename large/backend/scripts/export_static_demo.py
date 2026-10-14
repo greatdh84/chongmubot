@@ -97,7 +97,7 @@ with TestClient(create_app()) as c:
         *[(f"{b}/emails", {"status": s}) for s in ("", "queued", "retry_wait", "sending", "sent", "skipped", "failed")],
         *[(f"{b}/settlements/{t['id']}", {}) for t in teams],
         *[(f"{b}/report/teams/{t['id']}/evidence", {}) for t in teams],
-        (f"{b}/agent/timeline", {}), (f"{b}/agent/settlement-card", {}), (f"{b}/emails/sent", {}),
+        (f"{b}/agent/timeline", {}), (f"{b}/agent/settlement-card", {}), (f"{b}/emails/sent", {}), (f"{b}/agent/briefing", {}),
     ]
     for p, q in plan:  # 한 번 돌려 기준표·보고서를 먼저 만들어 두고(첫 열람 때 생기는 버전), 두 번째 결과를 녹화
         get(p, q)

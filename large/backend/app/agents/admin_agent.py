@@ -20,6 +20,7 @@ from ..adapters.llm import NO, YES, AgentInput, LLMError, MockLLM, get_llm, vali
 from ..errors import AppError, invalid, not_found
 from ..models import AdminChat, AdminChatMessage, AgentRun, Event, Team
 from ..services import emails, report as rpt
+from . import admin_cards
 
 MAX_STEPS = 5
 KIND_LABEL = rpt.KIND_LABEL
@@ -130,7 +131,7 @@ def find_person(ctx: Ctx, args: dict) -> dict:
         team = ctx.db.get(Team, p.team_id)
         st = fee_table(ctx.db, ctx.event, p.team_id)[p.id]
         hit = next((x for x in ctx.rep.people if x["participant_id"] == p.id), None)
-        out.append({"name": p.name, "team": team.name, "choice": st.choice, "fee": st.liability, "in_report": _person_brief(hit) if hit else None})
+        out.append({"participant_id": p.id, "name": p.name, "team": team.name, "choice": st.choice, "fee": st.liability, "in_report": _person_brief(hit) if hit else None})
     if not out:
         raise not_found(f"참가자 '{name}'")
     return {"count": len(out), "people": out}
@@ -297,10 +298,20 @@ def handle_message(db: Session, event: Event, text: str) -> dict:
     fallback: dict[str, str] = {}
     llm = get_llm()
 
-    def finish(reply: str, outcome: str) -> dict:
+    def finish(reply: str, outcome: str, card: dict | None = None, llm_card: dict | None = None) -> dict:
         used = sorted({d["by"].split(":")[0] for d in decisions})
         info = {"configured": get_llm().mode, "used": used, "model": next((d["by"].split(":", 1)[1] for d in decisions if ":" in d["by"]), ""), "fallback": fallback.get("reason", "")}
-        msg = _add(db, chat, "agent", reply, {"steps": steps, "llm": info, "decisions": decisions, "report_version": rep.version})
+        if card is None and outcome == "replied":
+            card = admin_cards_from_steps(ctx, steps)
+            if card is not None and llm_card is not None:
+                card, why = admin_cards.check_llm_card(llm_card, card, steps)
+                if why:
+                    notes.append(why)
+                    card["llm_note"] = why
+        if card is not None:
+            card["tools"] = [s["tool"] for s in steps]
+            reply = admin_cards.to_text(card)
+        msg = _add(db, chat, "agent", reply, {"steps": steps, "llm": info, "decisions": decisions, "report_version": rep.version, "card": card})
         db.add(
             AgentRun(
                 event_id=event.id, agent="admin", trigger="admin_message", steps=steps, rules=["숫자는 정산 보고서(코드 계산)에서만 인용"],
@@ -324,16 +335,7 @@ def handle_message(db: Session, event: Event, text: str) -> dict:
             if not step["ok"]:
                 return finish(f"보내지 못했어요: {step['error']['message']}", "execute_failed")
             r = step["result"]
-            d = r["dispatch"]
-            mode = "모의 발송(개발용 수신함)" if d.get("notify_mode") == "mock" else "Slack DM"
-            names = ", ".join(f"{x['team']}({x['manager']})" for x in r["targets"] if x["manager"])
-            return finish(
-                f"{r['kind_label']} {len(r['targets'])}개 부서 담당자에게 {mode}으로 {d.get('sent', 0)}건 보냈어요: {names}."
-                + (f" 연기 {d['deferred']}건(21~8시 금지·하루 한도 → 허용 시각에 자동 발송)." if d.get("deferred") else "")
-                + (f" 실패 {d['failed']}건(기록 탭에서 확인)." if d.get("failed") else "")
-                + (" 이미 같은 금액으로 보낸 부서는 다시 보내지 않았어요." if r["created"] < len(r["targets"]) else ""),
-                "executed",
-            )
+            return finish("", "executed", card=admin_cards.result_card(r))
         if is_no(text):
             chat.state, chat.pending = "idle", None
             return finish("알겠어요. 아무것도 보내지 않았어요.", "cancelled")
@@ -363,18 +365,59 @@ def handle_message(db: Session, event: Event, text: str) -> dict:
                 if not dry["ok"]:
                     continue
                 chat.state, chat.pending = "awaiting_confirmation", {"tool": spec.name, "args": action["args"]}
-                return finish(_confirm_text(dry["result"]), "awaiting_confirmation")
+                card = admin_cards.confirm_card(dry["result"])
+                card["tools"] = [s["tool"] for s in steps]
+                msg = finish(_confirm_text(dry["result"]), "awaiting_confirmation", card=card)
+                return msg
             steps.append(run_tool(ctx, spec.name, action["args"]))
             continue
         chat.state, chat.pending = "idle", None
-        return finish(action["text"], "replied" if action["type"] == "reply" else "asked")
+        return finish(action["text"], "replied" if action["type"] == "reply" else "asked", llm_card=action.get("card"))
     return finish("질문을 처리하지 못했어요. 부서 이름과 알고 싶은 것(추가 납부, 환불, 확인 필요 등)을 함께 적어 주세요.", "gave_up")
+
+
+def admin_cards_from_steps(ctx: Ctx, steps: list[dict]) -> dict | None:
+    """마지막으로 성공한 조회 도구 결과로 보고 카드(템플릿)를 만든다. 숫자는 코드 계산."""
+    ok = [s for s in steps if s.get("ok") and not s.get("dry_run")]
+    if not ok:
+        return None
+    last = ok[-1]
+    r, tool = last["result"], last["tool"]
+    db, ev, rep = ctx.db, ctx.event, ctx.rep
+    if tool == "get_evidence":
+        if r.get("person"):
+            return admin_cards.person_card(db, ev, rep, r["person"]["participant_id"])
+        return admin_cards.team_card(db, ev, rep, r["team"]["team_id"])
+    if tool == "get_department":
+        t = next(x for x in rep.teams if x["code"] == r["team"]["code"])
+        return admin_cards.team_card(db, ev, rep, t["team_id"])
+    if tool == "list_teams":
+        return admin_cards.teams_card(db, ev, rep, r["status"])
+    if tool == "list_people":
+        return admin_cards.people_card(rep, r)
+    if tool == "find_person" and r["count"] == 1:
+        return admin_cards.person_card(db, ev, rep, r["people"][0]["participant_id"])
+    if tool == "get_report_summary":
+        return admin_cards.summary_card(db, ev, rep)
+    if tool == "what_changed":
+        return admin_cards.changed_card(r)
+    return None
+
+
+def report_action(db: Session, event: Event, *, kind: str, team_id: int | None, what: str) -> dict:
+    """총무가 화면에서 승인·지정·확정한 뒤 Agent 가 채팅에 남기는 짧은 결과 보고(보고서는 호출 전에 갱신돼 있어야 함)."""
+    rep = rpt.latest(db, event)
+    card = admin_cards.after_action(db, event, rep, kind=kind, team_id=team_id, what=what)
+    chat = _chat(db, event)
+    msg = _add(db, chat, "agent", admin_cards.to_text(card), {"card": card, "report_version": rep.version, "action_report": kind})
+    chat.updated_at = clock.now()
+    return _msg_out(msg)
 
 
 def _msg_out(m: AdminChatMessage) -> dict:
     meta = m.meta or {}
     return {
-        "id": m.id, "sender": m.sender, "text": m.text, "created_at": clock.fmt(m.created_at),
+        "id": m.id, "sender": m.sender, "text": m.text, "created_at": clock.fmt(m.created_at), "card": meta.get("card"),
         "tools": [{"tool": s["tool"], "ok": s.get("ok"), "dry_run": s.get("dry_run", False)} for s in meta.get("steps", [])],
         "rules": [], "llm": meta.get("llm"), "report_version": meta.get("report_version"),
     }

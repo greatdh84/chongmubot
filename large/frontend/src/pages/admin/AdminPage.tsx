@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type JSX } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, BOT_PERSONA, BOT_STRATEGY, fmtTime, STATIC, won, type Change, type EventInfo } from "../../api";
-import { Chat, Msg, Page, StatusPill, useEventName, useMeta } from "../../components/common";
+import { Msg, Page, StatusPill, useEventName, useMeta } from "../../components/common";
 import { useAction, useLoad } from "../../hooks";
 import { PaymentsTab, RosterTab, TasksTab } from "./AdminMoney";
+import { AgentChat, agentLine, type AgentReported } from "./AgentChat";
 import { AgentTimeline, SettlementRunCard } from "./Evidence";
 import { Kpi, ReportTab, STATUS, Timeline, triggerLabel, type Report } from "./Report";
 
@@ -27,8 +28,10 @@ export default function AdminPage() {
   const { data: events, error, reload } = useLoad(() => api.get<EventInfo[]>("/api/large/admin/events"));
   const [tab, setTab] = useState<Tab>("대시보드");
   const [checkSub, setCheckSub] = useState<CheckSub>("입금 대조");
-  const go = (t: string, sub?: string) => {
+  const [focusTeam, setFocusTeam] = useState<number | null>(null);
+  const go = (t: string, sub?: string, teamId?: number) => {
     if (sub && (CHECK_SUBS as readonly string[]).includes(sub)) setCheckSub(sub as CheckSub);
+    setFocusTeam(teamId ?? null);
     setTab(t as Tab);
     window.scrollTo({ top: 0 });
   };
@@ -62,7 +65,7 @@ export default function AdminPage() {
       {tab === "대시보드" && <DashboardTab base={base} go={go} />}
       {tab === "부서·명단" && <RosterTab base={base} />}
       {tab === "입금·확인" && <CheckTab base={base} sub={checkSub} setSub={setCheckSub} />}
-      {tab === "정산 보고서" && <ReportTab base={base} go={go} />}
+      {tab === "정산 보고서" && <ReportTab key={focusTeam ?? "all"} base={base} go={go} focusTeam={focusTeam} />}
       {tab === "기록" && <LogTab base={base} />}
     </Page>
   );
@@ -71,7 +74,7 @@ export default function AdminPage() {
 const AGENT_CHIPS = ["데이터팀 왜 추가 납부야?", "환불 대상 부서 알려줘", "확인 필요한 부서와 이유", "박채원 팀 현황", "재무팀 왜 정산 완료야?", "전체 요약"];
 
 /** 대시보드: 맨 위 최종 현황 → 왼쪽 총무 Agent(보고서·근거에 묻기) · 오른쪽 정산 Agent 실행 카드·사람이 결정할 것 → Agent 활동 기록 */
-function DashboardTab({ base, go }: { base: string; go: (t: string, sub?: string) => void }) {
+function DashboardTab({ base, go }: { base: string; go: (t: string, sub?: string, teamId?: number) => void }) {
   const { data: d, reload } = useLoad(() => api.get<Dashboard>(base), [base]);
   const { data: rep, reload: reloadRep } = useLoad(() => api.get<Report>(`${base}/report`), [base]);
   if (!d) return <p className="muted">불러오는 중…</p>;
@@ -104,15 +107,7 @@ function DashboardTab({ base, go }: { base: string; go: (t: string, sub?: string
         </div>
       )}
       <div className="dash">
-        <Chat
-          base={`${base}/agent/chat`}
-          title="총무 Agent 에게 묻기"
-          subtitle={<>정산 보고서{rep ? ` v${rep.version}` : ""}와 근거(변동 기록·입금·슬랙 대화)를 조회해 답합니다. 숫자는 코드가 계산한 보고서에서만 가져오고, 담당자 안내 발송은 총무가 '네'라고 해야 실행됩니다.</>}
-          examples={AGENT_CHIPS.slice(0, 2)}
-          chips={AGENT_CHIPS}
-          onReply={() => { reloadRep(); reload(); }}
-          className="agent-chat"
-        />
+        <AgentChat base={base} chips={AGENT_CHIPS} go={go} onChange={() => { reloadRep(); reload(); }} />
         <div>
           <SettlementRunCard base={base} go={go} />
           <div className="card">
@@ -180,7 +175,7 @@ function ChangesTab({ base }: { base: string }) {
   const decide = (c: Change, ok: boolean) => {
     const m = manual[c.id] ?? (c.suggested_refund != null ? { amount: String(c.suggested_refund), note: c.suggested_note ?? "" } : undefined);
     const body = ok && c.rule_missing ? { note: m?.note ?? "", refund_amount: m?.amount === undefined || m.amount === "" ? null : Number(m.amount) } : { note: "" };
-    return run(() => api.post(`${base}/changes/${c.id}/${ok ? "approve" : "reject"}`, body), ok ? "승인했습니다." : "반려했습니다.").then(reload);
+    return run(() => api.post<AgentReported>(`${base}/changes/${c.id}/${ok ? "approve" : "reject"}`, body), (r) => agentLine(r, ok ? "승인했습니다." : "반려했습니다.")).then(reload);
   };
   return (
     <div className="card">

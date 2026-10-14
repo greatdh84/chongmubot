@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, CHOICE_LABEL, fmtTime, won, type SettlementCalc, type Task } from "../../api";
 import { ChoicePill, Msg, StatusPill } from "../../components/common";
 import { useAction, useLoad } from "../../hooks";
+import { agentLine, type AgentReported } from "./AgentChat";
 
 interface TeamRow { id: number; code: string; name: string; headcount: number; manager: { participant_id: number; name: string; slack_id: string; phone: string } | null; counts: Record<string, number>; final_fee: number; received: number; refunds_paid: number; balance: number; balance_label: string; blockers: string[]; settlement_status: string | null }
 interface PRow { id: number; employee_no: string; name: string; slack_id: string; phone: string; team: { id: number; code: string; name: string }; is_manager: boolean; choice: string | null; snapshot_choice: string | null; fee: number | null; pending_change_id: number | null; invite: { issued: number; active: number; latest_expires_at: string | null; last_used_at: string | null } }
@@ -136,8 +137,8 @@ export function PaymentsTab({ base }: { base: string }) {
         <h2>입금 대조</h2>
         <div className="row">
           <Upload label="거래내역 CSV 업로드" busy={busy} onFile={(f) => run(() => api.upload<{ inserted: number; duplicates: number }>(`${base}/transactions`, f), (r) => `새 거래 ${r.inserted}건, 이미 있던 거래 ${r.duplicates}건은 건너뜀`).then(reload)} />
-          <button className="primary" disabled={busy} onClick={() => run(() => api.post<{ summary: string }>(`${base}/agent/settlement-review`), (r) => `정산 Agent: ${r.summary}`).then(reload)}>정산 Agent 점검 실행</button>
-          <button disabled={busy} onClick={() => run(() => api.post<{ confirmed: number }>(`${base}/allocations/confirm-high`), (r) => `신뢰도 high 제안 ${r.confirmed}건 확정`).then(reload)}>high 제안 일괄 확정</button>
+          <button className="primary" disabled={busy} onClick={() => run(() => api.post<{ summary: string } & AgentReported>(`${base}/agent/settlement-review`), (r) => agentLine(r, `정산 Agent: ${r.summary}`)).then(reload)}>정산 Agent 점검 실행</button>
+          <button disabled={busy} onClick={() => run(() => api.post<{ confirmed: number } & AgentReported>(`${base}/allocations/confirm-high`), (r) => agentLine(r, `신뢰도 high 제안 ${r.confirmed}건 확정`)).then(reload)}>high 제안 일괄 확정</button>
           <select value={filter} onChange={(e) => setFilter(e.target.value as "all" | "todo")} aria-label="필터"><option value="todo">처리할 것만</option><option value="all">전체</option></select>
         </div>
       </div>
@@ -154,7 +155,7 @@ export function PaymentsTab({ base }: { base: string }) {
                 <StatusPill status={a.status} /> {a.team_code}{a.participant_name ? `·${a.participant_name}` : ""} {won(a.amount)}
                 {a.confidence && <span className="muted">[{a.confidence}]</span>}
                 <span className="muted" title={a.basis}>{a.basis.slice(0, 40)}</span>
-                {a.status === "proposed" && <button className="small primary" disabled={busy} onClick={() => run(() => api.post(`${base}/allocations/${a.id}/confirm`), "확정했습니다.").then(reload)}>확정</button>}
+                {a.status === "proposed" && <button className="small primary" disabled={busy} onClick={() => run(() => api.post<AgentReported>(`${base}/allocations/${a.id}/confirm`), (r) => agentLine(r, "확정했습니다.")).then(reload)}>확정</button>}
                 {a.status !== "cancelled" && <button className="small" disabled={busy} onClick={() => run(() => api.post(`${base}/allocations/${a.id}/cancel`), "취소했습니다.").then(reload)}>취소</button>}
               </div>))}
             </td>
@@ -220,7 +221,7 @@ export function TasksTab({ base }: { base: string }) {
               <b>정산 Agent 배정 후보(슬랙 근거)</b> → <b>{sugOf(t)!.team}</b><br />
               {sugOf(t)!.sender} {fmtTime(sugOf(t)!.sent_at)}: “{sugOf(t)!.text}” <span className="muted">· {sugOf(t)!.why}</span>
               <div className="row" style={{ marginTop: 6 }}>
-                <button className="small primary" disabled={busy} onClick={() => run(() => api.post(`${base}/tasks/${t.id}/accept-suggestion`), `${sugOf(t)!.team} 입금으로 지정·확정했습니다.`).then(reload)}>근거 확인 → {sugOf(t)!.team} 입금으로 지정</button>
+                <button className="small primary" disabled={busy} onClick={() => run(() => api.post<AgentReported>(`${base}/tasks/${t.id}/accept-suggestion`), (r) => agentLine(r, `${sugOf(t)!.team} 입금으로 지정·확정했습니다.`)).then(reload)}>근거 확인 → {sugOf(t)!.team} 입금으로 지정</button>
                 <span className="muted">자동으로 배정하지 않습니다. 총무가 지정하면 확정 배정 + 이 거래의 과제를 닫습니다.</span>
               </div>
             </div>

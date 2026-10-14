@@ -60,13 +60,13 @@ const writeSeen = (base: string, v: number) => { try { localStorage.setItem(seen
 
 const PROCESS_TONE = (p: string) => (p.startsWith("팀 납부 완료") || p.startsWith("팀 정산") || p.startsWith("환불 완료") || p.startsWith("청구에") ? "ok" : p.includes("대기") ? "warn" : p ? "bad" : "");
 
-export function ReportTab({ base, go }: { base: string; go?: Go }) {
+export function ReportTab({ base, go, focusTeam }: { base: string; go?: Go; focusTeam?: number | null }) {
   // 비교 기준: 이 화면에서 마지막으로 본 버전(바뀐 부서를 모아 보여 줌). 처음이면 바로 앞 버전.
   const [since, setSince] = useState<number | null>(() => readSeen(base));
   const { data: rep, reload } = useLoad(() => api.get<Report>(`${base}/report${since ? `?since=${since}` : ""}`).then((r) => { writeSeen(base, r.version); return r; }), [base, since]);
   const [filter, setFilter] = useState<string>("all");
   const [kind, setKind] = useState<string>("all");
-  const [open, setOpen] = useState<number | null>(null);
+  const [open, setOpen] = useState<number | null>(focusTeam ?? null);
   const [sel, setSel] = useState<number | null>(null);
   const { busy, message, run } = useAction();
   if (!rep) return <p className="muted">정산 보고서를 만드는 중…</p>;

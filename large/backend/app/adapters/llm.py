@@ -408,6 +408,8 @@ def validate_action(action: Any, tool_names: set[str]) -> dict[str, Any]:
     if not isinstance(text, str) or not text.strip():
         raise LLMError(f"{action['type']} 에 text 가 없음")
     out = {"type": action["type"], "text": text.strip()[:1000]}
+    if action["type"] == "reply" and isinstance(action.get("card"), dict):
+        out["card"] = action["card"]  # 총무 Agent: 문장만 쓴 카드(금액은 admin_cards.check_llm_card 가 검증)
     if action["type"] == "ask":
         out["pending"] = action.get("pending") if isinstance(action.get("pending"), dict) else {}
     return out
@@ -446,7 +448,11 @@ ADMIN_PROMPT = """너는 회사 워크숍(대모임, 300명·부서별 팀) 총�
 - '왜', '이유', '근거'를 물으면 get_evidence 로 변동마다 누가·언제(일시)·무엇에서 무엇으로·근거(규칙/총무 결정·슬랙 메시지 보낸 사람)를 인용한다.
 - '박채원 팀'처럼 사람 이름 + 팀이면 context.teams 의 manager 로 부서를 찾는다.
 - 같은 조회를 같은 인자로 두 번 부르지 않는다. 결과가 있으면 한국어로 짧고 구체적으로(이름·금액·사유) 답한다.
-출력: JSON 객체 하나만. {"type":"tool","name":...,"args":{...}} | {"type":"ask","text":...} | {"type":"reply","text":...}
+- 너는 총무의 비서다. 최종 답은 짧은 존댓말 보고 카드로: greeting(예: "총무님, 데이터팀 정리해 드릴게요."), headline(결론 한 문장 — 금액이 아직
+  확정 전이면 "(총무님 승인 전)"·"(입금 대조 전)"을 분명히), story(무슨 일이 있었는지 시간순 2~4줄, 슬랙 인용은 보낸 사람·일시와 따옴표).
+  금액·상태 칩·할 일 버튼은 시스템 코드가 붙이므로 쓰지 않는다. 문장 속 금액은 도구 결과에 있는 숫자만(다르면 시스템이 버린다).
+출력: JSON 객체 하나만. {"type":"tool","name":...,"args":{...}} | {"type":"ask","text":...}
+  | {"type":"reply","text":"<한 줄 요약>","card":{"greeting":"...","headline":"...","story":[{"at":"2026-10-14T08:35","who":"담당자 강권재님 슬랙","text":"홍주원님 불참 → 참석+버스","quote":"…"}]}}
 """
 
 

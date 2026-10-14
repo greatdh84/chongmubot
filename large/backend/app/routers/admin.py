@@ -337,16 +337,21 @@ def _get_change(db: Session, ev: Event, change_id: int) -> ChangeLog:
 def approve_change(change_id: int, body: Decision, ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
     c = resp_svc.decide_change(db, ev, _get_change(db, ev, change_id), admin, approve=True, note=body.note, refund_amount=body.refund_amount)
     _refresh(db, ev, "change_approved")
+    p = db.get(Participant, c.participant_id)
+    amt = f"환불 {c.refund_amount:,}원" if c.refund_amount else f"추가 {c.extra_charge:,}원" if c.extra_charge else "금액 변동 없음"
+    report = admin_agent.report_action(db, ev, kind="change_approved", team_id=p.team_id, what=f"{p.name}님 {CHOICE_LABELS[c.from_choice]}→{CHOICE_LABELS[c.to_choice]} 승인했어요({amt}{', 총무 결정' if c.admin_refund_decided else ''}).")
     db.commit()
-    return change_out(c)
+    return change_out(c) | {"agent_report": report}
 
 
 @router.post("/events/{event_id}/changes/{change_id}/reject")
 def reject_change(change_id: int, body: Decision, ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
     c = resp_svc.decide_change(db, ev, _get_change(db, ev, change_id), admin, approve=False, note=body.note)
     _refresh(db, ev, "change_rejected")
+    p = db.get(Participant, c.participant_id)
+    report = admin_agent.report_action(db, ev, kind="change_rejected", team_id=p.team_id, what=f"{p.name}님 {CHOICE_LABELS[c.from_choice]}→{CHOICE_LABELS[c.to_choice]} 변경을 반려했어요.")
     db.commit()
-    return change_out(c)
+    return change_out(c) | {"agent_report": report}
 
 
 # ---------------------------------------------------------------- 입금
@@ -405,8 +410,10 @@ def create_allocation(transaction_id: int, body: AllocationIn, ev: Event = Depen
 def confirm_allocation(allocation_id: int, ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
     a = payments.confirm_allocation(db, ev, allocation_id, admin.id)
     _refresh(db, ev, "allocation_confirmed")
+    txn = db.get(BankTransaction, a.transaction_id)
+    report = admin_agent.report_action(db, ev, kind="allocation_confirmed", team_id=a.team_id, what=f"{txn.depositor} {a.amount:,}원 입금을 확정했어요.")
     db.commit()
-    return {"id": a.id, "status": a.status}
+    return {"id": a.id, "status": a.status, "agent_report": report}
 
 
 @router.post("/events/{event_id}/allocations/confirm-high")
@@ -416,8 +423,9 @@ def confirm_high(ev: Event = Depends(admin_event), admin: Admin = Depends(curren
     for aid in ids:
         payments.confirm_allocation(db, ev, aid, admin.id)
     _refresh(db, ev, "allocations_confirmed_high")
+    report = admin_agent.report_action(db, ev, kind="allocations_confirmed_high", team_id=None, what=f"높은 확신(팀코드 + 팀원 명의) 입금 {len(ids)}건을 한 번에 확정했어요.")
     db.commit()
-    return {"confirmed": len(ids)}
+    return {"confirmed": len(ids), "agent_report": report}
 
 
 @router.post("/events/{event_id}/allocations/{allocation_id}/cancel")
@@ -434,6 +442,7 @@ def cancel_allocation(allocation_id: int, ev: Event = Depends(admin_event), admi
 def run_settlement_review(ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
     result = settlement_agent.review_event(db, ev, trigger=f"manual:{_actor(admin)}")
     _refresh(db, ev, "settlement_review")
+    result["agent_report"] = admin_agent.report_action(db, ev, kind="settlement_review", team_id=None, what=f"입금 대조를 마쳤어요: {result['summary']}.")
     db.commit()
     return result
 
@@ -475,8 +484,31 @@ def accept_suggestion(task_id: int, ev: Event = Depends(admin_event), admin: Adm
     a = settlement_agent.accept_slack_suggestion(db, ev, t, admin.id)
     audit(db, ev.id, _actor(admin), "slack_suggestion_accepted", f"task:{t.id}", {"allocation_id": a.id})
     _refresh(db, ev, "slack_suggestion_accepted")
+    txn = db.get(BankTransaction, a.transaction_id)
+    report = admin_agent.report_action(db, ev, kind="slack_suggestion_accepted", team_id=a.team_id, what=f"'{txn.depositor}' {a.amount:,}원을 슬랙 근거대로 {db.get(Team, a.team_id).name} 입금으로 지정했어요.")
     db.commit()
-    return {"allocation_id": a.id, "team_id": a.team_id, "amount": a.amount}
+    return {"allocation_id": a.id, "team_id": a.team_id, "amount": a.amount, "agent_report": report}
+
+
+@router.get("/events/{event_id}/agent/briefing")
+def agent_briefing(ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
+    """대시보드를 열면 Agent 가 먼저 하는 보고(조회만, 상태 안 바꿈). 본 시각은 POST /agent/briefing/seen 으로 남긴다."""
+    from ..agents import admin_cards
+
+    rep = rpt.latest(db, ev)
+    if rep is None or rpt.ensure_checkpoints(db, ev):
+        rep = rpt.refresh(db, ev, "report_view")
+        db.commit()
+    return admin_cards.briefing(db, ev, rep)
+
+
+@router.post("/events/{event_id}/agent/briefing/seen")
+def agent_briefing_seen(ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
+    from ..agents import admin_cards
+
+    admin_cards.mark_seen(db, ev)
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("/events/{event_id}/agent/timeline")

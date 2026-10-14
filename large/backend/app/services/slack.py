@@ -106,23 +106,72 @@ def _sender_participant(db: Session, event: Event, name: str, team: Team | None)
     return hits[0] if len(hits) == 1 else None
 
 
+def ingest_slack_message(
+    db: Session, event: Event, *, sent_at: datetime, sender: str, text: str, recipient: str = "", channel: str = "",
+    team: Team | None = None, related: Participant | None = None, sender_slack_id: str | None = None,
+    source: str = "slack_event", line: int = 0, external_id: str = "", record_run: bool = True,
+) -> EvidenceMessage:
+    """슬랙 메시지 한 건 처리 — 실시간 이벤트(POST /slack/events)와 CSV 재생이 같은 함수를 쓴다.
+    근거 저장 → 정산 Agent 해석(LLM 또는 규칙) → 명단·현재 응답과 대조 → 변경 기록 연결 또는 승인 대기 제안 / 입금자 과제에 근거
+    → (record_run) Agent 실행 기록. 확정은 하지 않는다(HITL)."""
+    from ..agents.settlement_agent import attach_slack_suggestions
+
+    sp = None
+    if sender_slack_id:
+        sp = db.scalar(select(Participant).where(Participant.event_id == event.id, Participant.slack_id == sender_slack_id))
+    if sp is None and sender not in BOT_NAMES | ADMIN_NAMES:
+        sp = _sender_participant(db, event, sender, team)
+    if team is None:
+        team = db.get(Team, related.team_id) if related else db.get(Team, sp.team_id) if sp else None
+    m = EvidenceMessage(
+        event_id=event.id, source=source, line=line, sent_at=sent_at, sender=sp.name if sp else sender, recipient=recipient or channel,
+        sender_participant_id=sp.id if sp else None, team_id=team.id if team else None, participant_id=related.id if related else None,
+        text=text, external_id=external_id[:100],
+    )
+    db.add(m)
+    db.flush()
+    by, fallback, llm = "rule", "", {}
+    if settings.llm_mode in ("claude", "gemini"):
+        try:
+            llm, model = llm_extract(db, event, [m])
+            by = f"{settings.llm_mode}:{model}"
+        except (LLMError, AppError) as e:
+            fallback, by = str(e)[:200], "mock_fallback"
+    people = {p.id: p for p in db.scalars(select(Participant).where(Participant.event_id == event.id, Participant.id.in_([x for x in (m.participant_id, m.sender_participant_id) if x] or [0])))}
+    a = _interpret(db, event, m, llm.get(m.id), by, people)
+    if fallback:
+        a["fallback"] = fallback
+    db.flush()
+    attach_slack_suggestions(db, event)
+    if record_run:
+        db.add(AgentRun(
+            event_id=event.id, agent="settlement", trigger=f"{source}:{m.id}",
+            steps=[{"tool": "read_message", "args": {"message_id": m.id, "at": clock.fmt(m.sent_at)}, "result": {k: a.get(k) for k in ("kind", "to", "confidence", "outcome", "change_id", "by")}, "rule": a.get("reason")}],
+            rules=["메시지 해석은 명단·현재 응답과 대조한 뒤에만 사용", "변경은 제안까지만(총무 승인 필요)"],
+            result={"summary": f"슬랙 {m.sender}: {a['kind_label']} → {a['outcome_label']}", "message_id": m.id, "by": a.get("by"), "fallback": fallback},
+            llm_mode=("rule" if by == "rule" else by.split(":")[0])[:20],
+        ))
+    return m
+
+
 def import_csv(db: Session, event: Event, actor: str, data: bytes) -> dict[str, Any]:
+    """슬랙 대화 CSV = 실시간 이벤트의 '재생기'. 행마다 원래 시각으로 ingest_slack_message 를 부른다(시각 순서대로)."""
     from . import report
 
     rows = parse_csv(db, event, data)
     clear(db, event)
-    for r in rows:
-        team = r["team"]
-        sp = _sender_participant(db, event, r["sender"], team)
-        db.add(
-            EvidenceMessage(
-                event_id=event.id, source="demo_slack", line=r["line"], sent_at=r["sent_at"], sender=r["sender"], recipient=r["recipient"],
-                sender_participant_id=sp.id if sp else None, team_id=team.id if team else None,
-                participant_id=r["participant"].id if r["participant"] else None, text=r["text"],
-            )
+    for r in sorted(rows, key=lambda r: (r["sent_at"], r["line"])):
+        ingest_slack_message(
+            db, event, sent_at=r["sent_at"], sender=r["sender"], recipient=r["recipient"], text=r["text"], team=r["team"], related=r["participant"],
+            source="demo_slack", line=r["line"], record_run=False,
         )
-    db.flush()
-    out = process_messages(db, event, trigger="slack_import")
+    msgs = demo_messages(db, event)
+    out = _summarize(msgs)
+    db.add(AgentRun(
+        event_id=event.id, agent="settlement", trigger="slack_import", steps=[_step_of(m) for m in msgs],
+        rules=["슬랙 대화 CSV = 실시간 이벤트 재생(메시지마다 ingest_slack_message, 원래 시각)", "메시지 해석은 명단·현재 응답과 대조한 뒤에만 사용", "변경은 제안까지만(총무 승인 필요)", "금액은 환불 규칙 코드가 계산"],
+        result={"summary": out["summary"], "counts": out["counts"], "outcomes": out["outcomes"], "by": out["by"], "fallback": out["fallback"]}, llm_mode=out["by"].split(":")[0][:20],
+    ))
     report.refresh(db, event, "slack_import")
     audit(db, event.id, actor, "demo_slack", detail={"messages": len(rows), **out["counts"]})
     return out
@@ -143,9 +192,15 @@ def unlink_changes(db: Session, event: Event) -> None:
 
 
 def _drop_pending_proposals(db: Session, event: Event) -> None:
-    ids = list(db.scalars(select(ChangeLog.id).where(ChangeLog.event_id == event.id, ChangeLog.source == "slack", ChangeLog.status == "pending_approval")))
-    unlink_changes(db, event)
+    """CSV 재생 메시지에서 나온 '아직 승인 안 된' 제안만 지운다(실시간 이벤트 제안·승인된 변경은 남김)."""
+    demo = demo_messages(db, event)
+    linked = {m.change_id for m in demo if m.change_id}
+    ids = list(db.scalars(select(ChangeLog.id).where(ChangeLog.id.in_(linked or [0]), ChangeLog.source == "slack", ChangeLog.status == "pending_approval")))
+    for m in demo:
+        m.change_id = None
+    db.flush()
     if ids:
+        db.execute(update(EvidenceMessage).where(EvidenceMessage.change_id.in_(ids)).values(change_id=None))
         db.execute(delete(ConfirmTask).where(ConfirmTask.change_id.in_(ids)))
         db.execute(delete(ChangeLog).where(ChangeLog.id.in_(ids)))
 
@@ -274,6 +329,11 @@ def demo_messages(db: Session, event: Event) -> list[EvidenceMessage]:
     return list(db.scalars(select(EvidenceMessage).where(EvidenceMessage.event_id == event.id, EvidenceMessage.source == "demo_slack").order_by(EvidenceMessage.sent_at, EvidenceMessage.line)))
 
 
+def all_messages(db: Session, event: Event) -> list[EvidenceMessage]:
+    """CSV 재생 + 실시간 이벤트 메시지(입금 단서 찾기 등)."""
+    return list(db.scalars(select(EvidenceMessage).where(EvidenceMessage.event_id == event.id).order_by(EvidenceMessage.sent_at, EvidenceMessage.id)))
+
+
 def _existing_change(db: Session, pid: int, to: str, at: datetime) -> ChangeLog | None:
     cands = list(db.scalars(select(ChangeLog).where(ChangeLog.participant_id == pid, ChangeLog.to_choice == to, ChangeLog.after_deadline.is_(True), ChangeLog.status.in_(("applied", "pending_approval")))))
     cands.sort(key=lambda c: abs((c.requested_at - at).total_seconds()))
@@ -281,70 +341,90 @@ def _existing_change(db: Session, pid: int, to: str, at: datetime) -> ChangeLog 
 
 
 def process_messages(db: Session, event: Event, trigger: str = "slack_import") -> dict[str, Any]:
-    """메시지를 (다시) 읽어 해석·연결·제안. 여러 번 불러도 결과가 같다(이전 제안·연결을 지우고 다시 만든다)."""
+    """저장된 CSV 메시지를 (다시) 읽어 해석·연결·제안(응답·변경 CSV 를 다시 넣은 뒤). 여러 번 불러도 결과가 같다."""
     from ..agents.settlement_agent import attach_slack_suggestions
 
     _drop_pending_proposals(db, event)
     _drop_task_suggestions(db, event)
     msgs = demo_messages(db, event)
-    counts: dict[str, int] = {"messages": len(msgs)}
-    outcomes: dict[str, int] = {}
-    steps: list[dict[str, Any]] = []
     if not msgs:
-        return {"counts": counts, "outcomes": outcomes, "by": "rule", "fallback": ""}
+        return {"counts": {"messages": 0}, "outcomes": {}, "by": "rule", "fallback": ""}
     by, fallback, llm = "rule", "", {}
     if settings.llm_mode in ("claude", "gemini"):
         try:
             llm, model = llm_extract(db, event, msgs)
             by = f"{settings.llm_mode}:{model}"
         except (LLMError, AppError) as e:
-            fallback = str(e)[:200]
-            by = "mock_fallback"
+            fallback, by = str(e)[:200], "mock_fallback"
     people = {p.id: p for p in db.scalars(select(Participant).where(Participant.event_id == event.id))}
     for m in msgs:
-        a = llm.get(m.id) if llm else None
-        if a is None:
-            a = rule_extract(m, event)
-            a["by"] = "rule" if by == "rule" or not llm else "rule(LLM 누락)"
-        else:
-            a["by"] = by
-        if by == "mock_fallback":
-            a["by"] = "mock_fallback"
-        pid = a.pop("participant_id", None) or m.participant_id
-        if m.participant_id and pid != m.participant_id:  # LLM 이 관련 ID 와 다른 사람을 고름 → 쓰지 않음
-            a = {"kind": "note", "confidence": "low", "reason": "LLM 이 고른 사람이 관련 ID 와 달라 버림", "by": a["by"], "llm_rejected": True}
-            pid = m.participant_id
-        m.change_id = None
-        kind = a["kind"]
-        counts[kind] = counts.get(kind, 0) + 1
-        if kind == "change":
-            a |= _handle_change(db, event, m, people.get(pid), a)
-        elif kind == "admin_refund":
-            a |= _handle_admin_refund(db, event, m, people.get(pid), a)
-        elif kind == "deposit_hint":
-            sp = people.get(m.sender_participant_id)
-            a |= {"outcome": "deposit_hint", "team_id": m.team_id or (sp.team_id if sp else None)}
-        else:
-            a["outcome"] = "recorded"
-        if pid and not m.participant_id and kind in ("change", "admin_refund"):
-            m.participant_id = pid
-        a["kind_label"], a["outcome_label"] = KIND_LABEL[kind], OUTCOME_LABEL.get(a["outcome"], a["outcome"])
-        m.analysis = a
-        if kind == "change":
-            outcomes[a["outcome"]] = outcomes.get(a["outcome"], 0) + 1
-        steps.append({"tool": "read_message", "args": {"message_id": m.id, "line": m.line, "at": clock.fmt(m.sent_at)}, "result": {k: a.get(k) for k in ("kind", "to", "confidence", "outcome", "change_id", "by")}, "rule": a.get("reason")})
+        _interpret(db, event, m, llm.get(m.id) if llm else None, by, people)
     db.flush()
     attach_slack_suggestions(db, event)
+    out = _summarize(msgs, by, fallback)
+    db.add(AgentRun(
+        event_id=event.id, agent="settlement", trigger=trigger, steps=[_step_of(m) for m in msgs],
+        rules=["메시지 해석은 명단·현재 응답과 대조한 뒤에만 사용", "변경은 제안까지만(총무 승인 필요)", "금액은 환불 규칙 코드가 계산"],
+        result={"summary": out["summary"], "counts": out["counts"], "outcomes": out["outcomes"], "by": by, "fallback": fallback}, llm_mode=("rule" if by == "rule" else by.split(":")[0])[:20],
+    ))
+    return out
+
+
+def _interpret(db: Session, event: Event, m: EvidenceMessage, a: dict[str, Any] | None, by: str, people: dict[int, Participant]) -> dict[str, Any]:
+    """메시지 하나: 해석(LLM 결과가 없으면 규칙) → 대조 → 연결/제안. m.analysis 에 남기고 돌려준다."""
+    if a is None:
+        a = rule_extract(m, event)
+        a["by"] = "rule" if by == "rule" else "mock_fallback" if by == "mock_fallback" else "rule(LLM 누락)"
+    else:
+        a = dict(a, by=by)
+    pid = a.pop("participant_id", None) or m.participant_id
+    if m.participant_id and pid != m.participant_id:  # LLM 이 관련 ID 와 다른 사람을 고름 → 쓰지 않음
+        a = {"kind": "note", "confidence": "low", "reason": "LLM 이 고른 사람이 관련 ID 와 달라 버림", "by": a["by"], "llm_rejected": True}
+        pid = m.participant_id
+    if pid and pid not in people:
+        people[pid] = db.get(Participant, pid)
+    m.change_id = None
+    kind = a["kind"]
+    if kind == "change":
+        a |= _handle_change(db, event, m, people.get(pid), a)
+    elif kind == "admin_refund":
+        a |= _handle_admin_refund(db, event, m, people.get(pid), a)
+    elif kind == "deposit_hint":
+        sp = people.get(m.sender_participant_id) or (db.get(Participant, m.sender_participant_id) if m.sender_participant_id else None)
+        a |= {"outcome": "deposit_hint", "team_id": m.team_id or (sp.team_id if sp else None)}
+    else:
+        a["outcome"] = "recorded"
+    if pid and not m.participant_id and kind in ("change", "admin_refund"):
+        m.participant_id = pid
+    a["kind_label"], a["outcome_label"] = KIND_LABEL[kind], OUTCOME_LABEL.get(a["outcome"], a["outcome"])
+    m.analysis = a
+    return a
+
+
+def _step_of(m: EvidenceMessage) -> dict[str, Any]:
+    a = m.analysis or {}
+    return {"tool": "read_message", "args": {"message_id": m.id, "line": m.line, "at": clock.fmt(m.sent_at)}, "result": {k: a.get(k) for k in ("kind", "to", "confidence", "outcome", "change_id", "by")}, "rule": a.get("reason")}
+
+
+def _summarize(msgs: list[EvidenceMessage], by: str | None = None, fallback: str = "") -> dict[str, Any]:
+    counts: dict[str, int] = {"messages": len(msgs)}
+    outcomes: dict[str, int] = {}
+    bys = set()
+    for m in msgs:
+        a = m.analysis or {}
+        counts[a.get("kind", "note")] = counts.get(a.get("kind", "note"), 0) + 1
+        if a.get("kind") == "change":
+            outcomes[a["outcome"]] = outcomes.get(a["outcome"], 0) + 1
+        bys.add(str(a.get("by", "rule")))
+        fallback = fallback or a.get("fallback", "")
+    if by is None:
+        ai = sorted(b for b in bys if b.startswith(("claude", "gemini")))
+        by = ai[0] if ai else "mock_fallback" if "mock_fallback" in bys else "rule"
     summary = (
         f"슬랙 {len(msgs)}건 읽음 → 참석 변경 {counts.get('change', 0)}건(기존 기록 연결 {outcomes.get('linked', 0)} · 새 제안 {outcomes.get('proposed', 0)}"
         + "".join(f" · {OUTCOME_LABEL[k]} {v}" for k, v in outcomes.items() if k not in ("linked", "proposed")) + ")"
         f" · 총무 결정 {counts.get('admin_refund', 0)} · 입금 단서 {counts.get('deposit_hint', 0)} · 총무봇 DM {counts.get('bot_dm', 0)}"
     )
-    db.add(AgentRun(
-        event_id=event.id, agent="settlement", trigger=trigger, steps=steps,
-        rules=["메시지 해석은 명단·현재 응답과 대조한 뒤에만 사용", "변경은 제안까지만(총무 승인 필요)", "금액은 환불 규칙 코드가 계산"],
-        result={"summary": summary, "counts": counts, "outcomes": outcomes, "by": by, "fallback": fallback}, llm_mode=("rule" if by == "rule" else by.split(":")[0])[:20],
-    ))
     return {"counts": counts, "outcomes": outcomes, "by": by, "fallback": fallback, "summary": summary}
 
 
@@ -404,7 +484,7 @@ def _mask_match(masked: str, name: str) -> bool:
 def deposit_suggestion(db: Session, event: Event, depositor: str) -> dict[str, Any] | None:
     """입금자 불명·불일치 거래에 맞는 슬랙 입금 단서를 찾는다. 금액이 아니라 '입금자명'·'채널+가린 이름'으로만 잇는다."""
     dep = re.sub(r"\s", "", depositor)
-    for m in reversed(demo_messages(db, event)):
+    for m in reversed(all_messages(db, event)):
         a = m.analysis or {}
         if a.get("kind") != "deposit_hint" or not a.get("team_id"):
             continue

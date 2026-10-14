@@ -227,3 +227,29 @@ table.people td.slack1 { max-width: 260px; }
 .bubble .trace.tools code { font-size: 11px; }
 @media (max-width: 520px) { .agent-tl li { grid-template-columns: minmax(0, 1fr); gap: 2px; } .calc-row { grid-template-columns: minmax(0, 1fr) auto; } .calc-row > :nth-child(2) { grid-column: 1 / -1; grid-row: 2; } }
 .todo li > button { flex: none; }
+
+/* ---------- 총무 Agent 보고 카드 ---------- */
+.bubble.agent:has(.acard) { max-width: 100%; width: 100%; white-space: normal; padding: 10px 12px; }
+.bubble.brief { border-color: var(--green); background: var(--green-l); }
+.acard { display: grid; gap: 7px; }
+.ac-greet { color: var(--muted); font-size: 13px; }
+.ac-head { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; font-size: 15px; line-height: 1.45; }
+.ac-head .pill { flex: none; }
+.ac-label { font-size: 11px; font-weight: 800; color: var(--muted); margin-bottom: 2px; }
+.ac-items { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; font-size: 13px; }
+.ac-story { display: grid; gap: 5px; border-left: 3px solid var(--line); padding-left: 9px; }
+.ac-line { font-size: 13px; }
+.ac-line q { quotes: "“" "”"; font-weight: 600; }
+.ac-at { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
+.ac-who { font-weight: 700; color: var(--green-d); }
+.ac-money { font-size: 14px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; background: var(--soft); border-radius: 10px; padding: 5px 9px; }
+.ac-first { font-size: 13px; background: var(--yellow-l); border-radius: 8px; padding: 3px 8px; justify-self: start; }
+table.ac-rows { font-size: 12px; }
+table.ac-rows td { padding: 4px 6px; }
+table.ac-rows td:first-child { white-space: nowrap; }
+table.ac-rows tr.hl td { background: var(--yellow-l); }
+.ac-todo .row { gap: 6px; }
+.ac-foot { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 11px; color: var(--muted); border-top: 1px dashed var(--line); padding-top: 5px; }
+.ac-foot code { font-size: 11px; }
+button.linkish { border: 0; background: none; box-shadow: none; padding: 0; font: inherit; font-size: 11px; color: var(--green-d); text-decoration: underline; cursor: pointer; }
+button.linkish:disabled { color: var(--muted); text-decoration: none; }

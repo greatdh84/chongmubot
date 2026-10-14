@@ -13,7 +13,7 @@ from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = BACKEND_DIR.parent.parent  # 총무봇 저장소 루트(소모임 .env 가 있는 곳)
-SHARED_KEYS = ("SLACK_BOT_TOKEN", "LLM_API_KEY")  # 소모임과 같이 쓰는 비밀값: 루트 .env 에서도 읽는다
+SHARED_KEYS = ("SLACK_BOT_TOKEN", "LLM_API_KEY", "SLACK_SIGNING_SECRET")  # 소모임과 같이 쓰는 비밀값: 루트 .env 에서도 읽는다
 DEFAULT_SECRET = "dev-only-insecure-secret"
 # 공용 서버(총무봇 hub)에서 SMALL API 와 섞이지 않도록 LARGE 의 API·화면은 각각 이 경로 아래에만 둔다.
 API_PREFIX = "/api/large"
@@ -66,6 +66,9 @@ class Settings:
     invite_ttl_days: int = 30
     session_ttl_hours: int = 12
     slack_bot_token: str = ""
+    # 슬랙 실시간 연동(Events API → POST /api/large/slack/events). 기본 꺼짐. 켜도 서명 비밀값이 없으면 모든 요청 403
+    slack_events: bool = False
+    slack_signing_secret: str = ""
     claude_api_key: str = ""
     claude_model: str = "claude-haiku-5-5"
     gemini_api_key: str = ""
@@ -115,6 +118,8 @@ def load_settings() -> Settings:
         quiet_start_hour=int(_env("EMAIL_QUIET_START", "21")),
         quiet_end_hour=int(_env("EMAIL_QUIET_END", "8")),
         slack_bot_token=_env("SLACK_BOT_TOKEN"),
+        slack_events=_env("SLACK_EVENTS", "off").lower() in ("on", "1", "true", "yes"),
+        slack_signing_secret=_env("SLACK_SIGNING_SECRET"),
         claude_api_key=_env("LLM_API_KEY"),
         claude_model=_env("CLAUDE_MODEL", "claude-haiku-5-5"),
         gemini_api_key=_env("GEMINI_API_KEY"),

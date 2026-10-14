@@ -59,6 +59,7 @@ _COLUMN_UPGRADES = {
     "events": {"mode": "VARCHAR(10) NOT NULL DEFAULT 'large'", "bot_persona": "VARCHAR(20) NOT NULL DEFAULT ''", "bot_strategy": "VARCHAR(20) NOT NULL DEFAULT ''"},
     "change_logs": {"rule_missing": "BOOLEAN NOT NULL DEFAULT 0", "admin_refund_decided": "BOOLEAN NOT NULL DEFAULT 0"},
     "email_jobs": {"claimed_at": "DATETIME", "claimed_by": "VARCHAR(100) NOT NULL DEFAULT ''"},
+    "evidence_messages": {"external_id": "VARCHAR(100) NOT NULL DEFAULT ''"},
 }
 
 

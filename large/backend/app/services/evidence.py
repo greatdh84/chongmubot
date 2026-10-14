@@ -94,6 +94,7 @@ def team_evidence(db: Session, event: Event, team: Team) -> dict[str, Any]:
         item = {
             "change_id": ch.id, "participant_id": ch.participant_id, "name": names.get(ch.participant_id), "from": CHOICE_LABELS[ch.from_choice], "to": CHOICE_LABELS[ch.to_choice],
             "status": ch.status, "delta": (ch.extra_charge - ch.refund_amount) if ch.status == "applied" else None,
+            "pending_delta": (ch.extra_charge - ch.refund_amount) if ch.status == "pending_approval" and not ch.rule_missing else None,
             "pending_amount_text": ("환불액 미정(규칙 없음 → 총무 판단)" if ch.rule_missing else f"승인되면 {'+' if ch.extra_charge else '−'}{(ch.extra_charge or ch.refund_amount):,}원") if ch.status == "pending_approval" else None,
             "basis_kind": kind, "basis": basis, "requested_at": clock.fmt(ch.requested_at), "decided_at": clock.fmt(ch.decided_at),
             "source": SOURCE_LABEL.get(ch.source, ch.source), "on_event_day": on_event_day(event, ch.requested_at), "note": ch.note, "messages": ev_msgs,
