@@ -383,8 +383,10 @@ def briefing(db: Session, event: Event, rep: Any, mark_new: bool = True) -> dict
     card = evidence.settlement_card(db, event)
     from ..models import Participant
 
-    names = {p.id: p.name for p in db.scalars(select(Participant).where(Participant.event_id == event.id))}
+    people = {p.id: p for p in db.scalars(select(Participant).where(Participant.event_id == event.id))}
+    names = {k: p.name for k, p in people.items()}
     teams = {t.id: t.name for t in db.scalars(select(Team).where(Team.event_id == event.id))}
+    team_by_name = {v: k for k, v in teams.items()}
 
     # 가장 급한 것: 근거가 준비돼 바로 정할 수 있는 결정부터(규칙 금액 승인 → 슬랙 총무 결정이 있는 환불액 → 슬랙 입금자 근거 → 배정 제안 → 근거 없는 판단 → 과제)
     ruleless = [c for c in pend if c.rule_missing]
@@ -394,18 +396,18 @@ def briefing(db: Session, event: Event, rep: Any, mark_new: bool = True) -> dict
     for c in pend:
         lab = f"{names.get(c.participant_id)}님 {rpt.CHOICE_LABELS[c.from_choice]}→{rpt.CHOICE_LABELS[c.to_choice]} "
         if not c.rule_missing:
-            cands.append({"pri": 1, "label": lab + f"승인({signed(c.extra_charge - c.refund_amount)})", "action": "approve_change", "target_id": c.id})
+            cands.append({"pri": 1, "label": lab + f"승인({signed(c.extra_charge - c.refund_amount)})", "action": "approve_change", "target_id": c.id, "team_id": people[c.participant_id].team_id})
         elif suggested.get(c.id) is not None:
-            cands.append({"pri": 2, "label": lab + f"환불액 {suggested[c.id]:,}원(슬랙 총무 결정) 넣고 승인", "action": "open_changes", "target_id": c.id})
+            cands.append({"pri": 2, "label": lab + f"환불액 {suggested[c.id]:,}원(슬랙 총무 결정) 넣고 승인", "action": "open_changes", "target_id": c.id, "team_id": people[c.participant_id].team_id})
         else:
-            cands.append({"pri": 5, "label": lab + "환불액 정하고 승인", "action": "open_changes", "target_id": c.id})
+            cands.append({"pri": 5, "label": lab + "환불액 정하고 승인", "action": "open_changes", "target_id": c.id, "team_id": people[c.participant_id].team_id})
     for t in sug:
-        cands.append({"pri": 3, "label": f"'{t.evidence.get('depositor')}' 입금 → {t.evidence['slack_suggestion']['team']} 지정", "action": "accept_suggestion", "target_id": t.id})
+        cands.append({"pri": 3, "label": f"'{t.evidence.get('depositor')}' 입금 → {t.evidence['slack_suggestion']['team']} 지정", "action": "accept_suggestion", "target_id": t.id, "team_id": t.team_id or team_by_name.get(t.evidence["slack_suggestion"]["team"])})
     for a in props:
-        cands.append({"pri": 4, "label": f"{teams.get(a.team_id)} 입금 배정 제안 확정", "action": "confirm_allocation", "target_id": a.id})
+        cands.append({"pri": 4, "label": f"{teams.get(a.team_id)} 입금 배정 제안 확정", "action": "confirm_allocation", "target_id": a.id, "team_id": a.team_id})
     for t in tasks:
         if t not in sug:
-            cands.append({"pri": 6, "label": f"과제 #{t.id} 보기", "action": "open_task", "target_id": t.id})
+            cands.append({"pri": 6, "label": f"과제 #{t.id} 보기", "action": "open_task", "target_id": t.id, "team_id": t.team_id})
     urgent = min(cands, key=lambda x: x["pri"]) if cands else None
     if urgent:
         urgent = {k: v for k, v in urgent.items() if k != "pri"}

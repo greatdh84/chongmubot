@@ -17,8 +17,8 @@ from ..models import (
     CHOICE_LABELS, Admin, AgentRun, Allocation, AuditLog, BankTransaction, ChangeLog, ConfirmTask, EmailJob, Event,
     Participant, RefundRule, Response, Settlement, Team, TeamManager,
 )
-from ..schemas import AdminResponseSet, AllocationIn, BotSettings, ChatSend as ChatIn, Decision, EmailEnqueue, EventUpdate, ManagerAssign, PayoutIn, RefundRuleIn, SchedulerToggle, TaskResolve
-from ..services import demo_import, emails, evidence as evid, invites, payments, report as rpt, responses as resp_svc, roster, settlement as stl, slack as slack_svc
+from ..schemas import AdminResponseSet, AllocationIn, BotSettings, ChatSend as ChatIn, Decision, EmailEnqueue, EventUpdate, ManagerAssign, PayoutIn, RefundRuleIn, RevealIn, SchedulerToggle, TaskResolve
+from ..services import demo_import, emails, evidence as evid, invites, payments, refunds, report as rpt, responses as resp_svc, roster, settlement as stl, slack as slack_svc
 from ..services.common import active_manager, audit, get_participant_in_event, get_team_in_event
 from .util import change_out, event_out, task_out
 
@@ -244,6 +244,9 @@ def list_participants(team_id: int | None = None, q: str | None = None, ev: Even
     table = resp_svc.fee_table(db, ev, team_id)
     teams = {t.id: t for t in db.scalars(select(Team).where(Team.event_id == ev.id))}
     managers = {m.participant_id for m in db.scalars(select(TeamManager).where(TeamManager.revoked_at.is_(None)))}
+    delta: dict[int, int] = {}
+    for c in db.scalars(select(ChangeLog).where(ChangeLog.event_id == ev.id, ChangeLog.after_deadline.is_(True), ChangeLog.status == "applied")):
+        delta[c.participant_id] = delta.get(c.participant_id, 0) + c.extra_charge - c.refund_amount
     out = []
     for p in db.scalars(query.order_by(Participant.employee_no).limit(400)):
         st = table.get(p.id)
@@ -253,7 +256,7 @@ def list_participants(team_id: int | None = None, q: str | None = None, ev: Even
                 "team": {"id": p.team_id, "code": teams[p.team_id].code, "name": teams[p.team_id].name},
                 "is_manager": p.id in managers, "choice": st.choice if st else None, "choice_label": CHOICE_LABELS[st.choice if st else None],
                 "snapshot_choice": st.snapshot_choice if st else None, "fee": st.liability if st else None,
-                "pending_change_id": st.pending_change_id if st else None, "invite": invites.status(db, p.id),
+                "pending_change_id": st.pending_change_id if st else None, "invite": invites.status(db, p.id), "delta": delta.get(p.id),
             }
         )
     return out
@@ -471,8 +474,9 @@ def resolve_task(task_id: int, body: TaskResolve, ev: Event = Depends(admin_even
     t.status, t.resolution, t.updated_at = "resolved", f"총무 처리: {body.resolution}", clock.now()
     audit(db, ev.id, _actor(admin), "task_resolved", f"task:{t.id}")
     _refresh(db, ev, "task_resolved")
+    report = admin_agent.report_action(db, ev, kind="task_resolved", team_id=t.team_id, what=f"확인 과제 #{t.id}를 처리했어요({body.resolution[:40]}).")
     db.commit()
-    return task_out(t)
+    return task_out(t) | {"agent_report": report}
 
 
 @router.post("/events/{event_id}/tasks/{task_id}/accept-suggestion")
@@ -608,14 +612,89 @@ def refresh_report(ev: Event = Depends(admin_event), admin: Admin = Depends(curr
     return rpt.report_out(rep)
 
 
+def _csv(content: str, filename: str) -> RawResponse:
+    # UTF-8 BOM: 엑셀에서 한글이 깨지지 않게
+    return RawResponse(content="\ufeff" + content, media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
 @router.get("/events/{event_id}/report.csv")
-def report_csv(ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
+def report_csv(kind: str | None = None, ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
+    """정산 결과 내보내기. kind 없음 = 보고서 전체(부서 + 사람), teams = 부서별 정산표, people = 사람별 변동표."""
     rep = rpt.latest(db, ev) or rpt.refresh(db, ev, "report_csv")
     db.commit()
-    return RawResponse(
-        content="\ufeff" + rpt.to_csv(rep), media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="settlement_report_v{rep.version}.csv"'},
-    )
+    if kind == "teams":
+        return _csv(rpt.teams_csv(rep), f"settlement_teams_v{rep.version}.csv")
+    if kind == "people":
+        return _csv(rpt.people_csv(rep), f"settlement_people_v{rep.version}.csv")
+    return _csv(rpt.to_csv(rep), f"settlement_report_v{rep.version}.csv")
+
+
+@router.get("/events/{event_id}/workbench")
+def workbench(ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
+    """대시보드 작업대: 급한 순 부서 목록(할 일 n) + 부서 밖 과제 + 첫 선택 부서(브리핑의 가장 급한 것)."""
+    from ..agents import admin_cards
+
+    rep = rpt.latest(db, ev)
+    if rep is None or rpt.ensure_checkpoints(db, ev):
+        rep = rpt.refresh(db, ev, "report_view")
+        db.commit()
+    out = evid.workbench(db, ev, rep)
+    urgent = admin_cards.briefing(db, ev, rep, mark_new=False)["urgent"]
+    first = (urgent or {}).get("team_id") or next((t["team_id"] for t in out["teams"] if t["todo"]), None) or (out["teams"][0]["team_id"] if out["teams"] else None)
+    return out | {"first_team_id": first, "urgent": urgent}
+
+
+# ---------------------------------------------------------------- 환불 계좌·송금 (실제 송금은 하지 않음 — 총무가 은행 앱에서 보낸 뒤 표시만)
+
+@router.get("/events/{event_id}/refunds")
+def refund_rows(ev: Event = Depends(admin_event), db: Session = Depends(get_db)):
+    return {"rows": refunds.rows(db, ev), "demo_note": refunds.DEMO_NOTE if settings.is_demo else ""}
+
+
+@router.post("/events/{event_id}/refunds/{team_id}/account/{account_id}/confirm")
+def refund_account_confirm(team_id: int, account_id: int, ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
+    """슬랙 답장에서 읽은 계좌 후보를 총무가 확인해 저장."""
+    team = get_team_in_event(db, ev.id, team_id)
+    a = refunds.confirm_candidate(db, ev, team, account_id, admin)
+    report = admin_agent.report_action(db, ev, kind="refund_account_confirmed", team_id=team.id, what=f"{team.name} 환불 계좌({a.bank} {refunds.mask(a.account_no)})를 저장했어요. 은행 앱에서 보낸 뒤 '송금 완료'를 눌러 주세요.")
+    db.commit()
+    return {"account": refunds.account_out(a), "agent_report": report}
+
+
+@router.post("/events/{event_id}/refunds/{team_id}/account/reveal")
+def refund_account_reveal(team_id: int, body: RevealIn, ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
+    """총무만: 전체 계좌번호(보기·복사). 꺼낸 사실은 감사 로그에 남는다(번호 없이)."""
+    out = refunds.reveal(db, ev, get_team_in_event(db, ev.id, team_id), admin, body.purpose)
+    db.commit()
+    return out
+
+
+@router.delete("/events/{event_id}/refunds/{team_id}/account")
+def refund_account_delete(team_id: int, ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
+    n = refunds.remove(db, ev, get_team_in_event(db, ev.id, team_id), admin)
+    db.commit()
+    return {"deleted": n}
+
+
+@router.post("/events/{event_id}/refunds/{team_id}/paid")
+def refund_paid(team_id: int, ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
+    """총무가 은행 앱에서 보낸 뒤 '송금 완료 표시' → 정산 확정 + 환불 지급 기록 → 잔액 0 → 완료."""
+    team = get_team_in_event(db, ev.id, team_id)
+    out = refunds.mark_paid(db, ev, team, admin)
+    _refresh(db, ev, "payout_recorded")
+    report = admin_agent.report_action(db, ev, kind="refund_paid", team_id=team.id, what=f"{team.name} 환불 {out['amount']:,}원 송금 완료로 표시했어요.")
+    db.commit()
+    return out | {"agent_report": report}
+
+
+@router.get("/events/{event_id}/refunds/payouts.csv")
+def payout_sheet(confirm: str = "", ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
+    """송금 명세 CSV — 전체 계좌번호가 들어가는 유일한 내보내기. 화면에서 한 번 더 확인한 뒤 confirm=yes 로만."""
+    if confirm != "yes":
+        raise invalid("CONFIRM_REQUIRED", "전체 계좌번호가 들어가는 파일입니다. 확인 후 다시 요청하세요(confirm=yes)")
+    content = refunds.payout_sheet_csv(db, ev, admin)
+    db.commit()
+    return _csv(content, "refund_payouts.csv")
 
 
 @router.get("/events/{event_id}/agent/chat")
@@ -638,8 +717,8 @@ def admin_chat_send(body: ChatIn, ev: Event = Depends(admin_event), db: Session 
 def enqueue(body: EmailEnqueue, ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
     fns = {
         "invite": emails.enqueue_invites, "attend_reminder": emails.enqueue_attend_reminders, "payment_reminder": emails.enqueue_payment_reminders,
-        "refund_notice": lambda d, e: emails.enqueue_settlement_notices(d, e, "refund_notice"),
-        "extra_notice": lambda d, e: emails.enqueue_settlement_notices(d, e, "extra_notice"),
+        "refund_notice": lambda d, e: emails.enqueue_settlement_notices(d, e, "refund_notice", body.team_ids),
+        "extra_notice": lambda d, e: emails.enqueue_settlement_notices(d, e, "extra_notice", body.team_ids),
     }
     result = fns[body.kind](db, ev)
     audit(db, ev.id, _actor(admin), "emails_enqueued", detail={"kind": body.kind, **result})

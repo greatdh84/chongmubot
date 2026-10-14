@@ -14,8 +14,10 @@ from ..db import get_db
 from ..deps import ManagerCtx, current_manager
 from ..errors import AppError, conflict
 from ..models import ChangeLog, ConfirmTask, Participant, Settlement
-from ..schemas import ChatSend, CorrectionIn, TaskAnswer
+from ..schemas import ChatSend, CorrectionIn, RefundAccountIn, TaskAnswer
 from ..services.common import add_message, audit, get_or_create_thread
+from ..config import settings
+from ..services import refunds
 from ..services.settlement import compute_team
 from .util import change_out, event_out, task_out
 
@@ -109,3 +111,20 @@ def send_chat(body: ChatSend, ctx: ManagerCtx = Depends(current_manager), db: Se
     rpt.refresh(db, ctx.event, "manager_chat")
     db.commit()
     return out
+
+
+@router.get("/refund-account")
+def refund_account(ctx: ManagerCtx = Depends(current_manager), db: Session = Depends(get_db)):
+    """환불 받을 계좌(뒤 4자리만). 전체 번호는 담당자 화면에도 다시 보여 주지 않는다."""
+    calc = compute_team(db, ctx.event, ctx.team)
+    return {
+        "due": max(0, -calc["balance"]), "paid": calc["refunds_paid"], "account": refunds.account_out(refunds.saved(db, ctx.team.id)),
+        "candidate": refunds.account_out(refunds.candidate(db, ctx.team.id)), "demo_note": refunds.DEMO_NOTE if settings.is_demo else "",
+    }
+
+
+@router.post("/refund-account")
+def submit_refund_account(body: RefundAccountIn, ctx: ManagerCtx = Depends(current_manager), db: Session = Depends(get_db)):
+    a = refunds.submit(db, ctx.event, ctx.team, ctx.participant, body.bank, body.account_no, body.holder, source="manager")
+    db.commit()
+    return {"account": refunds.account_out(a)}

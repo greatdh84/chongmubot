@@ -3,7 +3,7 @@ import { api, fmtTime, won, type ChatMessage, type ChatThread } from "../../api"
 import { useAction } from "../../hooks";
 
 /** 총무 Agent 보고 카드(백엔드 agents/admin_cards.py 와 같은 구조). 숫자는 모두 코드 계산 값 */
-export interface Todo { label: string; action: string; target_id?: number; team?: string; kind?: string }
+export interface Todo { label: string; action: string; target_id?: number; team?: string; kind?: string; team_id?: number | null }
 export interface AgentCard {
   type: string; greeting?: string; headline?: string; status?: { key: string; label: string } | null;
   story?: { at: string | null; text: string; who?: string; quote?: string }[];
@@ -38,7 +38,7 @@ export function CardView({ c, onTodo, busy }: { c: AgentCard; onTodo: (t: Todo) 
       {c.first && <div className="ac-first">가장 먼저 볼 것 · <b>{c.first.team}</b></div>}
       {c.rows && c.rows.length > 0 && (
         <table className="ac-rows"><tbody>{c.rows.map((r, i) => (
-          <tr key={i} className={c.first && r.team_id === c.first.team_id ? "hl" : ""}>
+          <tr key={i} className={`${c.first && r.team_id === c.first.team_id ? "hl" : ""} ${r.team_id ? "clickable" : ""}`} onClick={() => r.team_id && onTodo({ label: r.team ?? "", action: "open_evidence", target_id: r.team_id })}>
             <td><b>{r.name ?? r.team}</b>{r.name && r.team ? <span className="muted"> {r.team}</span> : null}{r.manager ? <span className="muted"> · {r.manager}</span> : null}</td>
             <td className="num">{r.amount ? won(r.amount) : ""}</td>
             <td className="muted">{r.reason ?? r.line}</td>
@@ -94,7 +94,8 @@ export function CardView({ c, onTodo, busy }: { c: AgentCard; onTodo: (t: Todo) 
 const STATE_LABEL: Record<string, string> = { awaiting_confirmation: "확인(네/아니요)을 기다리는 중", awaiting_info: "Agent 가 추가 정보를 기다리는 중" };
 
 /** 대시보드 총무 Agent: 열면 먼저 브리핑, 질문하면 보고 카드, 버튼으로 바로 처리(실행은 확인 후) */
-export function AgentChat({ base, chips, go, onChange }: { base: string; chips: string[]; go: Go; onChange?: () => void }) {
+/** openTeam 이 있으면(대시보드 작업대) '근거 보기·승인 화면 열기' 같은 [하실 일]은 그 부서를 부서 상세에 연다 */
+export function AgentChat({ base, chips, go, onChange, openTeam, reloadKey }: { base: string; chips: string[]; go: Go; onChange?: () => void; openTeam?: (teamId: number) => void; reloadKey?: number }) {
   const [thread, setThread] = useState<(ChatThread & { messages: Msg[] }) | null>(null);
   const [brief, setBrief] = useState<AgentCard | null>(null);
   const [text, setText] = useState("");
@@ -105,7 +106,7 @@ export function AgentChat({ base, chips, go, onChange }: { base: string; chips: 
     api.get<ChatThread>(chat).then((t) => setThread(t as ChatThread & { messages: Msg[] })).catch(() => undefined);
     api.get<AgentCard>(`${base}/agent/briefing`).then((b) => { setBrief(b); api.post(`${base}/agent/briefing/seen`).catch(() => undefined); }).catch(() => undefined);
   };
-  useEffect(load, [base]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(load, [base, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight }); }, [thread]);
 
   const send = (msg: string) => msg.trim() && run(async () => {
@@ -116,6 +117,8 @@ export function AgentChat({ base, chips, go, onChange }: { base: string; chips: 
   });
   const todo = (t: Todo) => {
     const after = () => { load(); onChange?.(); };
+    const team = t.team_id ?? (t.action === "open_evidence" ? t.target_id : undefined);
+    if (openTeam && team && t.action.startsWith("open_")) return openTeam(team);
     switch (t.action) {
       case "approve_change": return run(() => api.post(`${base}/changes/${t.target_id}/approve`, { note: "" })).then(after);
       case "accept_suggestion": return run(() => api.post(`${base}/tasks/${t.target_id}/accept-suggestion`)).then(after);

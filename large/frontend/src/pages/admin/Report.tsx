@@ -1,6 +1,6 @@
 import { Fragment, useState } from "react";
 import { api, CHOICE_LABEL, fmtTime, STATIC, won } from "../../api";
-import { Msg } from "../../components/common";
+import { ChoiceNow, ChoicePill, DeltaChip, deltaRow, deltaTone, Msg, type DeltaTone } from "../../components/common";
 import { useAction, useLoad } from "../../hooks";
 import { TeamStatement } from "./AdminMoney";
 import { NotifyPanel, TeamEvidence, type Go } from "./Evidence";
@@ -164,12 +164,12 @@ export function ReportTab({ base, go, focusTeam }: { base: string; go?: Go; focu
           <tbody>{people.map((p) => {
             const last = p.changes[p.changes.length - 1];
             return (
-              <tr key={`${p.participant_id}-${p.kind}`}>
+              <tr key={`${p.participant_id}-${p.kind}`} className={deltaRow(personTone(p))}>
                 <td>{p.team_name} <span className="muted">({p.manager_name ?? "미지정"})</span></td>
                 <td><b>{p.name}</b> <span className={`pill ${KIND[p.kind][1]}`}>{KIND[p.kind][0]}</span></td>
-                <td>{last ? `${last.from} → ${last.to}` : `${CHOICE_LABEL[p.snapshot_choice ?? "none"]} (응답 없음)`}{last && <div className="muted">{last.source} · 요청 {fmtTime(last.requested_at)}{last.decided_at ? ` · 승인 ${fmtTime(last.decided_at)}` : ""}</div>}</td>
+                <td>{last ? <><ChoicePill choice={p.snapshot_choice} /> → <ChoiceNow choice={p.choice} tone={personTone(p)} /></> : `${CHOICE_LABEL[p.snapshot_choice ?? "none"]} (응답 없음)`}{last && <div className="muted">{last.source} · 요청 {fmtTime(last.requested_at)}{last.decided_at ? ` · 승인 ${fmtTime(last.decided_at)}` : ""}</div>}</td>
                 <td>{p.on_event_day ? <span className="pill warn">행사 당일</span> : <span className="pill">일반</span>}</td>
-                <td className="num">{p.kind === "included" ? <span className="muted">청구 포함</span> : p.amount ? <b className={p.kind === "refund" ? "minus" : "plus"}>{p.kind === "refund" ? "−" : "+"}{won(p.amount)}</b> : p.kind === "pending" ? <span className="muted">승인 후 결정</span> : "-"}</td>
+                <td className="num">{p.kind === "included" ? <span className="muted">청구 포함</span> : p.amount ? <DeltaChip amount={p.kind === "refund" ? -p.amount : p.amount} /> : p.kind === "pending" || p.kind === "rule_missing" ? <DeltaChip amount={null} pending text="승인 후 결정" /> : "-"}</td>
                 <td className="muted">{p.basis_kind === "admin" ? <span className="pill warn">총무 결정</span> : p.basis_kind === "pending" ? <span className="pill bad">규칙 없음</span> : p.basis_kind === "rule" ? <span className="pill">규칙</span> : null} {p.basis}</td>
                 <td className="muted slack1">{p.slack ? <><b>{p.slack.sender}</b> {fmtTime(p.slack.at)}<br />“{p.slack.text}”</> : "-"}</td>
                 <td>{p.process && <span className={`pill ${PROCESS_TONE(p.process)}`}>{p.process}</span>}</td>
@@ -192,6 +192,10 @@ export function ReportTab({ base, go, focusTeam }: { base: string; go?: Go; focu
     </>
   );
 }
+
+/** 사람별 변동 행의 색(승인 대기·환불액 미정 = 노랑 점선, 추가 = 주황, 환불 = 파랑) */
+export const personTone = (p: ReportPerson): DeltaTone =>
+  p.kind === "pending" || p.kind === "rule_missing" ? "pending" : p.kind === "extra" ? "extra" : p.kind === "refund" ? "refund" : p.kind === "unresolved" ? null : deltaTone(p);
 
 const changedTeams = (rep: Report) => new Set((rep.diff?.first ? [] : rep.diff?.teams ?? []).map((t) => t.team_id));
 

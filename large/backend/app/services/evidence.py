@@ -98,7 +98,12 @@ def team_evidence(db: Session, event: Event, team: Team) -> dict[str, Any]:
             "pending_amount_text": ("환불액 미정(규칙 없음 → 총무 판단)" if ch.rule_missing else f"승인되면 {'+' if ch.extra_charge else '−'}{(ch.extra_charge or ch.refund_amount):,}원") if ch.status == "pending_approval" else None,
             "basis_kind": kind, "basis": basis, "requested_at": clock.fmt(ch.requested_at), "decided_at": clock.fmt(ch.decided_at),
             "source": SOURCE_LABEL.get(ch.source, ch.source), "on_event_day": on_event_day(event, ch.requested_at), "note": ch.note, "messages": ev_msgs,
+            "rule_missing": ch.rule_missing, "admin_refund_decided": ch.admin_refund_decided, "rule_text": ch.rule_text,
         }
+        sug = next((m for m in msgs_by_change.get(ch.id, []) if (m.analysis or {}).get("outcome") == "suggest_refund"), None)
+        if sug is not None and ch.status == "pending_approval":
+            item["suggested_refund"] = sug.analysis["suggested_refund"]
+            item["suggested_note"] = f"총무 슬랙 결정({_kst(sug.sent_at)}): {sug.text[:80]}"
         if billing is not None and ch.status == "applied" and (ch.decided_at or ch.requested_at) <= deadline:
             before_billing.append(item)
         else:
@@ -165,12 +170,103 @@ def team_evidence(db: Session, event: Event, team: Team) -> dict[str, Any]:
         blockers.append({"text": f"확인 과제 #{task.id}: {task.question.splitlines()[0][:90]}", "task_id": task.id, "kind": task.kind,
                          "suggestion": f"슬랙 근거 → {sug['team']} 배정 후보" if sug else None, "link": {"tab": "입금·확인", "sub": "확인 과제", "ids": [task.id]}})
 
+    from . import refunds
+
     return {
-        "team": {"team_id": team.id, "code": team.code, "name": team.name, "headcount": calc["headcount"], "manager": mp.name if mp else None},
+        "team": {"team_id": team.id, "code": team.code, "name": team.name, "headcount": calc["headcount"], "manager": mp.name if mp else None, "manager_id": mp.id if mp else None},
         "billing": bill, "before_billing": before_billing, "changes": lines, "final_fee": calc["final_fee"], "check": calc_check,
         "received": calc["received"], "refunds_paid": calc["refunds_paid"], "balance": calc["balance"],
-        "receipts": receipts, "messages": msgs, "blockers": blockers,
+        "receipts": receipts, "messages": msgs, "blockers": blockers, "members": members_out(calc, mp.id if mp else None),
+        "tasks": [_task_brief(db, t) for t in tasks if t.kind != "change_approval"], "refund": refunds.team_state(db, event, team),
+        "notices": _notices(db, team.id, calc["balance"]),
     }
+
+
+def members_out(calc: dict[str, Any], manager_id: int | None) -> list[dict[str, Any]]:
+    """팀원별 표: 마감 기준 vs 현재. delta = 반영된 마감 후 변동 금액(+추가 / −환불), pending = 승인 대기 변경이 있음."""
+    out = []
+    for l in calc["lines"]:
+        applied = [c for c in l["changes"] if c["status"] == "applied"]
+        out.append({
+            "participant_id": l["participant_id"], "name": l["name"], "is_manager": l["participant_id"] == manager_id,
+            "snapshot_choice": l["snapshot_choice"], "choice": l["choice"], "fee": l["fee"], "unresolved": l["unresolved"],
+            "delta": sum(c["extra_charge"] - c["refund_amount"] for c in applied) if applied else None,
+            "pending": any(c["status"] == "pending_approval" for c in l["changes"]),
+            "changes": [{"from": CHOICE_LABELS[c["from"]], "to": CHOICE_LABELS[c["to"]], "status": c["status"], "amount": c["extra_charge"] - c["refund_amount"], "rule_missing": c["rule_missing"]} for c in l["changes"]],
+        })
+    return out
+
+
+TASK_LABEL = {"unknown_depositor": "입금자 확인", "ambiguous_depositor": "동명이인 입금", "unclear_deposit": "불명확한 입금", "possible_duplicate": "중복 납부 의심",
+              "unresolved_response": "응답 미확정", "correction_request": "정정 요청", "deposit_unresolved": "입금 미해결", "overpayment_unexplained": "초과 수납 원인 불명", "multiple_team_reference": "여러 팀 표기"}
+
+
+def _task_brief(db: Session, t: ConfirmTask) -> dict[str, Any]:
+    txn = db.get(BankTransaction, t.transaction_id) if t.transaction_id else None
+    return {
+        "id": t.id, "kind": t.kind, "label": TASK_LABEL.get(t.kind, t.kind), "status": t.status, "assignee": t.assignee, "blocking": t.blocking,
+        "question": t.question.splitlines()[0], "slack_suggestion": (t.evidence or {}).get("slack_suggestion"),
+        "transaction": {"id": txn.id, "depositor": txn.depositor, "amount": txn.amount, "txn_at": clock.fmt(txn.txn_at)} if txn else None,
+    }
+
+
+def _notices(db: Session, team_id: int, balance: int) -> dict[str, Any]:
+    """담당자 안내(환불·추가 납부)를 지금 금액으로 이미 보냈는지."""
+    out = {}
+    for kind in ("refund_notice", "extra_notice"):
+        j = db.scalar(select(EmailJob).where(EmailJob.team_id == team_id, EmailJob.kind == kind).order_by(EmailJob.id.desc()))
+        if j is not None:
+            out[kind] = {"status": j.status, "sent_at": clock.fmt(j.sent_at), "current": j.dedupe_key == f"{kind}:{team_id}:{balance}"}
+    return out
+
+
+STATUS_ORDER = {"check": 0, "extra": 1, "refund": 2, "done": 3}
+
+
+def workbench(db: Session, event: Event, rep: Any) -> dict[str, Any]:
+    """대시보드 작업대 왼쪽 부서 목록: 급한 순(확인 필요 → 추가 → 환불 → 완료), 부서마다 '할 일 n'.
+    할 일 = 변경 승인 대기 + 입금 배정 제안 + 열린 확인 과제 + 응답 미확정 + (안내 안 보낸 추가/환불) + (안내 뒤 환불 송금 전)."""
+    from . import refunds
+
+    pend: dict[int, int] = {}
+    for c, tid in db.execute(select(ChangeLog, Participant.team_id).join(Participant, Participant.id == ChangeLog.participant_id).where(ChangeLog.event_id == event.id, ChangeLog.status == "pending_approval")):
+        pend[tid] = pend.get(tid, 0) + 1
+    props: dict[int, int] = {}
+    for a in db.scalars(select(Allocation).where(Allocation.event_id == event.id, Allocation.status == "proposed")):
+        props[a.team_id] = props.get(a.team_id, 0) + 1
+    tasks: dict[int | None, list[ConfirmTask]] = {}
+    for t in db.scalars(select(ConfirmTask).where(ConfirmTask.event_id == event.id, ConfirmTask.status.in_(ACTIVE), ConfirmTask.kind != "change_approval")):
+        tasks.setdefault(t.team_id, []).append(t)
+    refund_rows = {r["team_id"]: r for r in refunds.rows(db, event)}
+    rows = []
+    for t in rep.teams:
+        tid = t["team_id"]
+        todo: list[str] = []
+        if pend.get(tid):
+            todo.append(f"변경 승인 {pend[tid]}")
+        if props.get(tid):
+            todo.append(f"입금 제안 확정 {props[tid]}")
+        for k in tasks.get(tid, []):
+            if k.kind != "unresolved_response":
+                todo.append(TASK_LABEL.get(k.kind, k.kind))
+        unresolved = t.get("people_counts", {}).get("unresolved", 0)
+        if unresolved:
+            todo.append(f"응답 미확정 {unresolved}")
+        if t["status"] in ("extra", "refund") and not t["blockers"]:
+            sent = _notices(db, tid, t["balance"]).get("refund_notice" if t["status"] == "refund" else "extra_notice")
+            if not (sent and sent["current"] and sent["status"] == "sent"):
+                todo.append("담당자 안내")
+            elif t["status"] == "refund":
+                r = refund_rows.get(tid)
+                todo.append("계좌 확인" if r and r["state"] == "candidate" else "환불 송금" if r and r["state"] == "saved" else "계좌 입력 대기")
+        rows.append({
+            "team_id": tid, "code": t["code"], "name": t["name"], "manager": (t["manager"] or {}).get("name"), "status": t["status"],
+            "balance": t["balance"], "final_fee": t["final_fee"], "billed": t["billed"], "received": t["received"], "todo": todo,
+            "refund_state": (refund_rows.get(tid) or {}).get("state"),
+        })
+    rows.sort(key=lambda r: (STATUS_ORDER[r["status"]], -len(r["todo"]), r["code"]))
+    orphan = [_task_brief(db, k) for k in tasks.get(None, [])]
+    return {"teams": rows, "orphan_tasks": orphan, "refunds": len(refund_rows), "report_version": rep.version}
 
 
 def person_evidence(db: Session, event: Event, p: Participant) -> dict[str, Any]:

@@ -10,6 +10,7 @@ import InviteLanding from "./pages/InviteLanding";
 import ManagerLogin from "./pages/ManagerLogin";
 import ManagerPage from "./pages/ManagerPage";
 import ParticipantPage from "./pages/ParticipantPage";
+import RefundAccountPage from "./pages/RefundAccount";
 
 // 정적 데모판(GitHub Pages)은 서버가 내부 경로를 index.html 로 돌려주지 않으므로 해시 주소(#/admin)를 쓴다.
 const Router = ({ children }: { children: ReactNode }) => (STATIC ? <HashRouter>{children}</HashRouter> : <BrowserRouter basename="/large">{children}</BrowserRouter>);
@@ -36,6 +37,7 @@ export default function App() {
           <Route path="/me" element={<ParticipantPage />} />
           <Route path="/manager/login" element={<ManagerLogin />} />
           <Route path="/manager" element={<ManagerPage />} />
+          <Route path="/refund-account" element={<RefundAccountPage />} />
           <Route path="/admin/login" element={<AdminLogin />} />
           <Route path="/admin" element={<AdminPage />} />
           {meta?.demo_tools && <Route path="/dev/inbox" element={<DevInbox />} />}

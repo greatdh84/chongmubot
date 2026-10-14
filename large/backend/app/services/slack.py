@@ -28,8 +28,8 @@ from ..adapters.llm import LLMError, complete_json, parse_choice
 from ..config import settings
 from ..errors import AppError, invalid
 from ..models import CHOICE_LABELS, CHOICES, AgentRun, ChangeLog, ConfirmTask, EvidenceMessage, Event, Participant, Team
-from . import responses
-from .common import audit, won
+from . import refunds, responses
+from .common import audit, is_active_manager, won
 from .roster import _decode
 
 COLS = ("일시", "보낸 사람", "받는 사람", "부서", "내용")
@@ -37,12 +37,13 @@ BOT_NAMES = {"총무봇"}
 ADMIN_NAMES = {"총무"}
 KIND_LABEL = {
     "change": "참석 변경", "admin_refund": "총무 환불 결정", "deposit_hint": "입금 단서", "payment_promise": "납부 약속",
-    "bot_dm": "총무봇 DM", "admin_note": "총무 메모", "note": "기타",
+    "bot_dm": "총무봇 DM", "admin_note": "총무 메모", "refund_account": "환불 계좌", "note": "기타",
 }
 OUTCOME_LABEL = {
     "proposed": "변경 제안 생성(총무 승인 대기)", "linked": "이미 있는 변경 기록과 연결", "no_change": "현재 응답과 같아 변경 없음",
     "conflict": "다른 변경이 승인 대기 중이라 보류", "suggest_refund": "승인 화면에 총무 결정 환불액 제안", "before_deadline": "참석 마감 전 메시지(참가자 응답으로 처리)",
     "rejected": "검증 실패로 버림", "deposit_hint": "입금자 확인 과제의 근거로 대기", "recorded": "기록", "invalid": "검증 실패",
+    "account_candidate": "환불 계좌 후보(총무 확인 전)",
 }
 
 
@@ -123,6 +124,10 @@ def ingest_slack_message(
         sp = _sender_participant(db, event, sender, team)
     if team is None:
         team = db.get(Team, related.team_id) if related else db.get(Team, sp.team_id) if sp else None
+    # 담당자 답장의 환불 계좌: 전체 번호는 계좌 후보(RefundAccount)에만, 근거 메시지에는 뒤 4자리만. LLM 에도 보내지 않는다.
+    acct = refunds.parse_account(text) if sp is not None and is_active_manager(db, sp.id, sp.team_id) else None
+    if acct:
+        text, team = refunds.masked_text(text, acct), db.get(Team, sp.team_id)
     m = EvidenceMessage(
         event_id=event.id, source=source, line=line, sent_at=sent_at, sender=sp.name if sp else sender, recipient=recipient or channel,
         sender_participant_id=sp.id if sp else None, team_id=team.id if team else None, participant_id=related.id if related else None,
@@ -131,6 +136,8 @@ def ingest_slack_message(
     db.add(m)
     db.flush()
     by, fallback, llm = "rule", "", {}
+    if acct:
+        return _account_message(db, event, m, sp, acct, record_run)
     if settings.llm_mode in ("claude", "gemini"):
         try:
             llm, model = llm_extract(db, event, [m])
@@ -150,6 +157,29 @@ def ingest_slack_message(
             rules=["메시지 해석은 명단·현재 응답과 대조한 뒤에만 사용", "변경은 제안까지만(총무 승인 필요)"],
             result={"summary": f"슬랙 {m.sender}: {a['kind_label']} → {a['outcome_label']}", "message_id": m.id, "by": a.get("by"), "fallback": fallback},
             llm_mode=("rule" if by == "rule" else by.split(":")[0])[:20],
+        ))
+    return m
+
+
+def _account_message(db: Session, event: Event, m: EvidenceMessage, sp: Participant, acct: dict[str, Any], record_run: bool) -> EvidenceMessage:
+    """담당자가 슬랙으로 보낸 환불 계좌 → 총무 확인 전 '후보'. 확정은 총무가 환불 송금 목록에서(HITL)."""
+    team = db.get(Team, sp.team_id)
+    cand = refunds.add_candidate(db, event, team, sp, acct, m.id, m.sent_at)
+    a = {
+        "kind": "refund_account", "confidence": "high" if cand else "low", "by": "rule", "team_id": team.id,
+        "reason": "담당자 답장에서 은행·계좌번호·예금주를 읽음(형식 검사 통과)" if cand else "계좌처럼 보이지만 형식 검사를 통과하지 못함",
+        "outcome": "account_candidate" if cand else "invalid", "account": f"{acct['bank']} {refunds.mask(acct['account_no'])}",
+    }
+    a["kind_label"], a["outcome_label"] = KIND_LABEL["refund_account"], OUTCOME_LABEL[a["outcome"]]
+    m.analysis = a
+    db.flush()
+    if record_run:
+        db.add(AgentRun(
+            event_id=event.id, agent="settlement", trigger=f"{m.source}:{m.id}",
+            steps=[{"tool": "read_message", "args": {"message_id": m.id, "at": clock.fmt(m.sent_at)}, "result": {k: a.get(k) for k in ("kind", "outcome", "account", "by")}, "rule": a["reason"]}],
+            rules=["계좌는 뒤 4자리만 기록·표시", "계좌는 후보까지만(총무 확인 후 저장)"],
+            result={"summary": f"슬랙 {m.sender}: {a['kind_label']} {a['account']} → {a['outcome_label']}", "message_id": m.id, "by": "rule"},
+            llm_mode="rule",
         ))
     return m
 
@@ -180,6 +210,7 @@ def import_csv(db: Session, event: Event, actor: str, data: bytes) -> dict[str, 
 def clear(db: Session, event: Event) -> None:
     """그 행사의 demo_slack 메시지와, 그 메시지에서 나온 '아직 승인 안 된' 변경 제안을 지운다(승인된 변경은 남김)."""
     _drop_pending_proposals(db, event)
+    refunds.drop_candidates(db, [m.id for m in demo_messages(db, event)])
     db.execute(delete(EvidenceMessage).where(EvidenceMessage.event_id == event.id, EvidenceMessage.source == "demo_slack"))
     _drop_task_suggestions(db, event)
     db.flush()
@@ -346,7 +377,8 @@ def process_messages(db: Session, event: Event, trigger: str = "slack_import") -
 
     _drop_pending_proposals(db, event)
     _drop_task_suggestions(db, event)
-    msgs = demo_messages(db, event)
+    # 환불 계좌 답장은 다시 해석하지 않는다(번호는 가려져 있고 LLM 에 보내지 않음)
+    msgs = [m for m in demo_messages(db, event) if (m.analysis or {}).get("kind") != "refund_account"]
     if not msgs:
         return {"counts": {"messages": 0}, "outcomes": {}, "by": "rule", "fallback": ""}
     by, fallback, llm = "rule", "", {}

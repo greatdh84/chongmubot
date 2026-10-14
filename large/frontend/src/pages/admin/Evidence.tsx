@@ -15,6 +15,15 @@ interface EvChange {
   change_id: number; participant_id: number; name: string; from: string; to: string; status: string; delta: number | null; pending_amount_text: string | null;
   basis_kind: "rule" | "admin" | "pending"; basis: string; requested_at: string; decided_at: string | null; source: string; on_event_day: boolean; note: string;
   messages: { id: number; sender: string; sent_at: string; text: string; kind: string | null }[];
+  pending_delta?: number | null; rule_missing?: boolean; rule_text?: string; suggested_refund?: number; suggested_note?: string;
+}
+export interface EvMember { participant_id: number; name: string; is_manager: boolean; snapshot_choice: string | null; choice: string | null; fee: number | null; unresolved: boolean; delta: number | null; pending: boolean; changes: { from: string; to: string; status: string; amount: number; rule_missing: boolean }[] }
+export interface TaskBrief { id: number; kind: string; label: string; status: string; assignee: string; blocking: boolean; question: string; slack_suggestion: { team: string; sender: string; sent_at: string; text: string; why: string } | null; transaction: { id: number; depositor: string; amount: number; txn_at: string } | null }
+export interface MaskedAcct { id: number; bank: string; masked: string; holder: string; status: string; source: string; source_label: string; submitted_at: string; submitted_by?: string | null; message_id: number | null }
+export interface RefundRow {
+  team_id: number; team: string; code: string; manager: string | null; refund: number; due: number; paid: number; balance: number; blockers: string[];
+  state: "none" | "candidate" | "saved" | "paid"; state_label: string; account: MaskedAcct | null; candidate: MaskedAcct | null;
+  notice_sent_at: string | null; link_expires_at: string | null; can_pay: boolean; can_delete: boolean;
 }
 interface EvReceipt {
   transaction_id: number; allocation_id: number | null; txn_at: string; depositor: string; amount: number; txn_amount: number; memo: string; status: string; status_label: string;
@@ -27,6 +36,7 @@ export interface TeamEvidenceData {
   before_billing: EvChange[]; changes: EvChange[]; final_fee: number; check: { billed: number; delta: number; final: number; ok: boolean } | null;
   received: number; refunds_paid: number; balance: number; receipts: EvReceipt[]; messages: EvMessage[];
   blockers: { text: string; task_id?: number; kind?: string; suggestion?: string | null; link: { tab: string; sub?: string; ids?: number[] } }[];
+  members?: EvMember[]; tasks?: TaskBrief[]; refund?: RefundRow | null; notices?: Record<string, { status: string; sent_at: string | null; current: boolean }>;
 }
 
 const signed = (v: number | null | undefined) => (v === null || v === undefined ? "-" : v === 0 ? "0원" : `${v > 0 ? "+" : "−"}${Math.abs(v).toLocaleString("ko-KR")}원`);
@@ -59,10 +69,15 @@ export function SlackBubbles({ messages, highlight }: { messages: EvMessage[]; h
 export function TeamEvidence({ base, teamId, go, onStatement }: { base: string; teamId: number; go?: Go; onStatement?: () => void }) {
   const { data: e } = useLoad(() => api.get<TeamEvidenceData>(`${base}/report/teams/${teamId}/evidence`), [base, teamId]);
   if (!e) return <p className="muted">근거를 모으는 중…</p>;
+  return <TeamEvidenceView e={e} go={go} onStatement={onStatement} />;
+}
+
+/** 근거 패널 본문. work(대시보드 작업대)면 ④ 확인 필요 사유는 위의 '할 일'이 대신하고, ② 입금은 넓게 */
+export function TeamEvidenceView({ e, go, onStatement, work }: { e: TeamEvidenceData; go?: Go; onStatement?: () => void; work?: boolean }) {
   const b = e.billing;
   const diff = b ? e.final_fee - b.billed : null;
   return (
-    <div className="evidence">
+    <div className={`evidence ${work ? "work" : ""}`}>
       <section>
         <h3>① 청구 → 최종 계산</h3>
         {b ? (
@@ -88,7 +103,7 @@ export function TeamEvidence({ base, teamId, go, onStatement }: { base: string; 
           </div>
         ) : <p className="muted">납부 마감 전이라 청구표가 없습니다(최종 회비 {won(e.final_fee)}).</p>}
       </section>
-      <section>
+      <section className="receipts">
         <h3>② 입금 내역</h3>
         {e.receipts.length === 0 ? <p className="muted">배정된 입금이 없습니다.</p> : (
           <div className="table-wrap"><table>
@@ -110,7 +125,7 @@ export function TeamEvidence({ base, teamId, go, onStatement }: { base: string; 
         <h3>③ 슬랙 대화 <span className="muted">· 보낸 DM 포함, 시간순</span></h3>
         <SlackBubbles messages={e.messages} />
       </section>
-      <section>
+      {!work && <section>
         <h3>④ 확인 필요 사유</h3>
         {e.blockers.length === 0 ? <p className="muted">없음 — 정산 확정 가능</p> : (
           <ul className="todo">{e.blockers.map((x, i) => (
@@ -118,7 +133,7 @@ export function TeamEvidence({ base, teamId, go, onStatement }: { base: string; 
           ))}</ul>
         )}
         {onStatement && <button className="small ghost" onClick={onStatement}>정산 확정·송금 명세 열기</button>}
-      </section>
+      </section>}
     </div>
   );
 }

@@ -408,3 +408,55 @@ def to_csv(rep: SettlementReport) -> str:
             " / ".join(f"{c['from']}→{c['to']}({c['source']}, {c['rule']})" for c in p["changes"]),
         ])
     return buf.getvalue()
+
+
+def _signed_amount(p: dict) -> int | str:
+    if p["kind"] == "included":
+        return 0
+    if p["kind"] in ("pending", "rule_missing", "unresolved") and not p["amount"]:
+        return ""
+    return -p["amount"] if p["kind"] == "refund" else p["amount"]
+
+
+BASIS_KIND_LABEL = {"rule": "규칙", "admin": "총무 결정", "pending": "규칙 없음(총무 판단 전)", "none": ""}
+
+
+def teams_csv(rep: SettlementReport) -> str:
+    """부서별 정산표: 부서, 담당자, 청구, 변동 합계, 최종, 입금, 잔액, 상태, 근거 요약(변동 사람·사유)."""
+    import csv
+    import io
+
+    by_team: dict[int, list[dict]] = {}
+    for p in rep.people:
+        if p["kind"] != "included":
+            by_team.setdefault(p["team_id"], []).append(p)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["부서", "담당자", "청구", "변동 합계", "최종", "입금", "잔액", "상태", "근거 요약"])
+    for t in rep.teams:
+        reasons = []
+        for p in by_team.get(t["team_id"], []):
+            amt = _signed_amount(p)
+            reasons.append(f"{p['name']} {KIND_LABEL[p['kind']]}" + (f" {amt:+,}원" if isinstance(amt, int) and amt else "") + (f"({p['basis']})" if p.get("basis") else ""))
+        reasons += t["blockers"]
+        delta = t["final_fee"] - t["billed"] if t["billed"] is not None else ""
+        w.writerow([t["name"], (t["manager"] or {}).get("name", "미지정"), t["billed"] if t["billed"] is not None else "", delta, t["final_fee"], t["received"], t["balance"], STATUS_LABEL[t["status"]], " / ".join(reasons)])
+    return buf.getvalue()
+
+
+def people_csv(rep: SettlementReport) -> str:
+    """사람별 변동표: 부서, 이름, 마감 기준, 현재, 금액, 근거(규칙/총무 결정/슬랙 한 줄), 처리 상태."""
+    import csv
+    import io
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["부서", "이름", "마감 기준", "현재", "금액", "근거", "처리 상태"])
+    for p in rep.people:
+        sl = p.get("slack")
+        label, basis = BASIS_KIND_LABEL.get(p.get("basis_kind") or "none", ""), p.get("basis", "")
+        basis = basis if not label or basis.startswith(label) else f"{label}: {basis}" if basis else label
+        if sl:
+            basis += f" / 슬랙 {sl['sender']} {clock.kst(clock.parse_input(sl['at'])):%m/%d %H:%M}: {sl['text']}"
+        w.writerow([p["team_name"], p["name"], CHOICE_LABELS[p["snapshot_choice"]], CHOICE_LABELS[p["choice"]], _signed_amount(p), basis, p.get("process", "")])
+    return buf.getvalue()

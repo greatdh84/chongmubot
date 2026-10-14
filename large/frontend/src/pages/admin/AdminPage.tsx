@@ -4,9 +4,9 @@ import { api, BOT_PERSONA, BOT_STRATEGY, fmtTime, STATIC, won, type Change, type
 import { Msg, Page, StatusPill, useEventName, useMeta } from "../../components/common";
 import { useAction, useLoad } from "../../hooks";
 import { PaymentsTab, RosterTab, TasksTab } from "./AdminMoney";
-import { AgentChat, agentLine, type AgentReported } from "./AgentChat";
-import { AgentTimeline, SettlementRunCard } from "./Evidence";
-import { Kpi, ReportTab, STATUS, Timeline, triggerLabel, type Report } from "./Report";
+import { agentLine, type AgentReported } from "./AgentChat";
+import { ReportTab } from "./Report";
+import { Workbench } from "./Workbench";
 
 export interface Dashboard {
   event: EventInfo;
@@ -51,7 +51,7 @@ export default function AdminPage() {
   const ev = events[0];
   const base = `/api/large/admin/events/${ev.id}`;
   return (
-    <Page>
+    <Page wide={tab === "대시보드"}>
       <div className="topbar">
         <h1>총무 · {ev.name}</h1>
         <div className="row">
@@ -60,76 +60,19 @@ export default function AdminPage() {
         </div>
       </div>
       <nav className="tabs" aria-label="총무 메뉴">
-        {TABS.map((t) => <button key={t} className={t === tab ? "active" : ""} onClick={() => setTab(t)}>{t}</button>)}
+        {TABS.map((t, i) => (
+          <span key={t} className="row" style={{ gap: 6 }}>
+            {i === 1 && <span className="muted" title="시연은 대시보드에서 끝납니다. 아래는 같은 데이터의 원래 화면">원본 보기 ·</span>}
+            <button className={t === tab ? "active" : ""} onClick={() => setTab(t)}>{t}</button>
+          </span>
+        ))}
       </nav>
-      {tab === "대시보드" && <DashboardTab base={base} go={go} />}
+      {tab === "대시보드" && <Workbench base={base} go={go} />}
       {tab === "부서·명단" && <RosterTab base={base} />}
       {tab === "입금·확인" && <CheckTab base={base} sub={checkSub} setSub={setCheckSub} />}
       {tab === "정산 보고서" && <ReportTab key={focusTeam ?? "all"} base={base} go={go} focusTeam={focusTeam} />}
       {tab === "기록" && <LogTab base={base} />}
     </Page>
-  );
-}
-
-const AGENT_CHIPS = ["데이터팀 왜 추가 납부야?", "환불 대상 부서 알려줘", "확인 필요한 부서와 이유", "박채원 팀 현황", "재무팀 왜 정산 완료야?", "전체 요약"];
-
-/** 대시보드: 맨 위 최종 현황 → 왼쪽 총무 Agent(보고서·근거에 묻기) · 오른쪽 정산 Agent 실행 카드·사람이 결정할 것 → Agent 활동 기록 */
-function DashboardTab({ base, go }: { base: string; go: (t: string, sub?: string, teamId?: number) => void }) {
-  const { data: d, reload } = useLoad(() => api.get<Dashboard>(base), [base]);
-  const { data: rep, reload: reloadRep } = useLoad(() => api.get<Report>(`${base}/report`), [base]);
-  if (!d) return <p className="muted">불러오는 중…</p>;
-  const s = rep?.summary;
-  const openTasks = Object.values(d.open_tasks).reduce((a, b) => a + b, 0);
-  return (
-    <>
-      {s && (
-        <div className="card final-card">
-          <div className="row" style={{ justifyContent: "space-between" }}>
-            <h2>최종 현황 · {d.stage_label}</h2>
-            <button className="small" onClick={() => go("정산 보고서")}>정산 보고서 열기</button>
-          </div>
-          <div className="grid">
-            <Kpi label="참석" value={`${s.attending} / ${s.headcount}명`} sub={s.deadline_counts ? `마감 기준 버스 ${s.deadline_counts.bus} · 자차 ${s.deadline_counts.car} · 불참 ${s.deadline_counts.absent}` : undefined} />
-            <Kpi label="청구 → 최종" value={won(s.final_total)} sub={s.billed_total !== null ? `청구 ${won(s.billed_total)} · 차이 ${s.billed_final_delta && s.billed_final_delta > 0 ? "+" : ""}${(s.billed_final_delta ?? 0).toLocaleString("ko-KR")}원` : "납부 마감 전"} />
-            <Kpi label="확정 입금" value={won(s.received_total)} sub={`최종 회비의 ${Math.round((s.received_total / Math.max(1, s.final_total)) * 100)}%`} />
-            <Kpi label="열린 확인 과제" value={`${openTasks}건`} sub={`총무 ${d.open_tasks.admin ?? 0} · 담당자 ${d.open_tasks.manager ?? 0} · 변경 승인 대기 ${d.pending_changes}`} />
-          </div>
-          <div className="grid" style={{ marginTop: 10 }}>
-            {(["extra", "refund", "check", "done"] as const).map((k) => (
-              <button key={k} className={`stat clickable tone-${STATUS[k][1]}`} onClick={() => go("정산 보고서")}>
-                <div className="label">{STATUS[k][0]}</div>
-                <div className="value">{s.team_status[k]}개 부서</div>
-                {k === "extra" && <div className="muted">{won(s.extra_total)}</div>}
-                {k === "refund" && <div className="muted">{won(s.refund_total)}</div>}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-      <div className="dash">
-        <AgentChat base={base} chips={AGENT_CHIPS} go={go} onChange={() => { reloadRep(); reload(); }} />
-        <div>
-          <SettlementRunCard base={base} go={go} />
-          <div className="card">
-            <div className="row" style={{ justifyContent: "space-between" }}>
-              <h2>지금 단계 · {d.stage_label}</h2>
-            </div>
-            {rep && <Timeline rep={rep} />}
-            {rep && <p className="muted" style={{ marginBottom: 0 }}>보고서 v{rep.version} · {fmtTime(rep.created_at)} · 계기: {triggerLabel(rep.trigger)}</p>}
-          </div>
-          <div className="card">
-            <h2>사람이 결정할 것 <span className="hitl" title="Human-in-the-loop: 사람이 확인해야 반영">HITL</span></h2>
-            <ul className="todo">
-              <li><span>마감 후·당일 변경 승인 대기 <b>{d.pending_changes}건</b></span><button className="small" onClick={() => go("입금·확인", "변경 승인")}>보기</button></li>
-              <li><span>Agent 입금 배정 제안 <b>{d.transactions.proposed_allocations}건</b> · 미배정 거래 {d.transactions.unallocated}건</span><button className="small" onClick={() => go("입금·확인", "입금 대조")}>보기</button></li>
-              <li><span>확인 과제 총무 <b>{d.open_tasks.admin ?? 0}</b> · 담당자 답변 대기 {d.open_tasks.manager ?? 0}</span><button className="small" onClick={() => go("입금·확인", "확인 과제")}>보기</button></li>
-              <li><span>팀 담당자 미지정 <b>{d.teams_without_manager}개 부서</b></span><button className="small" onClick={() => go("부서·명단")}>보기</button></li>
-            </ul>
-          </div>
-        </div>
-      </div>
-      <AgentTimeline base={base} />
-    </>
   );
 }
 

@@ -21,7 +21,7 @@ from .config import API_PREFIX, BACKEND_DIR, UI_PREFIX, settings
 from .db import SessionLocal, init_db
 from .errors import AppError
 from .models import Admin
-from .routers import admin, auth, manager, participant, slack_events
+from .routers import admin, auth, manager, participant, refund_link, slack_events
 from .security import RedactSecretsFilter, hash_password
 from .services.scheduler import scheduler
 
@@ -125,6 +125,7 @@ def configure_large(app: FastAPI) -> None:
     app.include_router(manager.router)
     app.include_router(admin.router)
     app.include_router(slack_events.router)
+    app.include_router(refund_link.router)
     if settings.is_demo:
         from .routers import dev
 

@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { api, CHOICE_LABEL, fmtTime, won, type SettlementCalc, type Task } from "../../api";
-import { ChoicePill, Msg, StatusPill } from "../../components/common";
+import { api, CHOICE_LABEL, fmtTime, won, type SettlementCalc, type SettlementLine, type Task } from "../../api";
+import { ChoiceNow, ChoicePill, DeltaChip, deltaRow, deltaTone, Msg, StatusPill } from "../../components/common";
 import { useAction, useLoad } from "../../hooks";
 import { agentLine, type AgentReported } from "./AgentChat";
 
 interface TeamRow { id: number; code: string; name: string; headcount: number; manager: { participant_id: number; name: string; slack_id: string; phone: string } | null; counts: Record<string, number>; final_fee: number; received: number; refunds_paid: number; balance: number; balance_label: string; blockers: string[]; settlement_status: string | null }
-interface PRow { id: number; employee_no: string; name: string; slack_id: string; phone: string; team: { id: number; code: string; name: string }; is_manager: boolean; choice: string | null; snapshot_choice: string | null; fee: number | null; pending_change_id: number | null; invite: { issued: number; active: number; latest_expires_at: string | null; last_used_at: string | null } }
+interface PRow { id: number; employee_no: string; name: string; slack_id: string; phone: string; team: { id: number; code: string; name: string }; is_manager: boolean; choice: string | null; snapshot_choice: string | null; fee: number | null; pending_change_id: number | null; delta?: number | null; invite: { issued: number; active: number; latest_expires_at: string | null; last_used_at: string | null } }
 interface RosterResult { rows: number; inserted: number; updated: number; teams: number; managers_assigned: number; departments: { code: string; name: string; headcount: number; manager: string | null }[]; warnings: string[] }
 interface RowError { line: number; error: string }
 
@@ -89,11 +89,13 @@ export function RosterTab({ base }: { base: string }) {
         {(teamId || query) && (
           <div className="table-wrap"><table>
             <thead><tr><th>ID</th><th>이름</th><th>부서</th><th>Slack ID</th><th>전화번호</th><th>마감 기준</th><th>현재</th><th className="num">회비</th><th>초대 링크</th><th>작업</th></tr></thead>
-            <tbody>{people?.map((p) => (
-              <tr key={p.id}>
+            <tbody>{people?.map((p) => {
+              const tone = deltaTone({ snapshot_choice: p.snapshot_choice, choice: p.choice, delta: p.delta, pending: !!p.pending_change_id });
+              return (
+              <tr key={p.id} className={deltaRow(tone)}>
                 <td>{p.employee_no}</td><td>{p.name} {p.is_manager && <span className="pill ok">담당자</span>}</td><td>{p.team.name}</td>
                 <td className="muted">{p.slack_id}</td><td className="muted">{p.phone || "-"}</td>
-                <td><ChoicePill choice={p.snapshot_choice} /></td><td><ChoicePill choice={p.choice} /> {p.pending_change_id && <span className="pill warn">승인 대기</span>}</td>
+                <td><ChoicePill choice={p.snapshot_choice} /></td><td><ChoiceNow choice={p.choice} tone={tone} /> {p.delta ? <DeltaChip amount={p.delta} /> : null}</td>
                 <td className="num">{won(p.fee)}</td>
                 <td className="muted">유효 {p.invite.active}/{p.invite.issued} · 사용 {fmtTime(p.invite.last_used_at)}</td>
                 <td><div className="row">
@@ -101,7 +103,8 @@ export function RosterTab({ base }: { base: string }) {
                   <button className="small" disabled={busy} onClick={() => run(() => api.post<{ revoked: number; email_status: string }>(`${base}/participants/${p.id}/invite/reissue`), (r) => `기존 링크 ${r.revoked}개 폐기, 새 초대 DM ${r.email_status}`).then(reload)}>링크 재발급</button>
                   <SetResponse base={base} p={p} onDone={refresh} />
                 </div></td>
-              </tr>))}
+              </tr>);
+            })}
             </tbody>
           </table></div>
         )}
@@ -295,10 +298,7 @@ export function TeamStatement({ base, teamId, onChange }: { base: string; teamId
       <h3>팀원별</h3>
       <div className="table-wrap"><table>
         <thead><tr><th>이름</th><th>마감 기준</th><th>현재</th><th className="num">회비</th><th>마감 후 변경</th></tr></thead>
-        <tbody>{c.lines.map((l) => (
-          <tr key={l.participant_id}><td>{l.name}</td><td><ChoicePill choice={l.snapshot_choice} /></td><td><ChoicePill choice={l.choice} /></td><td className="num">{won(l.fee)}</td>
-            <td className="muted">{l.changes.map((x) => `${CHOICE_LABEL[x.from ?? "none"]}→${CHOICE_LABEL[x.to]} ${x.status === "applied" ? "" : "(승인 대기)"} ${x.refund_amount ? `환불 ${won(x.refund_amount)}` : x.extra_charge ? `추가 ${won(x.extra_charge)}` : ""} [${x.rule}]`).join(" / ")}</td></tr>))}
-        </tbody>
+        <tbody>{c.lines.map((l) => <LineRow key={l.participant_id} l={l} />)}</tbody>
       </table></div>
       <h3>수납</h3>
       <div className="table-wrap"><table>
@@ -307,5 +307,22 @@ export function TeamStatement({ base, teamId, onChange }: { base: string; teamId
       </table></div>
       <p className="muted">적용 규칙: {c.rules.join(" · ")}</p>
     </div>
+  );
+}
+
+/** 팀원별 한 줄: 마감 기준 vs 현재(다르면 현재 칩 색) + 마감 후 변경 금액 칩 */
+export function LineRow({ l }: { l: SettlementLine }) {
+  const applied = l.changes.filter((x) => x.status === "applied");
+  const tone = deltaTone({ snapshot_choice: l.snapshot_choice, choice: l.choice, delta: applied.length ? applied.reduce((n, x) => n + x.extra_charge - x.refund_amount, 0) : null, pending: l.changes.some((x) => x.status === "pending_approval") });
+  return (
+    <tr className={deltaRow(tone)}>
+      <td>{l.name}</td><td><ChoicePill choice={l.snapshot_choice} /></td><td><ChoiceNow choice={l.choice} tone={tone} /></td><td className="num">{won(l.fee)}</td>
+      <td>{l.changes.map((x) => (
+        <div key={x.change_id} className="row" style={{ gap: 4 }}>
+          {x.status === "applied" ? <DeltaChip amount={x.extra_charge - x.refund_amount} text="0원" /> : <DeltaChip amount={x.extra_charge - x.refund_amount} pending />}
+          <span className="muted">{CHOICE_LABEL[x.from ?? "none"]}→{CHOICE_LABEL[x.to]} · {x.rule}</span>
+        </div>
+      ))}</td>
+    </tr>
   );
 }

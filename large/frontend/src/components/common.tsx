@@ -56,6 +56,32 @@ export function ChoicePill({ choice }: { choice: string | null | undefined }) {
   return <span className={`pill ${cls}`}>{CHOICE_LABEL[key]}</span>;
 }
 
+/** 마감 기준과 현재가 다를 때의 색: 추가(주황) · 환불/감액(파랑) · 승인 대기(노랑 점선). 같으면 null(기본색). */
+export type DeltaTone = "extra" | "refund" | "pending" | null;
+const RANK: Record<string, number> = { bus: 2, car: 1 };
+export function deltaTone(o: { snapshot_choice: string | null; choice: string | null; delta?: number | null; pending?: boolean }): DeltaTone {
+  if (o.pending) return "pending";
+  if (o.delta) return o.delta > 0 ? "extra" : "refund";
+  if ((o.snapshot_choice ?? null) === (o.choice ?? null)) return null;
+  const a = RANK[o.snapshot_choice ?? ""] ?? 0, b = RANK[o.choice ?? ""] ?? 0;
+  return b > a ? "extra" : b < a ? "refund" : null;
+}
+/** 행 왼쪽 얇은 색 막대 */
+export const deltaRow = (t: DeltaTone) => (t ? `delta-${t}` : "");
+
+/** 현재 칩: 마감 기준과 다르면 색이 바뀐다 */
+export function ChoiceNow({ choice, tone }: { choice: string | null | undefined; tone: DeltaTone }) {
+  if (!tone) return <ChoicePill choice={choice} />;
+  return <span className={`pill now-${tone}`} title={tone === "pending" ? "승인 대기 중인 변경이 있음" : "마감 기준과 다름"}>{CHOICE_LABEL[choice ?? "none"]}{tone === "pending" ? " · 승인 대기" : ""}</span>;
+}
+
+/** 마감 후 변경 금액 칩(+5,000 / −10,000) */
+export function DeltaChip({ amount, pending, text }: { amount: number | null | undefined; pending?: boolean; text?: string }) {
+  if (pending) return <span className="pill now-pending">{text ?? (amount ? `승인되면 ${amount > 0 ? "+" : "−"}${Math.abs(amount).toLocaleString("ko-KR")}` : "승인 대기")}</span>;
+  if (!amount) return text ? <span className="muted">{text}</span> : null;
+  return <span className={`pill now-${amount > 0 ? "extra" : "refund"}`}>{amount > 0 ? "+" : "−"}{Math.abs(amount).toLocaleString("ko-KR")}</span>;
+}
+
 export function StatusPill({ status }: { status: string }) {
   const map: Record<string, [string, string]> = {
     applied: ["반영", "ok"], pending_approval: ["승인 대기", "warn"], rejected: ["반려", "bad"],
@@ -147,8 +173,8 @@ export function Chat({ base, title, examples, chips, subtitle, onReply, classNam
   );
 }
 
-export function Page({ children, narrow }: { children: ReactNode; narrow?: boolean }) {
-  return <main className={`wrap ${narrow ? "narrow" : ""}`}>{children}</main>;
+export function Page({ children, narrow, wide }: { children: ReactNode; narrow?: boolean; wide?: boolean }) {
+  return <main className={`wrap ${narrow ? "narrow" : ""} ${wide ? "wide" : ""}`}>{children}</main>;
 }
 
 /** 이 답변을 누가 정했는지: 실제 LLM / 규칙 기반(모의) / LLM 실패 후 규칙 기반 대체 / 코드의 확인 판정 */
