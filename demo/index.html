@@ -184,6 +184,31 @@ img.av{object-fit:cover;background:var(--grey-l)}
 .steps .sep{width:18px;height:2px;background:var(--line)}
 .polls{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
 .poll-fixed{font-size:18px;font-weight:800;margin-bottom:4px}
+/* 대시보드 오른쪽 Slack 패널 (화면의 약 1/3, 스크롤해도 고정) */
+.page.with-slack{max-width:none;display:grid;grid-template-columns:minmax(0,2fr) minmax(340px,1fr);gap:16px;align-items:start}
+.slack-pane{position:sticky;top:76px;height:calc(100vh - 96px);display:flex;flex-direction:column;background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.sm-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:#4a154b;color:#fff}
+.sm-head .muted{color:#e9d8ea}
+.sm-tabs{display:flex;gap:4px;flex:1;min-width:0}
+.sm-tabs button{border:0;background:transparent;color:#e9d8ea;font-weight:700;padding:6px 10px;border-radius:8px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sm-tabs button.on{background:rgba(255,255,255,.18);color:#fff}
+.sm-list{flex:1;overflow:auto;padding:8px 0}
+.sm-msg{display:flex;gap:8px;padding:6px 14px}
+.sm-msg:hover{background:#f8f8f8}
+.sm-av{flex:none;width:36px;height:36px;border-radius:8px;overflow:hidden;background:var(--grey-l);display:grid;place-items:center;font-size:20px;font-weight:700}
+.sm-av img{width:100%;height:100%;object-fit:cover}
+.sm-body{min-width:0;flex:1}
+.sm-meta{display:flex;align-items:center;gap:6px;font-size:13px}
+.sm-meta span{color:#616061;font-size:12px}
+.sm-meta .app{background:#e8e8e8;color:#616061;font-size:10px;font-weight:700;padding:0 4px;border-radius:3px}
+.sm-text{font-size:14px;line-height:1.45;word-break:break-word;color:#1d1c1d}
+.sm-text a{color:#1264a3}
+.sm-btn{display:inline-block;margin-top:6px;padding:4px 12px;border-radius:6px;background:#007a5a;color:#fff;font-size:13px;font-weight:700}
+.sm-reacts{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.sm-reacts span{border:1px solid #e0e0e0;background:#f6f6f6;border-radius:12px;padding:1px 8px;font-size:12px}
+.sm-replies{margin-top:4px;font-size:12px;color:#1264a3;font-weight:700}
+.sm-msg.sys .sm-text{color:#616061;font-size:13px}
+@media (max-width:1100px){.page.with-slack{grid-template-columns:1fr}.slack-pane{position:static;height:520px}}
 .card.remind{display:flex;align-items:center;gap:10px;padding:10px 16px;margin-bottom:16px}
 .card.next{display:flex;align-items:center;gap:10px;padding:14px 16px;margin-bottom:16px;border-color:var(--green);background:var(--green-l)}
 .drow{border-top:1px solid var(--line)}
@@ -882,7 +907,7 @@ const defaultDinner = () => ({
   dateMode:'fixed', date:'2026-10-24', time:'19:00', dateCands:[{at:'2026-10-23T19:00'}, {at:'2026-10-24T19:00'}],
   placeMode:'vote', placePick:0, voteDeadline:'2026-10-17T18:00',
   baseFee:{on:false, amount:20000}, byRound:true, nonDrink:{on:false, amount:5000},
-  account:{bank:'', number:'', holder:''},
+  account:{bank:'우리은행', number:'1002-000-000000', holder:'김도형'}, // 계좌번호는 시연용 가짜 번호
   dateVote:defaultPoll() // 날짜 투표 진행 상태 (장소 투표는 S.vote)
 });
 function defaultPoll(){ return {ts:null, channel:null, tally:null, closed:false, winner:null}; }
@@ -1473,7 +1498,7 @@ function renderDinnerDash(){
     <button class="btn" data-act="goSetup">⚙️ 전체 설정</button>
     <button class="btn danger-o" data-act="cancelMeet">⏹ 모임 중단</button>
   </div></header>
-  <main class="page">
+  <main class="page with-slack"><div class="dash-main">
     <div class="headline"><div>
       <div class="small muted" style="font-weight:700">🍻 회식</div>
       <h1>${esc(S.event.name)}</h1>
@@ -1519,8 +1544,59 @@ function renderDinnerDash(){
         ${ps.map(p => dinnerPersonRow(p, ph)).join('') || '<div class="card-b muted">참가자가 없어요.</div>'}
       </section>
     </div>
+  </div>
+  <aside class="slack-pane" id="slackPane">${slackPaneHtml()}</aside>
   </main>`;
+  slackPaneScroll();
 }
+// ---------- 오른쪽 Slack 패널: 단체방 · 내 DM 실제 메시지를 몇 초마다 읽어 와서 보여 줌 ----------
+const SLACK_EMOJI = {one:'1️⃣', two:'2️⃣', three:'3️⃣', four:'4️⃣', five:'5️⃣', six:'6️⃣', seven:'7️⃣', eight:'8️⃣', nine:'9️⃣', keycap_ten:'🔟', '+1':'👍', thumbsup:'👍', heart:'❤️', joy:'😂', pray:'🙏', fire:'🔥', tada:'🎉', ok_hand:'👌', clap:'👏', eyes:'👀', laughing:'😆', smile:'😄', sob:'😭', frog:'🐸', memo:'📝', ballot_box_with_ballot:'🗳️', pleading_face:'🥺', older_man:'👴', face_with_monocle:'🧐', white_check_mark:'✅', heavy_check_mark:'✔️'};
+const slackEmoji = n => SLACK_EMOJI[n] || `:${n}:`;
+function slackText(t){
+  let h = esc(t);
+  h = h.replace(/&lt;(https?:[^|&]+?)\|([^&]+?)&gt;/g, '<a href="$1" target="_blank" rel="noopener">$2</a>')
+       .replace(/&lt;(https?:[^&]+?)&gt;/g, '<a href="$1" target="_blank" rel="noopener">$1</a>')
+       .replace(/&lt;@(U[A-Z0-9]+)&gt;/g, (_, u) => '@' + esc(((MEMBERS.find(m => m.slackId === u) || {}).name) || u))
+       .replace(/&lt;!(channel|here|everyone)&gt;/g, '@$1')
+       .replace(/:([a-z0-9_+\-]+):/g, (m, n) => SLACK_EMOJI[n] || m)
+       .replace(/(^|[\s(])\*([^*\n]+)\*/g, '$1<b>$2</b>').replace(/(^|[\s(])_([^_\n]+)_/g, '$1<i>$2</i>');
+  return h.replace(/\n/g, '<br>');
+}
+function slackPaneHtml(){
+  const tab = UI.slackTab || 'ch', live = SLACK.status === 'on' && S.slackChannel;
+  const msgs = (UI.slackMsgs || {})[tab] || [];
+  const body = !live ? `<p class="small muted" style="padding:16px">${SLACK.status === 'on' ? '모임을 시작해 채널이 만들어지면 실제 Slack 메시지가 여기 보여요.' : 'Slack에 연결되면(서버 주소로 열면) 단체방과 내 DM 메시지가 실시간으로 여기 보여요. 지금은 데모 모드예요.'}</p>`
+    : !msgs.length ? `<p class="small muted" style="padding:16px">${UI.slackErr ? '⚠️ ' + esc(UI.slackErr) : '메시지를 불러오는 중…'}</p>`
+    : msgs.map(m => { const t = new Date(+m.ts * 1000);
+        return `<div class="sm-msg ${m.subtype ? 'sys' : ''}"><div class="sm-av">${m.avatar ? `<img src="${esc(m.avatar)}" alt="">` : esc(m.emoji ? (/^:.*:$/.test(m.emoji) ? slackEmoji(m.emoji.replace(/:/g, '')) : m.emoji) : (m.name || '?')[0])}</div>
+          <div class="sm-body"><div class="sm-meta"><b>${esc(m.name)}</b>${m.bot ? '<span class="app">APP</span>' : ''}<span>${pad(t.getHours())}:${pad(t.getMinutes())}</span></div>
+          <div class="sm-text">${slackText(m.text)}</div>
+          ${m.button ? '<span class="sm-btn">📝 응답하기</span>' : ''}
+          ${m.reactions.length ? `<div class="sm-reacts">${m.reactions.map(r => `<span>${r.char && !/^:.*:$/.test(r.char) ? esc(r.char) : slackEmoji(r.name)} ${r.count}</span>`).join('')}</div>` : ''}
+          ${m.replies ? `<div class="sm-replies">💬 댓글 ${m.replies}개</div>` : ''}</div></div>`; }).join('');
+  return `<div class="sm-head"><div class="sm-tabs"><button class="${tab === 'ch' ? 'on' : ''}" data-act="slackTab" data-val="ch"># ${esc(S.channel)}</button>
+      <button class="${tab === 'dm' ? 'on' : ''}" data-act="slackTab" data-val="dm">💬 내 DM</button></div>
+      <span class="small muted">${live ? '● 실시간' : ''}</span></div>
+    <div class="sm-list" id="slackMsgs">${body}</div>`;
+}
+// 패널만 다시 그림 (맨 아래를 보고 있었으면 새 메시지로 따라 내려감)
+function slackPaneScroll(){
+  const box = $('#slackMsgs'); if (!box) return;
+  box.scrollTop = UI.slackUp ? (UI.slackScroll || 0) : box.scrollHeight;
+  box.onscroll = () => { UI.slackUp = box.scrollTop + box.clientHeight < box.scrollHeight - 30; UI.slackScroll = box.scrollTop; };
+}
+function slackPaneRefresh(){ const el = $('#slackPane'); if (el){ el.innerHTML = slackPaneHtml(); slackPaneScroll(); } }
+async function slackPull(){
+  if (S.screen !== 'dash' || !voteOn() || SLACK.status !== 'on' || !S.slackChannel || !$('#slackPane')) return;
+  const tab = UI.slackTab || 'ch';
+  try {
+    const r = await slackApi(tab === 'dm' ? '/api/slack/history?dm=1' : `/api/slack/history?channel=${encodeURIComponent(S.slackChannel)}`);
+    const before = JSON.stringify(((UI.slackMsgs || {})[tab]) || []);
+    UI.slackMsgs = {...(UI.slackMsgs || {}), [tab]:r.messages}; UI.slackErr = '';
+    if (JSON.stringify(r.messages) !== before) slackPaneRefresh();
+  } catch(e){ UI.slackErr = slackErr(e.message); slackPaneRefresh(); }
+}
+setInterval(slackPull, 4000);
 function voteRemindBar(){
   if (!['date', 'place'].some(isOpen)) return '';
   const pend = votePending(), over = new Date(voteDeadline()) < new Date(), st = S.voteGroup || {};
@@ -2856,6 +2932,7 @@ document.addEventListener('click', e => {
     case 'toggleEmo': S.emo = !S.emo; UI.pvTab = 'msg'; S.flavorNext = Date.now() + flavorEvery() * 1000; log('총무', `구남친 감성 ${S.emo ? 'ON' : 'OFF'}`); break;
     case 'toggleLatte': S.latte = !S.latte; UI.pvTab = 'msg'; S.flavorNext = Date.now() + flavorEvery() * 1000; log('총무', `부장님 라떼모드 ${S.latte ? 'ON' : 'OFF'}`); break;
     case 'dayDrink': S.dayDrink = !S.dayDrink; log('총무', `구남친 낮술하기 ${S.dayDrink ? '켬 (09:00~18:00 추가)' : '끔'}`); break;
+    case 'slackTab': UI.slackTab = d.val; UI.slackUp = false; slackPaneRefresh(); slackPull(); return;
     case 'phaseDm': openDmPlan([d.id]); return;
     case 'phaseDmAll': openDmPlan(phasePending().map(p => p.id)); return;
     case 'dmSet': {

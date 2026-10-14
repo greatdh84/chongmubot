@@ -26,6 +26,7 @@ API
   POST /api/slack/thread   {channel, ts, text, persona?}  메시지 아래 스레드 댓글 (투표 마감 안내)
   POST /api/survey/start   {channel, title, text, questions, persona?}  [응답하기] 버튼이 달린 참석 조사 메시지
   GET  /api/survey?channel=  참석 조사 질문과 사람별 응답
+  GET  /api/slack/history?channel=|dm=1  단체방 또는 총무 DM 최근 메시지 (대시보드 오른쪽 Slack 패널)
   GET  /api/socket         응답 받기(Socket Mode) 연결 상태
   POST /api/slack/cancel   {channel, text, persona?}  모임 취소 안내, 참석 조사 기록 삭제 (채널은 그대로 둠)
   GET  /api/slack/poll?channel=&ts=  번호 이모지별 투표자 (봇 반응 제외)
@@ -35,6 +36,7 @@ API
 import json
 import mimetypes
 import random
+import re
 import threading
 import time
 import os
@@ -770,6 +772,58 @@ def start_socket():
     threading.Thread(target=run, daemon=True).start()
 
 
+# ---------- 대시보드 오른쪽 Slack 패널: 최근 메시지 ----------
+USER_CACHE = {}
+try:  # Slack 은 이모지를 ':clipboard:' 같은 글자 코드로 돌려줌 → 실제 이모지로 (라이브러리가 없으면 코드 그대로)
+    import emoji as _emoji
+except ImportError:
+    _emoji = None
+SKIN = re.compile(r":skin-tone-\d:")
+
+
+def emojize(t):
+    if not _emoji or not t:
+        return t
+    return _emoji.emojize(SKIN.sub("", t), language="alias")
+
+
+def user_brief(uid):
+    if uid not in USER_CACHE:
+        try:
+            p = slack("users.info", user=uid)["user"].get("profile", {})
+            USER_CACHE[uid] = {"name": p.get("display_name") or p.get("real_name") or uid, "avatar": p.get("image_48", "")}
+        except SlackError:
+            USER_CACHE[uid] = {"name": uid, "avatar": ""}
+    return USER_CACHE[uid]
+
+
+def history(q):
+    """채널(또는 총무와 총무봇의 DM)의 최근 메시지를 오래된 순으로. 봇 메시지는 보낸 이름·아이콘(성격)을 그대로"""
+    ch = q.get("channel", "")
+    if q.get("dm"):
+        if not OWNER:
+            raise SlackError("no_owner")
+        ch = slack("conversations.open", users=OWNER)["channel"]["id"]
+    if not ch:
+        raise SlackError("bad_request")
+    msgs = slack("conversations.history", channel=ch, limit=min(int(q.get("limit") or 40), 100))["messages"]
+    out = []
+    for m in reversed(msgs):
+        if m.get("subtype") in ("channel_join", "channel_purpose", "channel_topic") and not m.get("text"):
+            continue
+        if m.get("bot_id") or m.get("subtype") == "bot_message":
+            icons = m.get("icons") or {}
+            name, avatar, emoji = m.get("username") or "총무봇", icons.get("image_48") or icons.get("image_72") or "", icons.get("emoji", "")
+        else:
+            u = user_brief(m.get("user", ""))
+            name, avatar, emoji = u["name"], u["avatar"], ""
+        button = any(e.get("type") == "button" for b in m.get("blocks", []) for e in b.get("elements", []) if isinstance(e, dict))
+        out.append({"ts": m["ts"], "name": name, "avatar": avatar, "emoji": emojize(emoji), "text": emojize(m.get("text", "")), "bot": bool(m.get("bot_id")),
+                    "subtype": m.get("subtype", ""), "button": button, "replies": m.get("reply_count", 0),
+                    "reactions": [{"name": r["name"], "char": emojize(f":{r['name']}:"), "count": r.get("count", 0)} for r in m.get("reactions", [])]})
+    return {"channel": ch, "messages": out}
+
+
 def cancel_meeting(data):
     ch = data.get("channel", "")
     if not ch:
@@ -982,6 +1036,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/slack/members": list_members,
             "/api/config": lambda: {"kakaoJsKey": KAKAO_JS_KEY},
             "/api/socket": lambda: dict(SOCKET),
+            "/api/slack/history": lambda: history(q),
             "/api/survey": lambda: survey_get(q.get("channel", "")),
             "/api/slack/poll": lambda: poll_tally(q.get("channel", ""), q.get("ts", "")),
             "/api/chat": lambda: chat_events(q.get("channel", "")),
