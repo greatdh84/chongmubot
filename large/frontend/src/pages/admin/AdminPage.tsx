@@ -1,7 +1,7 @@
-import { useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, CHOICE_LABEL, fmtTime, STATIC, won, type Change, type EventInfo } from "../../api";
-import { Chat, Msg, Page, StatusPill, useEventName } from "../../components/common";
+import { api, BOT_PERSONA, BOT_STRATEGY, CHOICE_LABEL, fmtTime, STATIC, won, type Change, type EventInfo } from "../../api";
+import { Chat, Msg, Page, StatusPill, useEventName, useMeta } from "../../components/common";
 import { useAction, useLoad } from "../../hooks";
 import { PaymentsTab, RosterTab, TasksTab } from "./AdminMoney";
 import { ReportTab, STATUS, Timeline, triggerLabel, type Report } from "./Report";
@@ -22,9 +22,19 @@ type Tab = (typeof TABS)[number];
 
 export default function AdminPage() {
   const nav = useNavigate();
-  const { data: events, error } = useLoad(() => api.get<EventInfo[]>("/api/large/admin/events"));
+  const meta = useMeta();
+  const { data: events, error, reload } = useLoad(() => api.get<EventInfo[]>("/api/large/admin/events"));
   const [tab, setTab] = useState<Tab>("대시보드");
   useEventName(events?.[0]?.name);
+  // 시연 모드: 총무 세션이 없으면 로그인 화면 대신 시연 총무로 바로 들어간다(공용 초기설정 화면에서 넘어온 경우)
+  const autoLogin = useRef(false);
+  const needLogin = error?.status === 401;
+  useEffect(() => {
+    if (!needLogin || !meta?.demo_tools || autoLogin.current) return;
+    autoLogin.current = true;
+    api.post("/api/large/dev/switch", { role: "admin" }).then(reload).catch(() => undefined);
+  }, [needLogin, meta, reload]);
+  if (needLogin && (meta === null || meta.demo_tools) && !autoLogin.current) return <Page><p className="muted">총무 화면을 여는 중…</p></Page>;
   if (error) return <Page narrow><div className="card"><p className="error">{error.message}</p><button onClick={() => nav("/admin/login")}>로그인</button></div></Page>;
   if (!events) return <Page><p className="muted">불러오는 중…</p></Page>;
   if (events.length === 0) return <Page narrow><div className="card">관리하는 행사가 없습니다. 시드 데이터를 만들거나 행사를 등록하세요.</div></Page>;
@@ -34,7 +44,10 @@ export default function AdminPage() {
     <Page>
       <div className="topbar">
         <h1>총무 · {ev.name}</h1>
-        {!STATIC && <button onClick={() => api.post("/api/large/auth/admin/logout").then(() => nav("/"))}>로그아웃</button>}
+        <div className="row">
+          {ev.bot?.persona && <span className="pill ok" title="공용 초기설정 화면에서 고른 총무봇 말투 · 독촉 전략">총무봇: {BOT_PERSONA[ev.bot.persona] ?? ev.bot.persona}{ev.bot.strategy ? ` · ${BOT_STRATEGY[ev.bot.strategy] ?? ev.bot.strategy}` : ""}</span>}
+          {!STATIC && <button onClick={() => api.post("/api/large/auth/admin/logout").then(() => nav(meta?.demo_tools ? "/roles" : "/"))}>로그아웃</button>}
+        </div>
       </div>
       <nav className="tabs" aria-label="총무 메뉴">
         {TABS.map((t) => <button key={t} className={t === tab ? "active" : ""} onClick={() => setTab(t)}>{t}</button>)}

@@ -102,6 +102,16 @@ class CorrectionIn(BaseModel):
     text: str = Field(min_length=1, max_length=500)
 
 
+# 소모임(demo/index.html)의 PERSONAS·STRATEGIES 키와 같아야 한다
+BOT_PERSONAS = ("active", "shy", "oldie", "strict")
+BOT_STRATEGIES = ("consistent", "escalate", "chaos")
+
+
+class BotSettings(BaseModel):
+    persona: Literal["active", "shy", "oldie", "strict"]
+    strategy: Literal["consistent", "escalate", "chaos"]
+
+
 class DevSwitch(BaseModel):
     role: Literal["admin", "participant", "manager"]
     participant_id: Optional[int] = None

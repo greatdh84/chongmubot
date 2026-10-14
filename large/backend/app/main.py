@@ -55,6 +55,18 @@ def shutdown() -> None:
     scheduler.stop()
 
 
+def _db_purpose() -> str | None:
+    from .db import SessionLocal
+    from .models import DbMeta
+
+    try:
+        with SessionLocal() as db:
+            row = db.get(DbMeta, "purpose")
+            return row.value if row else None
+    except Exception:  # 메타 정보 때문에 화면 진입이 막히지 않게
+        return None
+
+
 def is_large_api(path: str) -> bool:
     return path == API_PREFIX or path.startswith(API_PREFIX + "/")
 
@@ -95,6 +107,8 @@ def configure_large(app: FastAPI) -> None:
     @app.get(API_PREFIX + "/meta")
     def meta():
         return {
+            # 이 DB 가 무엇인지: demo-seed(시드, 정산 시연) | demo-live(빈 행사, 명단 업로드 시연) | null(운영·알 수 없음)
+            "db_purpose": _db_purpose(),
             "system": "large",
             "app_mode": settings.app_mode,
             "email_mode": settings.email_mode,  # 이전 이름(호환)

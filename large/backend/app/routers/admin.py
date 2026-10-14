@@ -17,7 +17,7 @@ from ..models import (
     CHOICE_LABELS, Admin, AgentRun, Allocation, AuditLog, BankTransaction, ChangeLog, ConfirmTask, EmailJob, Event,
     Participant, RefundRule, Response, Settlement, Team, TeamManager,
 )
-from ..schemas import AdminResponseSet, AllocationIn, ChatSend as ChatIn, Decision, EmailEnqueue, EventUpdate, ManagerAssign, PayoutIn, RefundRuleIn, SchedulerToggle, TaskResolve
+from ..schemas import AdminResponseSet, AllocationIn, BotSettings, ChatSend as ChatIn, Decision, EmailEnqueue, EventUpdate, ManagerAssign, PayoutIn, RefundRuleIn, SchedulerToggle, TaskResolve
 from ..services import emails, invites, payments, report as rpt, responses as resp_svc, roster, settlement as stl
 from ..services.common import active_manager, audit, get_participant_in_event, get_team_in_event
 from .util import change_out, event_out, task_out
@@ -103,6 +103,15 @@ def update_event(body: EventUpdate, ev: Event = Depends(admin_event), admin: Adm
     if ev.attend_deadline > ev.payment_deadline or ev.payment_deadline > ev.event_at:
         raise invalid("DEADLINE_ORDER", "참석 마감 ≤ 입금 마감 ≤ 행사일 순서여야 합니다")
     audit(db, ev.id, _actor(admin), "event_updated", detail={k: str(v) for k, v in data.items()})
+    db.commit()
+    return event_out(ev)
+
+
+@router.post("/events/{event_id}/bot")
+def set_bot(body: BotSettings, ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
+    """초기설정 화면에서 고른 총무봇 성격·독촉 전략. 문구 말투에만 쓰이고 금액·대상 판단에는 쓰지 않는다."""
+    ev.bot_persona, ev.bot_strategy = body.persona, body.strategy
+    audit(db, ev.id, _actor(admin), "bot_updated", detail={"persona": body.persona, "strategy": body.strategy})
     db.commit()
     return event_out(ev)
 

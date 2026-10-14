@@ -27,7 +27,7 @@ export function AppHeader() {
             </span>
             {meta.scheduler && <span className="pill" title="Slack DM 발송 큐 자동 실행">발송 스케줄러 {meta.scheduler.enabled ? `켜짐·${meta.scheduler.interval_seconds}초` : "꺼짐"}</span>}
             {import.meta.env.DEV && <span className="pill bad" title="최종 실행은 공용 서버 127.0.0.1:8787">Vite 개발 서버</span>}
-            {meta.demo_tools && !STATIC && <Link className="pill" to="/">역할 전환</Link>}
+            {meta.demo_tools && !STATIC && <Link className="pill" to="/roles">역할 전환</Link>}
             {meta.demo_tools && !STATIC && <Link className="pill" to="/dev/inbox">개발용 수신함</Link>}
           </span>
         )}

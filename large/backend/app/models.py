@@ -46,6 +46,9 @@ class Event(Base):
     # 총무봇 공용 서버에서 SMALL/LARGE 를 구분. 이 DB 는 LARGE 전용이며 만든 뒤에는 바꾸지 않는다.
     mode: Mapped[str] = mapped_column(String(10), default="large", server_default="large")
     snapshot_taken_at: Mapped[Optional[datetime]] = mapped_column(default=None)
+    # 총무봇 말투: 초기설정 화면(도총 성격 카드·독촉 전략)에서 고른 값. 소모임과 같은 키(active·shy·oldie·strict / consistent·escalate·chaos)
+    bot_persona: Mapped[str] = mapped_column(String(20), default="", server_default="")
+    bot_strategy: Mapped[str] = mapped_column(String(20), default="", server_default="")
     created_at: Mapped[datetime] = mapped_column(default=_now)
 
 

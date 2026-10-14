@@ -56,7 +56,7 @@ def init_db() -> None:
 
 # create_all 은 기존 테이블에 새 컬럼을 넣지 않으므로, 이전 버전 DB 를 위해 필요한 컬럼만 추가한다.
 _COLUMN_UPGRADES = {
-    "events": {"mode": "VARCHAR(10) NOT NULL DEFAULT 'large'"},
+    "events": {"mode": "VARCHAR(10) NOT NULL DEFAULT 'large'", "bot_persona": "VARCHAR(20) NOT NULL DEFAULT ''", "bot_strategy": "VARCHAR(20) NOT NULL DEFAULT ''"},
     "change_logs": {"rule_missing": "BOOLEAN NOT NULL DEFAULT 0", "admin_refund_decided": "BOOLEAN NOT NULL DEFAULT 0"},
     "email_jobs": {"claimed_at": "DATETIME", "claimed_by": "VARCHAR(100) NOT NULL DEFAULT ''"},
 }
