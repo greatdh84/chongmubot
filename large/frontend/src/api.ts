@@ -5,7 +5,11 @@ export class ApiError extends Error {
   }
 }
 
+/** GitHub Pages 정적 데모판(vite --mode static)인지. 이때는 서버 대신 녹화한 응답(staticDemo.ts)을 쓴다. */
+export const STATIC = import.meta.env.VITE_STATIC === "1";
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  if (STATIC) return (await import("./staticDemo")).staticRequest<T>(method, path, body);
   const init: RequestInit = { method, credentials: "same-origin", headers: { "X-Requested-With": "chongmu" } };
   if (body instanceof FormData) init.body = body;
   else if (body !== undefined) {

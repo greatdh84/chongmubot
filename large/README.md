@@ -69,6 +69,27 @@ cd large/frontend && npm run typecheck && npm run build
 .venv/bin/python -m hub
 ```
 
+## GitHub Pages 정적 데모판
+데모 링크(https://greatdh84.github.io/chongmubot/demo/)는 서버가 없는 정적 사이트입니다. 거기서 **시작하기 → 워크샵**을 누르면
+`demo/large/`의 정적 데모판(`#/admin`)이 열립니다. 공용 서버(`python -m hub`)로 연 경우에는 지금처럼 실제 화면 `/large/`로 갑니다
+(`demo/index.html` 대모임 블록이 `/api/large/meta` 응답 여부로 판단).
+
+| 되는 것 | 안 되는 것 |
+|---|---|
+| 총무 화면 5개 탭(대시보드·부서·명단·입금·확인·정산 보고서·기록), 부서 클릭·명단 검색(브라우저에서 거름)·정산 명세, 보고서 CSV 내려받기 | 저장·발송 전부(명단·거래내역 업로드, 승인, 배정 확정, 다시 만들기 등) → "정적 데모라 저장되지 않아요" |
+| 총무 Agent: 예시 버튼 6개 + 녹화한 질문(인사팀·재무팀 현황 등), "환불 대상 담당자에게 안내 보내줘 → 네/아니요" | 녹화하지 않은 질문(안내 문구가 나옴), 참가자·담당자 화면, 로그인 |
+
+- 데이터는 시드(가상 300명·25개 부서, 행사 다음 날 상태, 기준일 2026-10-15)이고, 화면이 부르는 GET 응답과 Agent 답을 그대로 녹화한 것이라 **금액은 서버 코드 계산값과 같습니다**. 이름·전화(010-0000-xxxx)·Slack ID(UDEMO…)는 모두 가상, 실제 키는 쓰지 않습니다(`NOTIFY_MODE=mock`, `LLM_MODE=mock`).
+- 구성: `npm run build:static`(= `vite --mode static`, 상대 경로·HashRouter, `src/staticDemo.ts`가 API 대신 응답) → `demo/large/index.html`, `assets/` · `backend/scripts/export_static_demo.py` → `demo/large/fixtures.json`, `report.csv`.
+
+**다시 만들기**: 정적 데모판은 스냅샷이라 `large/`를 고치면 다시 만들어야 합니다.
+```bash
+large/scripts/update_static_demo.sh    # 저장소 안 어디서든. npm ci · build:static → 응답 녹화, 실패하면 멈춤
+git status demo/large                  # 바뀐 파일 확인 후 커밋
+```
+**자동 갱신**: `.github/workflows/large-static-demo.yml` 은 main 에 `large/**` 변경이 push 되면 위 스크립트를 돌리고, `demo/large/`가 바뀌었을 때만
+`chore: 대모임 정적 데모판 갱신 [skip ci]`로 main 에 커밋합니다(github-actions 봇). 녹화 시각을 기준일로 고정해서 코드가 같으면 파일도 같으므로 빈 커밋은 생기지 않습니다. Pages 배포 설정은 바꾸지 않습니다.
+
 ## 실제 Slack DM · 실제 LLM 켜기
 - Slack: 저장소 루트 `.env` 에 소모임이 쓰는 `SLACK_BOT_TOKEN` 이 있으면, `large/backend/.env` 에 `NOTIFY_MODE=slack` → 서버 재시작 → 상단 태그 `Slack DM 실제`. ⚠️ 수업 워크스페이스에 실제 DM 이 갑니다. 시연용 명단의 Slack ID 는 본인·채총처럼 소수만 실제 ID 로 바꾸세요(시드 ID `UDEMO…` 는 존재하지 않아 실패로 기록됩니다). 실제 Slack 모드에서는 스케줄러가 기본 꺼짐(`NOTIFY_SCHEDULER=on` 으로 켬).
 - Claude: 루트 `.env` 의 `LLM_API_KEY`(소모임과 같은 키) + `large/backend/.env` 에 `LLM_MODE=claude` (기본 모델 `claude-haiku-5-5`, `CLAUDE_MODEL` 로 변경)
