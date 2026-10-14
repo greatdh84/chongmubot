@@ -1,13 +1,21 @@
 /* =========================================================
-   총무봇 공통 디자인 토큰 (임시) — SMALL(demo/index.html) :root 값을 그대로 옮김
-   SMALL 과 같은 이름을 쓰므로, 공통 디자인이 확정되면 이 파일만 교체하면 됩니다.
+   총무봇 공통 디자인 토큰 — 도총 소모임 화면과 같은 값
+   출처: demo/index.html <style> 의 :root 와 "테마: 패트와 매트" 블록 (main 502223c, demo/index.html 최종 변경 beb4829 기준).
+   도총이 demo/index.html 의 :root·패트와 매트 값을 바꾸면 이 파일도 같이 고칠 것. 글꼴(Jua·Pretendard)은 index.html 에서 같은 주소로 불러옴.
    ========================================================= */
 :root {
   color-scheme: light;
-  --bg: #f3f7ee; --card: #ffffff; --ink: #1f2a1c; --muted: #6b7a66; --line: #e1e9d9; --soft: #f7faf3;
-  --green: #3f9b3a; --green-d: #2c6e28; --green-l: #e5f3df; --yellow: #ffd257; --yellow-l: #fff6d6;
-  --red: #d9534f; --red-l: #fde9e7; --orange: #e98b2a; --orange-l: #fdf0e1; --blue: #3b7fc4; --blue-l: #e6f0fa;
-  --grey-l: #eef1ec; --shadow: 0 1px 2px rgba(30,50,20,.06), 0 4px 14px rgba(30,50,20,.06); --r: 14px;
-  --r-btn: 10px; --r-sm: 8px;
+  /* 테마: 패트와 매트 — 세이지 그린 바탕에 소나무 무늬, 숲 초록 줄무늬 테두리, 매트 빨강·패트 노랑, 청바지 파랑, 나무 갈색 */
+  --bg: #a9cf9f; --card: #fffdf5; --ink: #2b2a1f; --muted: #6f6a52; --line: #e8dfc4; --soft: #faf6e8;
+  --green: #2f6e46; --green-d: #225236; --green-l: #e2efd6; --yellow: #f7d54a; --yellow-l: #fff5cc;
+  --red: #d6392d; --red-l: #fde4df; --orange: #d9822b; --orange-l: #fbecd9; --blue: #4f72a0; --blue-l: #e3ebf5;
+  --grey-l: #f1ecdc; --wood: #7a5232; --forest: #2c5f3e;
+  --shadow: 0 2px 0 rgba(60,45,20,.08), 0 8px 20px rgba(40,60,30,.12); --r: 18px;
+  --pine: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='72' height='72'%3E%3Cg fill='%23ffffff' fill-opacity='.16'%3E%3Cpath d='M18 6l7 10h-4l6 9h-4l7 10H10l7-10h-4l6-9h-4z'/%3E%3Crect x='16.5' y='35' width='3' height='4'/%3E%3Cpath d='M54 42l6 9h-3l5 7h-3l6 9H40l6-9h-3l5-7h-3z'/%3E%3C/g%3E%3C/svg%3E");
+
+  /* 대모임에서 쓰는 이름(값은 도총 컴포넌트에서 가져옴: .btn/.inp 12px, .btn.sm 8px, 패트와 매트 테두리 2px) */
+  --r-btn: 12px; --r-sm: 8px; --bw: 2px;
   --font: Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-title: Jua, Pretendard, sans-serif;
+  --top-stripe: repeating-linear-gradient(135deg, var(--forest) 0 10px, #2a5a3b 10px 20px); --top-edge: #1f4a30; --top-ink: #fff7dc;
 }

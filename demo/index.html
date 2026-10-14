@@ -1156,7 +1156,8 @@ function renderSizePick(){
    ========================================================= */
 const LARGE = {
   // 실제 대모임 화면은 React 앱(large/frontend)이고, 공용 서버가 /large/ 에서 제공합니다.
-  // 이 블록은 규모 선택 뒤의 '진입 카드'만 맡습니다. 서버 없이 연 정적 데모(GitHub Pages·파일)에서는 열 수 없다고 안내합니다.
+  // 서버 없이 연 정적 데모(GitHub Pages)에서는 같은 화면의 정적 데모판(demo/large/, 녹화한 가상 데이터·저장 안 됨)을 엽니다.
+  // 정적 데모판은 large/scripts/update_static_demo.sh 로 다시 만듭니다(main 에 large/** 가 바뀌면 Actions 가 자동 갱신).
   server:'unknown', // unknown | on | off — 공용 서버의 LARGE API 응답 여부. 페이지를 열 때마다 새로 확인(저장 안 함)
   defaults(){
     return {};
@@ -1164,10 +1165,12 @@ const LARGE = {
 
   render(el){
     const on = LARGE.server === 'on';
+    const web = location.protocol.startsWith('http'); // file:// 로 연 경우 정적 데모판도 열 수 없음(브라우저가 데이터 파일 읽기를 막음)
     const status = {
       unknown:'<span class="lg-pill">서버 확인 중…</span>',
       on:'<span class="lg-pill lg-on">공용 서버 실행 중 — 실제 대모임 화면을 열 수 있어요</span>',
-      off:'<span class="lg-pill lg-off">정적 데모 — 대모임 화면은 공용 서버에서만 열려요</span>'
+      off: web ? '<span class="lg-pill lg-off">정적 데모 — 녹화한 가상 데이터로 대모임 화면을 볼 수 있어요(저장 안 됨)</span>'
+               : '<span class="lg-pill lg-off">파일로 열림 — 대모임 화면은 웹 주소(GitHub Pages·공용 서버)에서 열려요</span>'
     }[LARGE.server] || '';
     el.innerHTML = `
     <header class="top"><div class="top-in">
@@ -1180,10 +1183,12 @@ const LARGE = {
           <p>수백 명 규모 행사: 전체 명단 CSV → 부서별 묶기 → 개인 인원조사(Slack DM) → 부서 담당자가 회비 일괄 납부 → 마감 기준표 저장 → 행사 후 정산 Agent 가 <b>정산 보고서 한 장</b>(추가 납부·환불·확인 필요)으로 정리. 환불·추가 납부는 부서 담당자에게만 연락합니다.</p></div></div>
         <p>${status}</p>
         <div class="lg-row">
-          <button class="btn primary" data-act="large:open" ${on ? '' : 'disabled'}>대모임 관리 화면 열기 →</button>
+          ${on || LARGE.server === 'unknown' || !web
+            ? `<button class="btn primary" data-act="large:open" ${on ? '' : 'disabled'}>대모임 관리 화면 열기 →</button>`
+            : `<button class="btn primary" data-act="large:openStatic">대모임 화면 열기(정적 데모) →</button>`}
           <button class="btn ghost" data-act="large:recheck">서버 다시 확인</button>
         </div>
-        ${LARGE.server === 'off' ? `<p class="muted lg-note">공용 서버를 켠 뒤 <code>http://127.0.0.1:8787</code> 로 다시 열어 주세요. 실행: <code>.venv/bin/python -m hub</code> (README 참고)</p>` : ''}
+        ${LARGE.server === 'off' ? `<p class="muted lg-note">저장·발송·실제 Agent 는 공용 서버에서: <code>.venv/bin/python -m hub</code> 실행 후 <code>http://127.0.0.1:8787</code> (README 참고)</p>` : ''}
         <p class="muted lg-note">연락은 소모임과 같은 Slack 봇의 DM 입니다(대모임 서버 설정 <code>NOTIFY_MODE=slack</code> 일 때만 실제 발송, 기본은 모의 발송).</p>
       </section>
     </div></main>`;
@@ -1200,24 +1205,27 @@ const LARGE = {
       .finally(() => { if (S.size === 'large' && S.screen === 'setup') render(); });
   },
 
+  // 대모임 화면으로 이동. 돌아오면 시작 화면이 보이도록(기존 '시작화면'·'모임 규모' 버튼과 같은 전환). 진행 중인 소모임이 있으면 규모는 그대로 둠
+  go(url){
+    S.screen = 'start';
+    if (!S.started) S.size = null;
+    save();
+    location.href = url;
+    return false;
+  },
+
   act: {
-    open(){
-      // 돌아오면 시작 화면이 보이도록(기존 '시작화면'·'모임 규모' 버튼과 같은 전환). 진행 중인 소모임이 있으면 규모는 그대로 둠
-      S.screen = 'start';
-      if (!S.started) S.size = null;
-      save();
-      location.href = '/large/';
-      return false;
-    },
+    open(){ return LARGE.go('/large/'); },              // 공용 서버의 실제 화면
+    openStatic(){ return LARGE.go('large/#/admin'); },  // 이 페이지 옆 demo/large/ 정적 데모판(GitHub Pages 에서도 동작하는 상대 경로)
     recheck(){ LARGE.server = 'unknown'; },
-    // 소모임 설정의 '워크샵' 카드: 공용 서버가 켜져 있으면 바로 대모임 화면, 아니면 대모임 진입 카드
+    // 소모임 설정의 '워크샵' 카드: 공용 서버가 켜져 있으면 실제 대모임 화면, 없으면 정적 데모판, 파일로 열었으면 진입 카드
     fromWorkshop(){
       S.size = 'large'; S.screen = 'setup'; save();
       if (!location.protocol.startsWith('http')) { LARGE.server = 'off'; return render(); }
       fetch('/api/large/meta', {cache:'no-store'})
         .then(r => r.ok ? r.json() : Promise.reject())
-        .then(j => { if (j.system === 'large') { LARGE.server = 'on'; LARGE.act.open(); } else { LARGE.server = 'off'; render(); } })
-        .catch(() => { LARGE.server = 'off'; render(); });
+        .then(j => { if (j.system === 'large') { LARGE.server = 'on'; LARGE.act.open(); } else return Promise.reject(); })
+        .catch(() => { LARGE.server = 'off'; LARGE.act.openStatic(); });
     }
   }
 };
