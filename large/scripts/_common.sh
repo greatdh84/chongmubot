@@ -19,6 +19,18 @@ refuse_if_running() {
   fi
 }
 
+# 지울 DB 를 다른 프로세스(다른 포트의 공용 서버 등)가 열고 있으면 멈춤 — 켜진 서버 밑에서 DB 파일이 지워지면 그 서버의 데이터가 사라진다
+refuse_if_db_open() {
+  local db="$1"
+  if command -v lsof >/dev/null 2>&1; then
+    local pid; pid="$(lsof -t "$db" "$db-wal" 2>/dev/null | head -1 || true)"
+    if [[ -n "$pid" ]]; then
+      echo "$db 를 다른 프로세스(PID $pid)가 쓰고 있어 지우지 않습니다. 그 서버를 Ctrl+C 로 끈 뒤 다시 실행하세요." >&2
+      exit 1
+    fi
+  fi
+}
+
 # 실제로 적용될 값(환경변수 → large/backend/.env → 저장소 루트 .env 순)을 대모임 설정 코드로 읽어 보여 준다
 show_settings() {
   local label="$1"

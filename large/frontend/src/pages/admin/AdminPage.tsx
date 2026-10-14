@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type JSX } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, BOT_PERSONA, BOT_STRATEGY, CHOICE_LABEL, fmtTime, STATIC, won, type Change, type EventInfo } from "../../api";
+import { api, BOT_PERSONA, BOT_STRATEGY, fmtTime, STATIC, won, type Change, type EventInfo } from "../../api";
 import { Chat, Msg, Page, StatusPill, useEventName, useMeta } from "../../components/common";
 import { useAction, useLoad } from "../../hooks";
 import { PaymentsTab, RosterTab, TasksTab } from "./AdminMoney";
@@ -115,10 +115,6 @@ function DashboardTab({ base, go }: { base: string; go: (t: Tab) => void }) {
           </div>
         </div>
       </div>
-      <details className="card">
-        <summary><b>행사 설정 · 회비 · 환불 규칙</b> <span className="muted">참석 마감 {fmtTime(d.event.attend_deadline)} · 납부 마감 {fmtTime(d.event.payment_deadline)} · 행사 {fmtTime(d.event.event_at)}</span></summary>
-        <div style={{ marginTop: 12 }}><SettingsTab base={base} /></div>
-      </details>
     </>
   );
 }
@@ -153,70 +149,6 @@ function LogTab({ base }: { base: string }) {
 
 export function Stat({ label, value }: { label: string; value: string }) {
   return <div className="stat"><div className="label">{label}</div><div className="value">{value}</div></div>;
-}
-
-interface Rule { id: number; change_type: string; valid_until: string | null; refund_percent: number; description: string }
-const toLocalInput = (iso: string | null) => (iso ? iso.slice(0, 16) : "");
-
-function SettingsTab({ base }: { base: string }) {
-  const { data: d, reload } = useLoad(() => api.get<Dashboard>(base), [base]);
-  const { data: rules, reload: reloadRules } = useLoad(() => api.get<Rule[]>(`${base}/refund-rules`), [base]);
-  const { busy, message, run } = useAction();
-  const [form, setForm] = useState<Record<string, string>>({});
-  const [rule, setRule] = useState({ change_type: "attend_to_absent", valid_until: "", refund_percent: "50", description: "" });
-  if (!d) return <p className="muted">불러오는 중…</p>;
-  const ev = d.event;
-  const val = (k: string, fallback: string) => form[k] ?? fallback;
-  const save = () => {
-    const body: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(form)) body[k] = k.startsWith("fee_") ? Number(v) : v;
-    run(() => api.put(base, body), "저장했습니다.").then(() => { setForm({}); reload(); });
-  };
-  const locked = !!ev.snapshot_taken_at;
-  return (
-    <div className="two">
-      <div className="card">
-        <h2>행사·회비</h2>
-        <div style={{ display: "grid", gap: 8 }}>
-          <label className="field">행사명<input value={val("name", ev.name)} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
-          <label className="field">행사 일시<input type="datetime-local" value={val("event_at", toLocalInput(ev.event_at))} onChange={(e) => setForm({ ...form, event_at: e.target.value })} /></label>
-          <label className="field">참석 응답 마감<input type="datetime-local" disabled={locked} value={val("attend_deadline", toLocalInput(ev.attend_deadline))} onChange={(e) => setForm({ ...form, attend_deadline: e.target.value })} /></label>
-          <label className="field">팀 입금 마감<input type="datetime-local" value={val("payment_deadline", toLocalInput(ev.payment_deadline))} onChange={(e) => setForm({ ...form, payment_deadline: e.target.value })} /></label>
-          <div className="row">
-            {(["bus", "car", "absent"] as const).map((k) => (
-              <label key={k} className="field">{CHOICE_LABEL[k]}<input type="number" min={0} step={1000} disabled={locked} value={val(`fee_${k}`, String(ev.fees[k]))} onChange={(e) => setForm({ ...form, [`fee_${k}`]: e.target.value })} style={{ width: 110 }} /></label>
-            ))}
-          </div>
-          <label className="field">입금 안내<input value={val("account_note", ev.account_note)} onChange={(e) => setForm({ ...form, account_note: e.target.value })} /></label>
-          {locked && <p className="muted">마감 기준 응답 저장 후에는 회비와 참석 마감을 바꿀 수 없습니다.</p>}
-          <div className="row">
-            <button className="primary" disabled={busy || Object.keys(form).length === 0} onClick={save}>저장</button>
-            <button disabled={busy || locked || !ev.after_attend_deadline} onClick={() => run(() => api.post(`${base}/snapshot`), "마감 기준 응답을 저장했습니다.").then(reload)}>마감 기준 응답 저장</button>
-          </div>
-        </div>
-        <Msg m={message} />
-      </div>
-      <div className="card">
-        <h2>환불 규칙 (변경 시점·항목별)</h2>
-        <p className="muted">감액 변경은 '이전 부담액 − 새 회비'에 환불률을 곱합니다. 맞는 규칙이 없으면 환불 0원(총무 확인). 증액 변경은 차액을 전액 청구합니다.</p>
-        <div className="table-wrap"><table>
-          <thead><tr><th>항목</th><th>이 시각 전 요청</th><th className="num">환불률</th><th>설명</th><th /></tr></thead>
-          <tbody>{rules?.map((r) => (
-            <tr key={r.id}><td>{r.change_type === "attend_to_absent" ? "참석→불참" : "버스→자차"}</td><td>{r.valid_until ? fmtTime(r.valid_until) : "기한 없음"}</td><td className="num">{r.refund_percent}%</td><td>{r.description}</td>
-              <td><button className="small danger" onClick={() => run(() => api.del(`${base}/refund-rules/${r.id}`), "삭제했습니다.").then(reloadRules)}>삭제</button></td></tr>
-          ))}</tbody>
-        </table></div>
-        <h3>규칙 추가</h3>
-        <div className="row">
-          <select value={rule.change_type} onChange={(e) => setRule({ ...rule, change_type: e.target.value })} aria-label="변경 항목"><option value="attend_to_absent">참석→불참</option><option value="bus_to_car">버스→자차</option></select>
-          <input type="datetime-local" value={rule.valid_until} onChange={(e) => setRule({ ...rule, valid_until: e.target.value })} aria-label="적용 기한" />
-          <input type="number" min={0} max={100} value={rule.refund_percent} onChange={(e) => setRule({ ...rule, refund_percent: e.target.value })} style={{ width: 70 }} aria-label="환불률" />%
-          <input value={rule.description} onChange={(e) => setRule({ ...rule, description: e.target.value })} placeholder="설명" aria-label="설명" />
-          <button disabled={busy} onClick={() => run(() => api.post(`${base}/refund-rules`, { ...rule, valid_until: rule.valid_until || null, refund_percent: Number(rule.refund_percent) }), "추가했습니다.").then(reloadRules)}>추가</button>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function ChangesTab({ base }: { base: string }) {

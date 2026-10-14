@@ -404,13 +404,15 @@ h1,h2,h3,.brand,.card-h h3,.sec-h h3,.headline b{font-family:Jua,Pretendard,sans
 .lg-status{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 20px;border-bottom:2px dashed var(--line);background:var(--soft)}
 .lg-result{margin-top:10px;padding:10px 12px;border-radius:12px;background:var(--green-l);color:var(--green-d)}
 .lg-errs{margin:4px 0 0;padding-left:18px;max-height:180px;overflow:auto}
-.lg-depts{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;margin-top:12px}
-.lg-dept{padding:8px 10px}
-.lg-dept b{font-size:13px}
-.lg-people{margin-top:10px;padding:10px;border:2px solid var(--line);border-radius:12px;background:#fff;display:grid;gap:8px;max-height:360px;overflow:auto}
+.lg-depts{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px;margin-top:12px;align-items:start}
+.lg-dept{padding:12px;display:grid;gap:4px}
+.lg-dept .members{grid-template-columns:repeat(auto-fill,minmax(96px,1fr))}
+.lg-dept .mem{padding:4px 6px;font-size:12px}
+.lg-dept .mem .av{width:22px;height:22px;font-size:11px}
+.lg-demo{margin-top:14px;padding:10px 12px;border:2px dashed var(--line);border-radius:12px;background:var(--soft)}
+.lg-demo summary{cursor:pointer}
 .lg-rule{display:grid;grid-template-columns:120px minmax(0,1fr) 80px minmax(0,1.2fr) auto;gap:6px;align-items:center;margin-top:10px}
 .lg-rules .sheet th,.lg-rules .sheet td{white-space:normal} /* 설명이 길어 좁은 화면에서 가로로 넘치지 않게 */
-.lg-people .sheet td{white-space:normal}
 .lg-empty{padding:24px 12px;text-align:center;border:2px dashed var(--line);border-radius:12px}
 @media (max-width:720px){.lg-rule{grid-template-columns:1fr 1fr}.lg-rule .btn{grid-column:1/-1}}
 </style>
@@ -1173,9 +1175,9 @@ const LARGE = {
   // 성격·독촉 전략은 소모임과 같은 S.persona·S.strategy 와 같은 함수(setupPersona·setupStrategy·SURVEY_DM·SETTLE_DM)를 그대로 씁니다.
   server:'unknown', // unknown | on | off — 대모임 API(/api/large/meta) 응답 여부. 페이지를 열 때마다 새로 확인(저장 안 함)
   // 서버에서 읽은 값(저장 안 함): meta, 행사(ev), 환불 규칙, 부서, 펼친 부서의 명단
-  meta:null, ev:null, rules:[], teams:[], people:{}, loading:false, loaded:false, needLogin:false, busy:false, error:'',
+  meta:null, ev:null, rules:[], teams:[], people:[], loading:false, loaded:false, needLogin:false, busy:false, error:'',
   defaults(){
-    return {eventId:null, open:null, result:null, rowErrors:[], form:{}, rule:{change_type:'attend_to_absent', valid_until:'', refund_percent:'50', description:''}};
+    return {eventId:null, open:null, result:null, rowErrors:[], demo:null, demoErrors:[], form:{}, rule:{change_type:'attend_to_absent', valid_until:'', refund_percent:'50', description:''}};
   },
   st(){ // 예전 저장 상태에도 필요한 칸이 있게
     const d = LARGE.defaults(), L = S.large = S.large || d;
@@ -1222,19 +1224,21 @@ const LARGE = {
   async reload(){
     const b = LARGE.base();
     [LARGE.rules, LARGE.teams] = await Promise.all([LARGE.api('GET', `${b}/refund-rules`), LARGE.api('GET', `${b}/teams`)]);
-    const open = S.large.open;
-    LARGE.people = {};
-    if (open && LARGE.teams.some(t => t.id === open)) LARGE.people[open] = await LARGE.api('GET', `${b}/participants?team_id=${open}`);
+    // 부서 카드의 멤버 칩용 전원 명단(부서별로 묶어 씀). 명단이 없으면 부르지 않음
+    LARGE.people = LARGE.teams.length ? await LARGE.api('GET', `${b}/participants`) : [];
   },
   // 서버 없을 때 보여 줄 예시 값(저장 안 함)
+  // 시연 고정 날짜(KST) — large/backend/scripts/make_empty_event.py 와 같은 값
+  SAMPLE_AT:{attend:'2026-10-05T18:00:00+09:00', payment:'2026-10-08T18:00:00+09:00', event:'2026-10-14T09:00:00+09:00', minus3:'2026-10-11T09:00:00+09:00'},
   sample(){
-    const at = (days, h) => { const d = new Date(); d.setDate(d.getDate() + days); d.setHours(h, 0, 0, 0); return toLocalInput(d.getTime()) + ':00+09:00'; };
-    return {id:null, name:'2026 가을 전사 워크숍', event_at:at(10, 9), attend_deadline:at(3, 18), payment_deadline:at(6, 18), fees:{bus:20000, car:15000, absent:0}, account_note:'(시연) 가상은행 000-000000-00 워크숍 총무', snapshot_taken_at:null};
+    const A = LARGE.SAMPLE_AT;
+    return {id:null, name:'2026 가을 전사 워크숍', event_at:A.event, attend_deadline:A.attend, payment_deadline:A.payment, fees:{bus:20000, car:15000, absent:0}, account_note:'(시연) 가상은행 000-000000-00 워크숍 총무', snapshot_taken_at:null};
   },
   sampleRules(){
-    return [['attend_to_absent', '입금 마감 전', 100, '입금 마감 전 불참 전환: 전액 환불'], ['attend_to_absent', '행사 3일 전', 50, '입금 마감 후 ~ 행사 3일 전 불참: 50% 환불'],
-      ['bus_to_car', '입금 마감 전', 100, '입금 마감 전 버스→자차: 차액 전액 환불'], ['bus_to_car', null, 0, '입금 마감 후 버스→자차: 버스 좌석 확정으로 환불 없음']]
-      .map(([change_type, label, refund_percent, description], i) => ({id:-i - 1, change_type, valid_label:label, refund_percent, description}));
+    const A = LARGE.SAMPLE_AT;
+    return [['attend_to_absent', A.payment, 100, '입금 마감 전 불참 전환: 전액 환불'], ['attend_to_absent', A.minus3, 50, '입금 마감 후 ~ 행사 3일 전 불참: 50% 환불'],
+      ['bus_to_car', A.payment, 100, '입금 마감 전 버스→자차: 차액 전액 환불'], ['bus_to_car', null, 0, '입금 마감 후 버스→자차: 버스 좌석 확정으로 환불 없음']]
+      .map(([change_type, valid_until, refund_percent, description], i) => ({id:-i - 1, change_type, valid_until, refund_percent, description}));
   },
 
   // ---------- 초기설정 화면 섹션 (도총 setupSections() 가 워크샵일 때 이 목록을 씀) ----------
@@ -1281,20 +1285,48 @@ const LARGE = {
           ${LARGE.busy ? '<span class="small muted">올리는 중…</span>' : ''}
         </div>
         ${seed ? '<div class="warn lg-note">⚠️ 지금은 시드 데이터(가짜 300명) DB 예요. 명단을 올리면 시드 데이터와 섞입니다. <code>large/scripts/start_live.sh</code> 로 빈 행사에서 올리세요.</div>' : ''}
-        ${r ? `<div class="lg-result"><b>${r.rows}명 → ${r.teams}개 부서, 담당자 ${r.managers_assigned}명</b> <span class="small muted">(새로 ${r.inserted} · 수정 ${r.updated})</span></div>` : ''}
+        ${r ? `<div class="lg-result"><b>${r.rows}명 → ${r.teams}개 부서, 담당자 ${r.managers_total ?? r.managers_assigned}명</b> <span class="small muted">(새로 ${r.inserted} · 수정 ${r.updated})</span></div>` : ''}
         ${L.rowErrors.length ? `<div class="err lg-note"><b>반영하지 않은 이유 (전체 반려)</b><ul class="lg-errs">${L.rowErrors.map(x => `<li>${esc(x.line)}행: ${esc(x.error)}</li>`).join('')}</ul></div>` : ''}
         ${r && r.warnings && r.warnings.length ? `<div class="warn lg-note">${r.warnings.map(w => `<div>${esc(w)}</div>`).join('')}</div>` : ''}
-        ${LARGE.teams.length ? `<div class="lg-depts">${LARGE.teams.map(t => `
-          <button class="opt lg-dept ${L.open === t.id ? 'on' : ''}" data-act="large:openTeam" data-id="${t.id}">
-            <b>${esc(t.name)}</b><span>${t.headcount}명 · 담당자 ${t.manager ? esc(t.manager.name) : '<span class="tag r">미지정</span>'}</span></button>`).join('')}</div>` : ''}
-        ${L.open && LARGE.people[L.open] ? LARGE.teamList(LARGE.teams.find(t => t.id === L.open), LARGE.people[L.open]) : ''}
+        ${LARGE.teams.length ? `<div class="lg-depts">${LARGE.teams.map(t => LARGE.deptCard(t, L.open === t.id)).join('')}</div>` : ''}
+        ${on && LARGE.meta.demo_tools && LARGE.teams.length ? LARGE.demoBox() : ''}
       </section>`; },
-  teamList(t, ps){ if (!t) return ''; return `
-        <div class="lg-people">
-          <div class="row"><b>${esc(t.name)} 명단</b><span class="tag">${ps.length}명</span><span class="grow"></span><button class="btn sm ghost" data-act="large:openTeam" data-id="${t.id}">접기</button></div>
-          <table class="sheet"><thead><tr><th>ID</th><th>이름</th><th>Slack ID</th><th>응답</th></tr></thead>
-          <tbody>${ps.map(p => `<tr><td>${esc(p.employee_no)}</td><td>${esc(p.name)} ${p.is_manager ? '<span class="tag g">담당자</span>' : ''}</td><td>${esc(p.slack_id)}</td><td>${esc(p.choice_label)}</td></tr>`).join('')}</tbody></table>
-        </div>`; },
+  // 부서 색: 팀코드 숫자로 도총 멤버 색(PALETTE)에서 하나 — 같은 부서는 늘 같은 색
+  color(t){ return PALETTE[(parseInt(String(t.code).replace(/\D/g, ''), 10) || 0) % PALETTE.length]; },
+  // 도총 avatar() 와 같은 모양(.av, 한국 이름은 가운데 글자)
+  // 카드(.opt) 안에서는 도총 '.opt span'(회색 12px)이 덮어쓰므로 글자색·크기를 직접 지정
+  av(name, color, big){ const n = String(name || '?'); return `<span class="av" style="background:${color};color:#fff;${big ? 'width:40px;height:40px;font-size:18px;border-radius:12px' : 'font-size:11px'}">${esc(isKorName(n) ? n[1] : n[0].toUpperCase())}</span>`; },
+  CHIPS:8,
+  deptCard(t, open){
+    const c = LARGE.color(t), ps = LARGE.people.filter(p => p.team.id === t.id), shown = open ? ps : ps.slice(0, LARGE.CHIPS), more = ps.length - shown.length;
+    const mgr = t.manager ? t.manager.name : null;
+    return `
+          <div class="opt lg-dept" style="border-top:4px solid ${c}">
+            <div class="row">${LARGE.av(mgr || t.name, c, true)}
+              <div style="min-width:0"><b style="font-size:20px;font-weight:800">${mgr ? esc(mgr) : '담당자 미지정'}</b>
+                <span>${esc(t.name)} · ${t.headcount}명 · ${esc(t.code)}${mgr ? ' · 담당자' : ''}</span></div></div>
+            <div class="members" style="margin-top:8px">${shown.map(p => `<span class="mem">${LARGE.av(p.name, c)}<span style="color:var(--ink)">${esc(p.name)}</span></span>`).join('')}</div>
+            ${more > 0 ? `<button class="btn sm ghost" data-act="large:openTeam" data-id="${t.id}">+${more}명 더보기</button>`
+              : open && ps.length > LARGE.CHIPS ? `<button class="btn sm ghost" data-act="large:openTeam" data-id="${t.id}">접기</button>` : ''}
+          </div>`;
+  },
+  // 시연용 데이터(APP_MODE=demo): 참석 응답·마감 후 변경 CSV 로 그 시각들을 재현
+  demoBox(){
+    const L = S.large, d = L.demo, c = d && d.counts;
+    return `
+        <details class="lg-demo" ${d || L.demoErrors.length ? 'open' : ''}>
+          <summary><b>시연용 데이터</b> <span class="small muted">참석 응답·마감 후 변경 CSV (시연 모드에서만)</span></summary>
+          <p class="small muted lg-note">응답 CSV(ID, 이름, 소속 부서, 응답, 응답일시) → 참석 마감 기준 응답 저장 → 변경 CSV(ID … 변경 전, 변경 후, 요청일시, 경로, 처리, 처리일시 …)를 시각 순서대로 다시 만듭니다. 넣을 때마다 응답·변경 기록을 지우고 처음부터 다시 만들어 같은 파일은 같은 결과입니다.</p>
+          <div class="row wrap">
+            <button class="btn" data-act="large:pickDemo" data-kind="responses" ${LARGE.busy ? 'disabled' : ''}>📄 응답 CSV 올리기</button>
+            <button class="btn" data-act="large:pickDemo" data-kind="changes" ${LARGE.busy || !d ? 'disabled' : ''}>📄 변경 CSV 올리기</button>
+            <input type="file" id="lgDemoFile" accept=".csv,text/csv" hidden>
+          </div>
+          ${c ? `<div class="lg-result">${esc(d.basis)}: 버스 ${c.bus} · 자차 ${c.car} · 불참 ${c.absent} · 미정 ${c.undecided} · 미응답 ${c.none} <span class="small">· 현재 참석 ${d.attending_now}명</span>
+            <br>변경 승인 ${d.changes.applied} · 대기 ${d.changes.pending}${d.changes.rejected ? ` · 반려 ${d.changes.rejected}` : ''}</div>` : ''}
+          ${L.demoErrors.length ? `<div class="err lg-note"><b>반영하지 않은 이유 (전체 반려)</b><ul class="lg-errs">${L.demoErrors.map(x => `<li>${esc(x.line)}행: ${esc(x.error)}</li>`).join('')}</ul></div>` : ''}
+        </details>`;
+  },
   secFee(n){ const e = LARGE.ev || LARGE.sample(), lock = LARGE.readonly() || (e.snapshot_taken_at ? 'disabled' : ''); return `
       <section class="sec" data-pv="msg">
         <div class="sec-h"><span class="n">${n}</span><div><h3>회비</h3><p>사람마다 고른 참석 방식으로 회비가 정해지고, 부서 담당자가 부서 합계를 한 번에 입금해요.</p></div></div>
@@ -1305,7 +1337,7 @@ const LARGE = {
       <section class="sec" data-pv="sched">
         <div class="sec-h"><span class="n">${n}</span><div><h3>환불 규칙</h3><p>마감 뒤 감액 변경은 '이전 부담액 − 새 회비'에 환불률을 곱해요. 맞는 규칙이 없으면 환불 0원(총무 확인), 증액은 차액 전액 청구.</p></div></div>
         <div class="sheet-wrap lg-rules"><table class="sheet"><thead><tr><th>항목</th><th>이 시각 전 요청</th><th>환불률</th><th>설명</th>${on ? '<th></th>' : ''}</tr></thead>
-        <tbody>${LARGE.rules.map(r => `<tr><td>${r.change_type === 'attend_to_absent' ? '참석→불참' : '버스→자차'}</td><td>${r.valid_label !== undefined ? esc(r.valid_label || '기한 없음') : r.valid_until ? fmtDeadline(r.valid_until) : '기한 없음'}</td><td>${r.refund_percent}%</td><td>${esc(r.description)}</td>
+        <tbody>${LARGE.rules.map(r => `<tr><td>${r.change_type === 'attend_to_absent' ? '참석→불참' : '버스→자차'}</td><td>${r.valid_until ? fmtDeadline(r.valid_until) : '기한 없음'}</td><td>${r.refund_percent}%</td><td>${esc(r.description)}</td>
           ${on ? `<td><button class="btn sm ghost danger" data-act="large:delRule" data-id="${r.id}" aria-label="규칙 삭제">✕</button></td>` : ''}</tr>`).join('')}</tbody></table></div>
         ${on ? `<div class="lg-rule">
           <select class="inp" data-bind="large.rule.change_type" aria-label="변경 항목"><option value="attend_to_absent" ${R.change_type === 'attend_to_absent' ? 'selected' : ''}>참석→불참</option><option value="bus_to_car" ${R.change_type === 'bus_to_car' ? 'selected' : ''}>버스→자차</option></select>
@@ -1322,7 +1354,7 @@ const LARGE = {
     pv.closest('.preview')?.querySelectorAll('.tabs button[data-act="pvTab"]').forEach(b => { if (names[b.dataset.val]) b.textContent = names[b.dataset.val]; });
     const e = LARGE.ev || LARGE.sample(), f = k => LARGE.val(k, k.startsWith('fee_') ? e.fees[k.slice(4)] : LARGE.local(e[k]));
     if (UI.pvTab === 'msg'){
-      const t0 = LARGE.teams[0], mgr = (t0 && t0.manager && t0.manager.name) || '김부장', who = (LARGE.people[S.large.open] || [])[1];
+      const t0 = LARGE.teams[0], mgr = (t0 && t0.manager && t0.manager.name) || '김부장', who = LARGE.people.find(p => !p.is_manager && (!S.large.open || p.team.id === S.large.open));
       const name = (who && who.name) || '정서준', event = LARGE.val('name', e.name);
       const sv = {name, event, ...dlCtx(f('attend_deadline'))};
       // 금액 예시: 응답이 있으면 응답대로, 아직 없으면 부서 전원 버스 기준(실제 안내 금액은 납부 마감 청구표에서 서버가 계산)
@@ -1404,13 +1436,8 @@ const LARGE = {
       if (LARGE.meta && LARGE.meta.db_purpose === 'demo-seed' && !confirm('시드 데이터와 섞입니다. start_live.sh 로 빈 행사에서 올리세요.\n그래도 이 DB 에 올릴까요?')) return false;
       $('#lgRoster').click(); return false;
     },
-    async openTeam(d){
-      const L = S.large, id = +d.id;
-      if (L.open === id){ L.open = null; render(); return false; }
-      L.open = id; UI.pvTab = 'sheet';
-      try { LARGE.people[id] = await LARGE.api('GET', `${LARGE.base()}/participants?team_id=${id}`); } catch (e){ return LARGE.fail(e); }
-      render(); return false;
-    },
+    openTeam(d){ const L = S.large, id = +d.id; L.open = L.open === id ? null : id; UI.pvTab = 'sheet'; },
+    pickDemo(d){ LARGE.demoKind = d.kind; $('#lgDemoFile').click(); return false; },
     async addRule(){
       const R = S.large.rule;
       try {
@@ -1442,13 +1469,27 @@ const LARGE = {
     }
   },
 
+  async uploadDemo(file, kind){
+    const L = S.large;
+    LARGE.busy = true; L.demoErrors = []; render();
+    const fd = new FormData(); fd.append('file', file);
+    try {
+      L.demo = await LARGE.api('POST', `${LARGE.base()}/demo/${kind === 'changes' ? 'changes' : 'responses'}`, fd);
+      await LARGE.reload();
+      toast(kind === 'changes' ? `변경 ${L.demo.changes.applied + L.demo.changes.pending}건을 시각 순서대로 넣었어요` : `응답을 넣고 참석 마감 기준 응답을 저장했어요`);
+    } catch (e){
+      if (Array.isArray(e.detail)) L.demoErrors = e.detail.filter(x => x && x.line !== undefined);
+      toast(e.message);
+    }
+    LARGE.busy = false; render();
+  },
   async upload(file){
     const L = S.large;
     LARGE.busy = true; L.rowErrors = []; L.result = null; render();
     const fd = new FormData(); fd.append('file', file);
     try {
       L.result = await LARGE.api('POST', `${LARGE.base()}/roster`, fd);
-      L.open = null; await LARGE.reload(); UI.pvTab = 'sheet';
+      L.open = null; L.demo = null; L.demoErrors = []; await LARGE.reload(); UI.pvTab = 'sheet';
       toast(`명단 ${L.result.rows}명 → ${L.result.teams}개 부서로 묶었어요`);
     } catch (e){
       if (Array.isArray(e.detail)) L.rowErrors = e.detail.filter(x => x && x.line !== undefined);
@@ -1457,7 +1498,11 @@ const LARGE = {
     LARGE.busy = false; render();
   }
 };
-document.addEventListener('change', e => { if (e.target.id === 'lgRoster' && e.target.files && e.target.files[0]){ LARGE.upload(e.target.files[0]); e.target.value = ''; } });
+document.addEventListener('change', e => {
+  const f = e.target.files && e.target.files[0]; if (!f) return;
+  if (e.target.id === 'lgRoster'){ LARGE.upload(f); e.target.value = ''; }
+  if (e.target.id === 'lgDemoFile'){ LARGE.uploadDemo(f, LARGE.demoKind); e.target.value = ''; }
+});
 /* ===================== 대모임 블록 끝 ===================== */
 
 /* =========================================================

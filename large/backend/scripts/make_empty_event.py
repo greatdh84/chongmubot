@@ -2,14 +2,16 @@
 
     DATABASE_URL=sqlite:///$PWD/var/live.db ../../.venv/bin/python scripts/make_empty_event.py
 
-- 참석 응답 마감 3일 뒤 18:00 · 회비 납부 마감 6일 뒤 18:00 · 행사 10일 뒤 09:00 (KST, 오늘 기준)
-- 회비·환불 규칙은 시드와 같은 기본값. 명단은 초기설정 화면(워크샵)에서 CSV 로 올린다.
+- 시연 날짜 고정(KST): 참석 응답 마감 2026-10-05 18:00 · 회비 납부 마감 2026-10-08 18:00 · 행사 2026-10-14 09:00
+  (시연용 응답·변경·거래내역 CSV 의 날짜와 맞춤. 초기설정 화면의 서버 없을 때 기본값도 같다)
+- 회비 버스 20,000 / 자차 15,000 / 불참 0, 환불 규칙 4개(납부 마감 전 불참 100% · 납부 마감~행사 3일 전 불참 50%
+  · 버스→자차 납부 마감 전 100% · 이후 0%). 명단은 초기설정 화면(워크샵)에서 CSV 로 올린다.
 - 이미 행사가 있는 DB 면 거부한다(시드 DB·운영 DB 보호). 지우고 다시 만들려면 large/scripts/start_live.sh --reset
 """
 from __future__ import annotations
 
 import sys
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -23,8 +25,10 @@ from app.security import hash_password  # noqa: E402
 LIVE_PURPOSE = "demo-live"
 
 
-def kst(d: date, days: int, hour: int) -> datetime:
-    return clock.kst_naive_to_utc(datetime(d.year, d.month, d.day, hour) + timedelta(days=days))
+# 시연 날짜(KST)
+ATTEND_DEADLINE = datetime(2026, 10, 5, 18, 0)
+PAYMENT_DEADLINE = datetime(2026, 10, 8, 18, 0)
+EVENT_AT = datetime(2026, 10, 14, 9, 0)
 
 
 def main() -> None:
@@ -41,8 +45,7 @@ def main() -> None:
             admin = Admin(email=settings.admin_email.lower(), password_hash=hash_password(settings.admin_password))
             db.add(admin)
             db.flush()
-        today = clock.kst(clock.now()).date()
-        attend, payment, event_at = kst(today, 3, 18), kst(today, 6, 18), kst(today, 10, 9)
+        attend, payment, event_at = (clock.kst_naive_to_utc(d) for d in (ATTEND_DEADLINE, PAYMENT_DEADLINE, EVENT_AT))
         ev = Event(
             admin_id=admin.id, name="2026 가을 전사 워크숍", event_at=event_at, attend_deadline=attend, payment_deadline=payment,
             mode="large", fee_bus=20000, fee_car=15000, fee_absent=0, account_note="(시연) 가상은행 000-000000-00 워크숍 총무",

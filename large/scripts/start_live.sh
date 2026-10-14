@@ -9,6 +9,7 @@ refuse_if_running
 
 DB="$VAR/live.db"
 if [[ "${1:-}" == "--reset" ]]; then
+  refuse_if_db_open "$DB"
   rm -f "$DB" "$DB-wal" "$DB-shm" "$DB-journal"
   echo "live.db 를 지웠습니다."
 elif [[ -n "${1:-}" ]]; then

@@ -9,6 +9,7 @@ refuse_if_running
 DB="$VAR/chongmu.db"
 export DATABASE_URL="sqlite:///$DB"
 if [[ "${1:-}" == "--reset" ]]; then
+  refuse_if_db_open "$DB"
   (cd "$ROOT/large/backend" && "$PY" -m app.seed --reset)
 elif [[ -n "${1:-}" ]]; then
   echo "알 수 없는 인자: $1 (쓸 수 있는 것: --reset)" >&2; exit 2

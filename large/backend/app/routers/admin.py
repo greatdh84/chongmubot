@@ -18,7 +18,7 @@ from ..models import (
     Participant, RefundRule, Response, Settlement, Team, TeamManager,
 )
 from ..schemas import AdminResponseSet, AllocationIn, BotSettings, ChatSend as ChatIn, Decision, EmailEnqueue, EventUpdate, ManagerAssign, PayoutIn, RefundRuleIn, SchedulerToggle, TaskResolve
-from ..services import emails, invites, payments, report as rpt, responses as resp_svc, roster, settlement as stl
+from ..services import demo_import, emails, invites, payments, report as rpt, responses as resp_svc, roster, settlement as stl
 from ..services.common import active_manager, audit, get_participant_in_event, get_team_in_event
 from .util import change_out, event_out, task_out
 
@@ -156,6 +156,25 @@ async def upload_roster(file: UploadFile = File(...), ev: Event = Depends(admin_
     _refresh(db, ev, "roster_upload")
     db.commit()
     return result
+
+
+# 시연용: 참석 응답·마감 후 변경을 CSV 로 한 번에 재현(APP_MODE=demo 에서만. 운영에서는 없는 API)
+@router.post("/events/{event_id}/demo/responses")
+async def demo_responses(file: UploadFile = File(...), ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
+    if not settings.is_demo:
+        raise not_found("API")
+    out = demo_import.import_responses(db, ev, admin, await _read_upload(file))
+    db.commit()
+    return out
+
+
+@router.post("/events/{event_id}/demo/changes")
+async def demo_changes(file: UploadFile = File(...), ev: Event = Depends(admin_event), admin: Admin = Depends(current_admin), db: Session = Depends(get_db)):
+    if not settings.is_demo:
+        raise not_found("API")
+    out = demo_import.import_changes(db, ev, admin, await _read_upload(file))
+    db.commit()
+    return out
 
 
 @router.get("/events/{event_id}/teams")
