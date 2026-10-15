@@ -37,6 +37,7 @@ def event_out(ev: Event) -> dict[str, Any]:
         "account_note": ev.account_note,
         "snapshot_taken_at": clock.fmt(ev.snapshot_taken_at),
         "after_attend_deadline": clock.now() >= ev.attend_deadline,
+        "bot": {"persona": ev.bot_persona or None, "strategy": ev.bot_strategy or None},
     }
 
 

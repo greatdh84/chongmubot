@@ -216,6 +216,8 @@ A_DAY = re.compile(r"당일")
 A_SUMMARY = re.compile(r"요약|현황|전체|보고서|정산|얼마|총액|합계|상태|어떻게")
 A_PERSON = re.compile(r"([가-힣]{2,4})\s*(?:님|씨)")
 A_LIST_WORDS = re.compile(r"누구|명단|목록|사람|대상|알려|보여")
+A_WHY = re.compile(r"왜|이유|근거|어째서|어떻게 ?(나온|된|계산)")
+A_STATUS = re.compile(r"현황|상태|어때|어떻게 ?돼")
 
 
 def _a_team(inp: AgentInput) -> str | None:
@@ -226,7 +228,54 @@ def _a_team(inp: AgentInput) -> str | None:
         if name in text or (len(name) > 2 and name.removesuffix("팀") in text):
             return t["name"]
     m = re.search(r"T\d{2}", text)
-    return m.group(0) if m else None
+    if m:
+        return m.group(0)
+    # '박채원 팀 현황'처럼 담당자 이름 + 팀
+    for t in teams:
+        if t.get("manager") and re.search(re.escape(t["manager"]) + r"\s*(님|씨)?\s*(의\s*)?(팀|부서)", inp.message):
+            return t["name"]
+    return None
+
+
+def _hm(iso: str | None) -> str:
+    return (iso or "")[5:16].replace("-", "/").replace("T", " ")
+
+
+def _was(word: str) -> str:
+    """'불참이었는데' / '참석+버스였는데' — 받침 있으면 '이었는데'."""
+    ch = word[-1:] if word else ""
+    return word + ("이었는데" if "가" <= ch <= "힣" and (ord(ch) - 0xAC00) % 28 else "였는데")
+
+
+def _signed(v: int | None) -> str:
+    return "" if v is None else ("0원" if v == 0 else f"{'+' if v > 0 else '−'}{abs(v):,}원")
+
+
+def _evidence_reply(r: dict[str, Any], dept: dict[str, Any] | None) -> str:
+    """get_evidence 결과로 '왜'를 설명: 변동마다 누가·언제·무엇에서 무엇으로·근거(규칙/총무 결정·슬랙)·금액."""
+    t, b = r["team"], r.get("billing")
+    who = r.get("person")
+    out = [f"{who['name']}님 ({t['name']} · 담당자 {t['manager'] or '미지정'})" if who else f"{t['name']}({t['code']}) · 담당자 {t['manager'] or '미지정'}" + (f" · {r['status_label']}" if r.get("status_label") else "")]
+    if b:
+        out.append(f"청구(납부 마감 {_hm(b['deadline'])} 청구표): {b['formula']}" + (f" · 청구 때 미확정 {', '.join(b['unresolved_names'])}" if b["unresolved_names"] else ""))
+    for c in r["changes"]:
+        msg = c["messages"][0] if c["messages"] else None
+        when = f"{_hm(c['requested_at'])}{' 당일' if c['on_event_day'] else ''}"
+        via = f"({msg['sender']}{' 담당자' if msg['sender'] == t['manager'] else ''} 슬랙 “{msg['text'][:40]}{'…' if len(msg['text']) > 40 else ''}”)" if msg else f"({c['source']})"
+        amt = _signed(c["delta"]) if c["status"] == "applied" else (c["pending"] or "승인 대기")
+        tail = f" · {'총무 결정' if c['basis_kind'] == 'admin' else '규칙'}: {c['basis']}" if c["status"] == "applied" else " · 총무 승인 대기"
+        ok = f" · 승인 {_hm(c['decided_at'])}" if c["status"] == "applied" and c["decided_at"] else ""
+        out.append(f"- {c['name']}님이 {_was(c['from'])} {when} {c['to']} {via} → {amt}{tail}{ok}")
+    if not r["changes"]:
+        out.append("- 마감 후 변동 없음")
+    late = [x for x in r.get("receipts", []) if x.get("late")]
+    if r.get("received") is not None:
+        out.append(f"최종 회비 {_won(r['final_fee'])} · 확정 입금 {_won(r['received'])}" + (" · " + ", ".join(f"{x['late']} {x['amount']:,}원" for x in late) if late else ""))
+    bal = r["balance"]
+    out.append(f"→ 정산 잔액 {_signed(bal)}: " + ("담당자가 더 걷어 낼 돈(추가 납부)" if bal > 0 else "총무가 담당자에게 돌려줄 돈(환불)" if bal < 0 else "정산 완료"))
+    if r["blockers"]:
+        out.append("확인 필요: " + "; ".join(r["blockers"]))
+    return "\n".join(out)
 
 
 def _a_reply(inp: AgentInput) -> dict[str, Any]:
@@ -234,6 +283,11 @@ def _a_reply(inp: AgentInput) -> dict[str, Any]:
     if not last["ok"]:
         return {"type": "reply", "text": last["error"]["message"]}
     r, tool = last["result"], last["tool"]
+    if tool == "get_department" and A_STATUS.search(inp.message) and not any(s["tool"] == "get_evidence" for s in inp.steps):
+        return {"type": "tool", "name": "get_evidence", "args": {"team": r["team"]["name"]}}
+    if tool == "get_evidence":
+        dept = next((s["result"] for s in inp.steps if s["tool"] == "get_department" and s["ok"]), None)
+        return {"type": "reply", "text": _evidence_reply(r, dept)}
     if tool == "get_report_summary":
         ts, pc = r["team_status"], r["people_counts"]
         billed = f"청구 {_won(r['billed_total'])} → " if r["billed_total"] is not None else ""
@@ -306,6 +360,11 @@ def admin_mock(inp: AgentInput) -> dict[str, Any]:
     if inp.state == "awaiting_info" and (inp.pending or {}).get("intent") == "notify" and (refund or extra):
         return {"type": "tool", "name": "notify_managers", "args": {**args, "kind": "refund" if refund else "extra"}}
     person = A_PERSON.search(msg + " ")
+    if A_WHY.search(msg) and (team or person):
+        if team:
+            return {"type": "tool", "name": "get_evidence", "args": {"team": team}}
+        if person.group(1) not in ("담당자", "팀장", "총무"):
+            return {"type": "tool", "name": "get_evidence", "args": {"person": person.group(1)}}
     if person and not team and person.group(1) not in ("담당자", "팀장", "총무"):
         return {"type": "tool", "name": "find_person", "args": {"name": person.group(1)}}
     if A_CHANGED.search(msg) and not (refund or extra):
@@ -349,6 +408,8 @@ def validate_action(action: Any, tool_names: set[str]) -> dict[str, Any]:
     if not isinstance(text, str) or not text.strip():
         raise LLMError(f"{action['type']} 에 text 가 없음")
     out = {"type": action["type"], "text": text.strip()[:1000]}
+    if action["type"] == "reply" and isinstance(action.get("card"), dict):
+        out["card"] = action["card"]  # 총무 Agent: 문장만 쓴 카드(금액은 admin_cards.check_llm_card 가 검증)
     if action["type"] == "ask":
         out["pending"] = action.get("pending") if isinstance(action.get("pending"), dict) else {}
     return out
@@ -384,8 +445,14 @@ ADMIN_PROMPT = """너는 회사 워크숍(대모임, 300명·부서별 팀) 총�
 - 부서 이름은 context.teams 에서 고른다. 모호하면 type=ask 로 묻는다.
 - notify_managers 는 호출만 한다. 대상 확인 질문과 '네' 판정·발송은 시스템 코드가 한다.
 - 회비는 팀 단위: 추가 납부·환불은 개인이 아니라 그 부서 팀 담당자에게 안내된다는 점을 답변에 반영한다.
+- '왜', '이유', '근거'를 물으면 get_evidence 로 변동마다 누가·언제(일시)·무엇에서 무엇으로·근거(규칙/총무 결정·슬랙 메시지 보낸 사람)를 인용한다.
+- '박채원 팀'처럼 사람 이름 + 팀이면 context.teams 의 manager 로 부서를 찾는다.
 - 같은 조회를 같은 인자로 두 번 부르지 않는다. 결과가 있으면 한국어로 짧고 구체적으로(이름·금액·사유) 답한다.
-출력: JSON 객체 하나만. {"type":"tool","name":...,"args":{...}} | {"type":"ask","text":...} | {"type":"reply","text":...}
+- 너는 총무의 비서다. 최종 답은 짧은 존댓말 보고 카드로: greeting(예: "총무님, 데이터팀 정리해 드릴게요."), headline(결론 한 문장 — 금액이 아직
+  확정 전이면 "(총무님 승인 전)"·"(입금 대조 전)"을 분명히), story(무슨 일이 있었는지 시간순 2~4줄, 슬랙 인용은 보낸 사람·일시와 따옴표).
+  금액·상태 칩·할 일 버튼은 시스템 코드가 붙이므로 쓰지 않는다. 문장 속 금액은 도구 결과에 있는 숫자만(다르면 시스템이 버린다).
+출력: JSON 객체 하나만. {"type":"tool","name":...,"args":{...}} | {"type":"ask","text":...}
+  | {"type":"reply","text":"<한 줄 요약>","card":{"greeting":"...","headline":"...","story":[{"at":"2026-10-14T08:35","who":"담당자 강권재님 슬랙","text":"홍주원님 불참 → 참석+버스","quote":"…"}]}}
 """
 
 
@@ -480,6 +547,60 @@ class GeminiLLM:
             self.last_model = model
             return action
         raise LLMError(f"사용 가능한 Gemini 모델 없음 ({last_err})")
+
+
+def complete_json(system: str, payload: dict[str, Any]) -> tuple[Any, str]:
+    """행동 계약 밖의 '추출' 작업용(정산 Agent 가 슬랙 대화를 읽을 때). LLM_MODE 의 실제 LLM 에 JSON 하나를 받아
+    (결과, 모델 이름)을 돌려준다. mock 이거나 실패하면 LLMError — 호출한 쪽이 규칙 기반으로 대체한다.
+    결과는 반드시 호출한 쪽 코드가 명단·현재 응답과 대조 검증한 뒤에만 쓴다."""
+    text_in = json.dumps(payload, ensure_ascii=False)
+    if settings.llm_mode == "claude":
+        if not settings.claude_api_key:
+            raise LLMError("Claude 키 없음(LLM_API_KEY)")
+        try:
+            r = httpx.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": settings.claude_api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                json={"model": settings.claude_model, "max_tokens": 2000, "temperature": 0, "system": system, "messages": [{"role": "user", "content": text_in}]},
+                timeout=40,
+            )
+        except httpx.HTTPError as e:
+            raise LLMError(f"Claude 연결 오류: {type(e).__name__}") from None
+        if r.status_code != 200:
+            raise LLMError(f"Claude HTTP {r.status_code}")
+        try:
+            text = "".join(b.get("text", "") for b in r.json()["content"] if b.get("type") == "text")
+        except (KeyError, ValueError, TypeError) as e:
+            raise LLMError(f"Claude 응답 형식 오류 {type(e).__name__}") from None
+        return _parse_action(text), settings.claude_model
+    if settings.llm_mode == "gemini":
+        if not settings.gemini_api_key:
+            raise LLMError("Gemini 키 없음(GEMINI_API_KEY)")
+        body = {
+            "systemInstruction": {"parts": [{"text": system}]},
+            "contents": [{"role": "user", "parts": [{"text": text_in}]}],
+            "generationConfig": {"responseMimeType": "application/json", "temperature": 0},
+        }
+        last_err = ""
+        for model in settings.gemini_models:
+            try:
+                r = httpx.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent", headers={"x-goog-api-key": settings.gemini_api_key}, json=body, timeout=40)
+            except httpx.HTTPError as e:
+                last_err = f"{model}: {type(e).__name__}"
+                continue
+            if r.status_code in (404, 429, 500, 503):
+                last_err = f"{model}: HTTP {r.status_code}"
+                continue
+            if r.status_code != 200:
+                raise LLMError(f"{model}: HTTP {r.status_code}")
+            try:
+                parts = r.json()["candidates"][0]["content"]["parts"]
+                text = "".join(x.get("text", "") for x in parts if not x.get("thought"))
+            except (KeyError, IndexError, ValueError, TypeError) as e:
+                raise LLMError(f"{model}: 응답 형식 오류 {type(e).__name__}") from None
+            return _parse_action(text), model
+        raise LLMError(f"사용 가능한 Gemini 모델 없음 ({last_err})")
+    raise LLMError("LLM_MODE=mock")
 
 
 def get_llm() -> LLM:

@@ -159,8 +159,7 @@ def seed(base: date, rng_seed: int = 20261015, stage: str = "after-event") -> di
         for ctype, until, pct, desc in [
             ("attend_to_absent", payment_deadline, 100, "입금 마감 전 불참 전환: 전액 환불"),
             ("attend_to_absent", event_at - timedelta(days=3), 50, "입금 마감 후 ~ 행사 3일 전 불참: 50% 환불"),
-            ("bus_to_car", payment_deadline, 100, "입금 마감 전 버스→자차: 차액 전액 환불"),
-            ("bus_to_car", None, 0, "입금 마감 후 버스→자차: 버스 좌석 확정으로 환불 없음"),
+            ("bus_to_car", None, 100, "버스→자차: 차액 5,000원 환불(당일 포함)"),
         ]:
             db.add(RefundRule(event_id=ev.id, change_type=ctype, valid_until=until, refund_percent=pct, description=desc))
 

@@ -92,6 +92,25 @@ class PayoutIn(BaseModel):
 
 class EmailEnqueue(BaseModel):
     kind: Literal["invite", "attend_reminder", "payment_reminder", "refund_notice", "extra_notice"]
+    team_ids: Optional[list[int]] = None  # 환불·추가 납부 안내를 이 부서들에게만(대시보드 부서 상세)
+
+
+class RefundAccountIn(BaseModel):
+    bank: str = Field(max_length=30)
+    account_no: str = Field(max_length=40)
+    holder: str = Field(max_length=40)
+
+
+class RefundLinkIn(BaseModel):
+    token: str = Field(max_length=200)
+
+
+class RefundLinkSubmit(RefundAccountIn):
+    token: str = Field(max_length=200)
+
+
+class RevealIn(BaseModel):
+    purpose: Literal["view", "copy"] = "view"
 
 
 class SchedulerToggle(BaseModel):
@@ -100,6 +119,16 @@ class SchedulerToggle(BaseModel):
 
 class CorrectionIn(BaseModel):
     text: str = Field(min_length=1, max_length=500)
+
+
+# 소모임(demo/index.html)의 PERSONAS·STRATEGIES 키와 같아야 한다
+BOT_PERSONAS = ("active", "shy", "oldie", "strict")
+BOT_STRATEGIES = ("consistent", "escalate", "chaos")
+
+
+class BotSettings(BaseModel):
+    persona: Literal["active", "shy", "oldie", "strict"]
+    strategy: Literal["consistent", "escalate", "chaos"]
 
 
 class DevSwitch(BaseModel):

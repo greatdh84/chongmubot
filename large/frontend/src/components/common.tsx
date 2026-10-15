@@ -27,7 +27,7 @@ export function AppHeader() {
             </span>
             {meta.scheduler && <span className="pill" title="Slack DM 발송 큐 자동 실행">발송 스케줄러 {meta.scheduler.enabled ? `켜짐·${meta.scheduler.interval_seconds}초` : "꺼짐"}</span>}
             {import.meta.env.DEV && <span className="pill bad" title="최종 실행은 공용 서버 127.0.0.1:8787">Vite 개발 서버</span>}
-            {meta.demo_tools && !STATIC && <Link className="pill" to="/">역할 전환</Link>}
+            {meta.demo_tools && !STATIC && <Link className="pill" to="/roles">역할 전환</Link>}
             {meta.demo_tools && !STATIC && <Link className="pill" to="/dev/inbox">개발용 수신함</Link>}
           </span>
         )}
@@ -54,6 +54,32 @@ export function ChoicePill({ choice }: { choice: string | null | undefined }) {
   const key = choice ?? "none";
   const cls = key === "none" || key === "undecided" ? "warn" : key === "absent" ? "" : "ok";
   return <span className={`pill ${cls}`}>{CHOICE_LABEL[key]}</span>;
+}
+
+/** 마감 기준과 현재가 다를 때의 색: 추가(주황) · 환불/감액(파랑) · 승인 대기(노랑 점선). 같으면 null(기본색). */
+export type DeltaTone = "extra" | "refund" | "pending" | null;
+const RANK: Record<string, number> = { bus: 2, car: 1 };
+export function deltaTone(o: { snapshot_choice: string | null; choice: string | null; delta?: number | null; pending?: boolean }): DeltaTone {
+  if (o.pending) return "pending";
+  if (o.delta) return o.delta > 0 ? "extra" : "refund";
+  if ((o.snapshot_choice ?? null) === (o.choice ?? null)) return null;
+  const a = RANK[o.snapshot_choice ?? ""] ?? 0, b = RANK[o.choice ?? ""] ?? 0;
+  return b > a ? "extra" : b < a ? "refund" : null;
+}
+/** 행 왼쪽 얇은 색 막대 */
+export const deltaRow = (t: DeltaTone) => (t ? `delta-${t}` : "");
+
+/** 현재 칩: 마감 기준과 다르면 색이 바뀐다 */
+export function ChoiceNow({ choice, tone }: { choice: string | null | undefined; tone: DeltaTone }) {
+  if (!tone) return <ChoicePill choice={choice} />;
+  return <span className={`pill now-${tone}`} title={tone === "pending" ? "승인 대기 중인 변경이 있음" : "마감 기준과 다름"}>{CHOICE_LABEL[choice ?? "none"]}{tone === "pending" ? " · 승인 대기" : ""}</span>;
+}
+
+/** 마감 후 변경 금액 칩(+5,000 / −10,000) */
+export function DeltaChip({ amount, pending, text }: { amount: number | null | undefined; pending?: boolean; text?: string }) {
+  if (pending) return <span className="pill now-pending">{text ?? (amount ? `승인되면 ${amount > 0 ? "+" : "−"}${Math.abs(amount).toLocaleString("ko-KR")}` : "승인 대기")}</span>;
+  if (!amount) return text ? <span className="muted">{text}</span> : null;
+  return <span className={`pill now-${amount > 0 ? "extra" : "refund"}`}>{amount > 0 ? "+" : "−"}{Math.abs(amount).toLocaleString("ko-KR")}</span>;
 }
 
 export function StatusPill({ status }: { status: string }) {
@@ -115,11 +141,11 @@ export function Chat({ base, title, examples, chips, subtitle, onReply, classNam
             {m.text}
             {m.sender === "agent" && <LlmBadge llm={m.llm} />}
             {(m.tools.length > 0 || m.rules.length > 0) && (
-              <div className="trace">
+              <div className="trace tools" aria-label="호출한 도구 순서">
+                {m.tools.length > 0 && <span>도구:</span>}
                 {m.tools.map((t, i) => (
-                  <span key={i}>
-                    {t.dry_run ? "코드 검증" : "코드 실행"}:{t.tool}
-                    {t.ok ? "" : "(거절)"}{" "}
+                  <span key={i} title={t.dry_run ? "코드가 미리 검증(실행 전 확인 질문)" : "코드가 실행"}>
+                    {i > 0 && "→ "}<code>{t.tool}</code>{t.dry_run ? "(검증)" : ""}{t.ok ? "" : "(거절)"}
                   </span>
                 ))}
                 {m.rules.length > 0 && <span>· 규칙: {m.rules.join(" / ")}</span>}
@@ -147,8 +173,8 @@ export function Chat({ base, title, examples, chips, subtitle, onReply, classNam
   );
 }
 
-export function Page({ children, narrow }: { children: ReactNode; narrow?: boolean }) {
-  return <main className={`wrap ${narrow ? "narrow" : ""}`}>{children}</main>;
+export function Page({ children, narrow, wide }: { children: ReactNode; narrow?: boolean; wide?: boolean }) {
+  return <main className={`wrap ${narrow ? "narrow" : ""} ${wide ? "wide" : ""}`}>{children}</main>;
 }
 
 /** 이 답변을 누가 정했는지: 실제 LLM / 규칙 기반(모의) / LLM 실패 후 규칙 기반 대체 / 코드의 확인 판정 */

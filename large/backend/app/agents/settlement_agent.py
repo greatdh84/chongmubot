@@ -11,6 +11,8 @@ R4 아무 단서도 없음(입금자 불명) → 금액이 같은 미납 팀은 
    금액이 같다는 이유만으로 배정하지 않는다. 후보가 없거나 3팀 초과면 총무 이관.
 R5 개인 입금과 팀 일괄 입금이 함께 있고 수납액이 회비를 넘으면 → 중복 납부 가능성 확인 과제
 R6 마감 기준 응답이 미응답·미정인 팀원 → 담당자에게 알림 과제(미응답을 불참으로 처리하지 않음)
+R7 입금자 불명·불일치 거래에 맞는 슬랙 입금 단서('ㅎㅂ 이름으로 보냈어요', 토스+가린 이름 = 보낸 사람)가 있으면
+   그 부서를 '배정 후보'로 과제에 붙인다. 배정은 총무가 근거를 보고 지정해야 확정된다(accept_slack_suggestion).
 답변 재검토: 후보 중 정확히 한 팀이 '네' → 그 팀 입금 제안 / 모두 '아니요' 또는 여러 팀 '네' → 총무 이관
 """
 from __future__ import annotations
@@ -202,16 +204,18 @@ def review_event(db: Session, event: Event, trigger: str = "manual") -> dict[str
         else:
             candidates = [t for t in teams if outstanding_including_proposed(db, event, t) == remaining]
             run.step("find_amount_candidates", {"amount": remaining}, {"teams": [t.code for t in candidates], "note": "금액 일치는 참고용, 확정 근거 아님"}, "R4 입금자 불명")
+            created = []
             if 1 <= len(candidates) <= MAX_AMOUNT_CANDIDATES:
                 for team in candidates:
-                    ask_manager(
+                    created.append(ask_manager(
                         run, team=team, kind="unknown_depositor", dedupe_key=f"unknown:{txn.id}:{team.id}",
                         question=f"입금자 '{txn.depositor}' {won(txn.amount)}({clock.kst(txn.txn_at):%m/%d}, 메모 '{txn.memo or '-'}')의 팀을 알 수 없습니다. 금액이 {team.name} 미납액과 같아 여쭤봅니다. 우리 팀이 보낸 입금인가요?",
                         options=YES_NO("네, 우리 팀이 보냈습니다", "아니요"), rule="R4 입금자 불명 → 금액 일치 후보 팀에 확인(금액만으로 확정 안 함)",
                         evidence=evidence | {"amount_candidates": [t.code for t in candidates]}, transaction_id=txn.id,
-                    )
+                    ))
             else:
-                escalate(run, kind="unknown_depositor", dedupe_key=f"unknown_admin:{txn.id}", question=f"입금자 '{txn.depositor}' {won(txn.amount)}의 팀을 찾지 못했습니다(금액 일치 후보 {len(candidates)}팀). 총무 확인이 필요합니다.", rule="R4 후보 없음/과다 → 총무", evidence=evidence | {"amount_candidates": [t.code for t in candidates]}, transaction_id=txn.id)
+                created.append(escalate(run, kind="unknown_depositor", dedupe_key=f"unknown_admin:{txn.id}", question=f"입금자 '{txn.depositor}' {won(txn.amount)}의 팀을 찾지 못했습니다(금액 일치 후보 {len(candidates)}팀). 총무 확인이 필요합니다.", rule="R4 후보 없음/과다 → 총무", evidence=evidence | {"amount_candidates": [t.code for t in candidates]}, transaction_id=txn.id))
+            _attach(run, txn, created)
 
     # 중복 납부 가능성, 미확정 응답
     for team in teams:
@@ -248,8 +252,62 @@ def review_event(db: Session, event: Event, trigger: str = "manual") -> dict[str
         _review(run, task)
 
     c = run.counts
-    summary = f"배정 제안 {c.get('proposed', 0)}건, 확인 과제 {sum(v for k, v in c.items() if k.startswith('task:'))}건, 총무 이관 {c.get('escalated', 0)}건"
+    summary = f"배정 제안 {c.get('proposed', 0)}건, 확인 과제 {sum(v for k, v in c.items() if k.startswith('task:'))}건, 총무 이관 {c.get('escalated', 0)}건" + (f", 슬랙 근거 배정 후보 {c['slack_suggested']}건" if c.get("slack_suggested") else "")
     return run.save(summary)
+
+
+# ---------------------------------------------------------------- R7 슬랙 입금 단서
+
+def _attach(run: Run | None, txn: BankTransaction, tasks: list[ConfirmTask]) -> bool:
+    """입금자 확인 과제에 슬랙 근거의 배정 후보를 붙인다(이미 붙어 있으면 그대로). 배정은 하지 않는다."""
+    from ..services import slack
+
+    db = run.db if run else None
+    if db is None or not tasks:
+        return False
+    sug = slack.deposit_suggestion(db, run.event, txn.depositor)
+    if sug is None:
+        return False
+    for t in tasks:
+        if (t.evidence or {}).get("slack_suggestion", {}).get("message_id") == sug["message_id"]:
+            continue
+        t.evidence = {**(t.evidence or {}), "slack_suggestion": sug}
+        t.question = t.question.split("\n[슬랙 근거]")[0] + f"\n[슬랙 근거] {sug['sender']} {clock.kst(clock.parse_input(sug['sent_at'])):%m/%d %H:%M} “{sug['text']}” → {sug['team']} 배정 후보(총무 지정 필요)"
+        t.updated_at = clock.now()
+    run.count("slack_suggested")
+    run.step("match_slack_evidence", {"txn": txn.id, "depositor": txn.depositor}, {"team": sug["team"], "message_id": sug["message_id"], "why": sug["why"]}, "R7 슬랙 입금 단서 → 배정 후보(총무 지정)")
+    return True
+
+
+def attach_slack_suggestions(db: Session, event: Event) -> int:
+    """슬랙 CSV 를 거래내역보다 늦게 넣었을 때: 이미 열린 입금자 확인 과제에 근거를 붙인다."""
+    run = Run(db, event, "slack_attach")
+    by_txn: dict[int, list[ConfirmTask]] = {}
+    for t in db.scalars(select(ConfirmTask).where(ConfirmTask.event_id == event.id, ConfirmTask.kind.in_(("unknown_depositor", "deposit_unresolved")), ConfirmTask.status.in_(("open", "answered", "escalated")))):
+        by_txn.setdefault(t.transaction_id, []).append(t)
+    n = sum(_attach(run, db.get(BankTransaction, tid), ts) for tid, ts in by_txn.items() if tid)
+    return n
+
+
+def accept_slack_suggestion(db: Session, event: Event, task: ConfirmTask, admin_id: int) -> Allocation:
+    """총무가 슬랙 근거를 보고 '이 부서 입금이 맞다'고 지정: 남은 금액을 확정 배정하고 그 거래의 과제를 모두 닫는다."""
+    from ..errors import conflict
+
+    sug = (task.evidence or {}).get("slack_suggestion")
+    if task.transaction_id is None or not sug:
+        raise conflict("NO_SUGGESTION", "슬랙 근거의 배정 후보가 없는 과제입니다")
+    if task.status not in ("open", "answered", "escalated"):
+        raise conflict("ALREADY_RESOLVED", "이미 처리된 과제입니다")
+    txn = db.get(BankTransaction, task.transaction_id)
+    remaining = txn.amount - allocated_sum(db, txn.id)
+    if remaining <= 0:
+        raise conflict("NOTHING_LEFT", "이미 모두 배정된 거래입니다")
+    when = clock.kst(clock.parse_input(sug["sent_at"])).strftime("%m/%d %H:%M")
+    a = allocate(db, event, txn.id, sug["team_id"], remaining, status="confirmed", source="admin", confidence="slack_evidence",
+                 basis=f"슬랙 근거: {sug['sender']} {when} “{sug['text'][:60]}” ({sug['why']}) → 총무 지정", actor=f"admin:{admin_id}", admin_id=admin_id)
+    for t in db.scalars(select(ConfirmTask).where(ConfirmTask.transaction_id == txn.id, ConfirmTask.status.in_(("open", "answered", "escalated")))):
+        _resolve(t, f"총무가 슬랙 근거({sug['sender']} {when})로 {sug['team']} 입금 지정 → 확정 배정")
+    return a
 
 
 # ---------------------------------------------------------------- 답변 재검토

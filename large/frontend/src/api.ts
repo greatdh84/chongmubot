@@ -40,18 +40,25 @@ export const api = {
 export type Choice = "bus" | "car" | "absent" | "undecided";
 export const CHOICE_LABEL: Record<string, string> = { bus: "참석+버스", car: "참석+자차", absent: "불참", undecided: "미정", none: "미응답" };
 
-export interface Meta { system: "large"; app_mode: "demo" | "production"; email_mode: string; notify_mode: "mock" | "slack"; llm_mode: "mock" | "claude" | "gemini"; demo_tools: boolean; scheduler?: { enabled: boolean; interval_seconds: number } }
+export interface Meta { system: "large"; db_purpose?: string | null; app_mode: "demo" | "production"; email_mode: string; notify_mode: "mock" | "slack"; llm_mode: "mock" | "claude" | "gemini"; demo_tools: boolean; scheduler?: { enabled: boolean; interval_seconds: number } }
 
 export interface EventInfo {
   id: number; name: string; event_at: string; attend_deadline: string; payment_deadline: string;
   fees: { bus: number; car: number; absent: number }; account_note: string; snapshot_taken_at: string | null; after_attend_deadline: boolean;
+  bot?: { persona: string | null; strategy: string | null };
 }
+
+/** 총무봇 성격·독촉 전략 이름 — 공용 초기설정 화면(demo/index.html PERSONAS·STRATEGIES)과 같은 키 */
+export const BOT_PERSONA: Record<string, string> = { active: "영크크", shy: "구남친", oldie: "부장님", strict: "맑눈광" };
+export const BOT_STRATEGY: Record<string, string> = { consistent: "초지일관", escalate: "단계적 압박", chaos: "급발진" };
 
 export interface Change {
   id: number; participant_id: number; participant_name: string | null; from_choice: string | null; to_choice: string;
   from_label: string; to_label: string; after_deadline: boolean; status: string; source: string; requested_at: string;
   decided_at: string | null; liability_before: number | null; liability_after: number | null; refund_amount: number;
   extra_charge: number; rule_text: string; note: string; rule_missing: boolean; admin_refund_decided: boolean;
+  evidence?: { id: number; sender: string; sent_at: string; text: string; analysis: { confidence?: string } | null }[];
+  suggested_refund?: number | null; suggested_note?: string;
 }
 
 export interface Me {
@@ -63,7 +70,7 @@ export interface Me {
   is_manager: boolean;
 }
 
-export interface ChatMessage { id: number; sender: "user" | "agent" | "system"; text: string; created_at: string; tools: { tool: string; ok: boolean; dry_run: boolean }[]; rules: string[]; llm?: { configured: string; used: string[]; model: string; fallback: string } | null }
+export interface ChatMessage { id: number; sender: "user" | "agent" | "system"; text: string; created_at: string; card?: unknown; tools: { tool: string; ok: boolean; dry_run: boolean }[]; rules: string[]; llm?: { configured: string; used: string[]; model: string; fallback: string } | null }
 export interface ChatThread { id: number; role: string; state: "idle" | "awaiting_info" | "awaiting_confirmation"; pending: Record<string, unknown> | null; messages: ChatMessage[] }
 
 export interface Task {

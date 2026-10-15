@@ -3,6 +3,8 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, fmtTime, won, type Change, type EventInfo, type SettlementCalc, type Task } from "../api";
 import { Chat, ChoicePill, Msg, Page, StatusPill, useEventName } from "../components/common";
 import { useAction, useLoad } from "../hooks";
+import { LineRow } from "./admin/AdminMoney";
+import { ManagerRefundCard } from "./RefundAccount";
 
 interface Overview {
   manager: { id: number; name: string };
@@ -64,6 +66,7 @@ export default function ManagerPage() {
               </div>
             ))}
           </div>
+          <ManagerRefundCard />
           <div className="card">
             <h2>정산 명세</h2>
             {data.confirmed_settlement ? (
@@ -93,14 +96,8 @@ export default function ManagerPage() {
       <div className="card">
         <h2>팀원별 청구 내역</h2>
         <div className="table-wrap"><table>
-          <thead><tr><th>이름</th><th>마감 기준</th><th>현재</th><th className="num">회비</th><th>변경</th></tr></thead>
-          <tbody>{b.lines.map((l) => (
-            <tr key={l.participant_id}>
-              <td>{l.name}</td><td><ChoicePill choice={l.snapshot_choice} /></td><td><ChoicePill choice={l.choice} /></td>
-              <td className="num">{won(l.fee)}</td>
-              <td className="muted">{l.changes.map((c) => `${c.status === "applied" ? "" : "[승인대기] "}${c.refund_amount ? `환불 ${won(c.refund_amount)}` : c.extra_charge ? `추가 ${won(c.extra_charge)}` : "변동 없음"}`).join(", ")}</td>
-            </tr>))}
-          </tbody>
+          <thead><tr><th>이름</th><th>마감 기준</th><th>현재</th><th className="num">회비</th><th>마감 후 변경</th></tr></thead>
+          <tbody>{b.lines.map((l) => <LineRow key={l.participant_id} l={l} />)}</tbody>
         </table></div>
       </div>
     </Page>

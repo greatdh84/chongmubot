@@ -21,7 +21,7 @@ from .config import API_PREFIX, BACKEND_DIR, UI_PREFIX, settings
 from .db import SessionLocal, init_db
 from .errors import AppError
 from .models import Admin
-from .routers import admin, auth, manager, participant
+from .routers import admin, auth, manager, participant, refund_link, slack_events
 from .security import RedactSecretsFilter, hash_password
 from .services.scheduler import scheduler
 
@@ -55,6 +55,18 @@ def shutdown() -> None:
     scheduler.stop()
 
 
+def _db_purpose() -> str | None:
+    from .db import SessionLocal
+    from .models import DbMeta
+
+    try:
+        with SessionLocal() as db:
+            row = db.get(DbMeta, "purpose")
+            return row.value if row else None
+    except Exception:  # 메타 정보 때문에 화면 진입이 막히지 않게
+        return None
+
+
 def is_large_api(path: str) -> bool:
     return path == API_PREFIX or path.startswith(API_PREFIX + "/")
 
@@ -83,7 +95,9 @@ def configure_large(app: FastAPI) -> None:
         # LARGE API 에만 적용한다(SMALL API 의 기존 동작은 건드리지 않음).
         # 쿠키 세션 + SameSite=Lax 에 더해, 상태 변경 요청은 앱이 붙이는 헤더가 있어야 받는다.
         large = is_large_api(request.url.path)
-        if large and request.method in UNSAFE_METHODS and request.headers.get("x-requested-with") != "chongmu":
+        # 예외: Slack Events API 수신(쿠키 세션을 쓰지 않고 Slack 서명으로만 받는다 — routers/slack_events.py)
+        signed_webhook = request.url.path == API_PREFIX + "/slack/events"
+        if large and not signed_webhook and request.method in UNSAFE_METHODS and request.headers.get("x-requested-with") != "chongmu":
             return JSONResponse(status_code=403, content={"error": {"code": "CSRF_HEADER_MISSING", "message": "허용되지 않은 요청입니다"}})
         response = await call_next(request)
         if large:
@@ -95,6 +109,8 @@ def configure_large(app: FastAPI) -> None:
     @app.get(API_PREFIX + "/meta")
     def meta():
         return {
+            # 이 DB 가 무엇인지: demo-seed(시드, 정산 시연) | demo-live(빈 행사, 명단 업로드 시연) | null(운영·알 수 없음)
+            "db_purpose": _db_purpose(),
             "system": "large",
             "app_mode": settings.app_mode,
             "email_mode": settings.email_mode,  # 이전 이름(호환)
@@ -108,6 +124,8 @@ def configure_large(app: FastAPI) -> None:
     app.include_router(participant.router)
     app.include_router(manager.router)
     app.include_router(admin.router)
+    app.include_router(slack_events.router)
+    app.include_router(refund_link.router)
     if settings.is_demo:
         from .routers import dev
 

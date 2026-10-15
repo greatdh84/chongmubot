@@ -401,6 +401,27 @@ h1,h2,h3,.brand,.card-h h3,.sec-h h3,.headline b{font-family:Jua,Pretendard,sans
 .lg-on{background:var(--green-l);color:var(--green-d)}
 .lg-off{background:var(--yellow-l);color:#7a5a00}
 .lg-note{font-size:12px;margin-top:6px}
+.lg-status{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 20px;border-bottom:2px dashed var(--line);background:var(--soft)}
+.lg-result{margin-top:10px;padding:10px 12px;border-radius:12px;background:var(--green-l);color:var(--green-d)}
+.lg-errs{margin:4px 0 0;padding-left:18px;max-height:180px;overflow:auto}
+.lg-depts{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px;margin-top:12px;align-items:start}
+.lg-dept{padding:12px;display:grid;gap:4px}
+.lg-dept .members{grid-template-columns:repeat(auto-fill,minmax(96px,1fr))}
+.lg-dept .mem{padding:4px 6px;font-size:12px}
+.lg-dept .mem .av{width:22px;height:22px;font-size:11px}
+/* 부서 카드: 제목 = 부서명, 담당자 줄·칩 이름은 칩 글자 크기(12px)와 같게. 담당자 칩은 맨 앞·볼드(색·크기는 같음) */
+.lg-dept .lg-dname{font-size:20px;font-weight:800;color:var(--ink)}
+.lg-dept .lg-mgr{font-size:12px;color:var(--ink);margin-top:6px}
+.lg-dept .lg-mgr b{display:inline;font-size:12px;font-weight:800}
+.lg-dept .lg-mgr .lg-nomgr{color:var(--red)}
+.lg-dept .mem .lg-mname{font-size:12px;color:var(--ink)}
+.lg-dept .mem.lg-me .lg-mname{font-weight:800}
+.lg-demo{margin-top:14px;padding:10px 12px;border:2px dashed var(--line);border-radius:12px;background:var(--soft)}
+.lg-demo summary{cursor:pointer}
+.lg-rule{display:grid;grid-template-columns:120px minmax(0,1fr) 80px minmax(0,1.2fr) auto;gap:6px;align-items:center;margin-top:10px}
+.lg-rules .sheet th,.lg-rules .sheet td{white-space:normal} /* 설명이 길어 좁은 화면에서 가로로 넘치지 않게 */
+.lg-empty{padding:24px 12px;text-align:center;border:2px dashed var(--line);border-radius:12px}
+@media (max-width:720px){.lg-rule{grid-template-columns:1fr 1fr}.lg-rule .btn{grid-column:1/-1}}
 </style>
 </head>
 <body>
@@ -1155,23 +1176,235 @@ function renderSizePick(){
    ③ 화면:  render(el) 에서 el.innerHTML 로 그림
    ========================================================= */
 const LARGE = {
-  // 실제 대모임 화면은 React 앱(large/frontend)이고, 공용 서버가 /large/ 에서 제공합니다.
-  // 서버 없이 연 정적 데모(GitHub Pages)에서는 같은 화면의 정적 데모판(demo/large/, 녹화한 가상 데이터·저장 안 됨)을 엽니다.
-  // 정적 데모판은 large/scripts/update_static_demo.sh 로 다시 만듭니다(main 에 large/** 가 바뀌면 Actions 가 자동 갱신).
-  server:'unknown', // unknown | on | off — 공용 서버의 LARGE API 응답 여부. 페이지를 열 때마다 새로 확인(저장 안 함)
+  // 워크샵 = 대모임. 모임 종류에서 워크샵을 고르면 이 초기설정 화면 안에서 대모임 섹션(setupSections)과 미리보기(preview)를 그리고,
+  // '확인하고 시작하기'(act.start)에서 행사·회비·총무봇 말투를 대모임 서버에 저장한 뒤 대모임 총무 대시보드(/large/admin)로 갑니다.
+  // 서버 없이 연 정적 데모(GitHub Pages)에서는 저장하지 않고 정적 데모판(demo/large/, 녹화한 가상 데이터)으로 갑니다.
+  // 성격·독촉 전략은 소모임과 같은 S.persona·S.strategy 와 같은 함수(setupPersona·setupStrategy·SURVEY_DM·SETTLE_DM)를 그대로 씁니다.
+  server:'unknown', // unknown | on | off — 대모임 API(/api/large/meta) 응답 여부. 페이지를 열 때마다 새로 확인(저장 안 함)
+  // 서버에서 읽은 값(저장 안 함): meta, 행사(ev), 환불 규칙, 부서, 펼친 부서의 명단
+  meta:null, ev:null, rules:[], teams:[], people:[], loading:false, loaded:false, needLogin:false, busy:false, error:'',
   defaults(){
-    return {};
+    return {eventId:null, open:null, result:null, rowErrors:[], demo:null, slack:null, demoErrors:[], form:{}, rule:{change_type:'attend_to_absent', valid_until:'', refund_percent:'50', description:''}};
+  },
+  st(){ // 예전 저장 상태에도 필요한 칸이 있게
+    const d = LARGE.defaults(), L = S.large = S.large || d;
+    for (const k of Object.keys(d)) if (L[k] === undefined) L[k] = d[k];
+    return L;
+  },
+  base(){ return `/api/large/admin/events/${LARGE.ev && LARGE.ev.id}`; },
+  async api(method, path, body){
+    const init = {method, credentials:'same-origin', headers:{'X-Requested-With':'chongmu'}};
+    if (body instanceof FormData) init.body = body;
+    else if (body !== undefined){ init.body = JSON.stringify(body); init.headers['Content-Type'] = 'application/json'; }
+    const r = await fetch(path, init);
+    const j = r.status === 204 ? null : await r.json().catch(() => null);
+    if (!r.ok){ const e = (j && j.error) || {}; throw Object.assign(new Error(e.message || `요청 실패(${r.status})`), {status:r.status, detail:e.detail}); }
+    return j;
   },
 
+  // 워크샵을 고르거나 워크샵 화면을 처음 그릴 때: 서버 확인 → (시연 모드) 총무 세션 → 행사·규칙·부서 읽기
+  async load(){
+    if (LARGE.loading) return;
+    LARGE.loading = true; LARGE.error = '';
+    try {
+      if (!location.protocol.startsWith('http')) throw Object.assign(new Error('file'), {off:true});
+      const meta = await fetch('/api/large/meta', {cache:'no-store'}).then(r => r.ok ? r.json() : Promise.reject()).catch(() => null);
+      if (!meta || meta.system !== 'large') throw Object.assign(new Error('off'), {off:true});
+      LARGE.server = 'on'; LARGE.meta = meta;
+      if (meta.demo_tools) await LARGE.api('POST', '/api/large/dev/switch', {role:'admin'}); // 시연 모드: 로그인 화면 없이 시연 총무로
+      let events;
+      try { events = await LARGE.api('GET', '/api/large/admin/events'); }
+      catch (e){ if (e.status === 401){ LARGE.needLogin = true; return; } throw e; }
+      LARGE.needLogin = false; LARGE.ev = events[0] || null;
+      if (!LARGE.ev){ LARGE.error = '대모임 행사가 없어요. large/scripts/start_live.sh 로 빈 행사를 만들어 켜 주세요.'; return; }
+      const L = LARGE.st();
+      if (L.eventId !== LARGE.ev.id){ Object.assign(L, LARGE.defaults(), {eventId:LARGE.ev.id}); } // DB(빈 행사·시드)가 바뀌면 이전 입력·결과는 버림
+      await LARGE.reload();
+    } catch (e){
+      if (e.off){ LARGE.server = 'off'; LARGE.ev = LARGE.sample(); LARGE.rules = LARGE.sampleRules(); }
+      else LARGE.error = e.message;
+    } finally {
+      LARGE.loading = false; LARGE.loaded = true;
+      if (S.screen === 'setup' && S.template === 'ws') render();
+    }
+  },
+  async reload(){
+    const b = LARGE.base();
+    [LARGE.rules, LARGE.teams] = await Promise.all([LARGE.api('GET', `${b}/refund-rules`), LARGE.api('GET', `${b}/teams`)]);
+    // 부서 카드의 멤버 칩용 전원 명단(부서별로 묶어 씀). 명단이 없으면 부르지 않음
+    LARGE.people = LARGE.teams.length ? await LARGE.api('GET', `${b}/participants`) : [];
+  },
+  // 서버 없을 때 보여 줄 예시 값(저장 안 함)
+  // 시연 고정 날짜(KST) — large/backend/scripts/make_empty_event.py 와 같은 값
+  SAMPLE_AT:{attend:'2026-10-05T18:00:00+09:00', payment:'2026-10-08T18:00:00+09:00', event:'2026-10-14T09:00:00+09:00', minus3:'2026-10-11T09:00:00+09:00'},
+  sample(){
+    const A = LARGE.SAMPLE_AT;
+    return {id:null, name:'2026 가을 전사 워크숍', event_at:A.event, attend_deadline:A.attend, payment_deadline:A.payment, fees:{bus:20000, car:15000, absent:0}, account_note:'(시연) 가상은행 000-000000-00 워크숍 총무', snapshot_taken_at:null};
+  },
+  sampleRules(){
+    const A = LARGE.SAMPLE_AT;
+    return [['attend_to_absent', A.payment, 100, '입금 마감 전 불참 전환: 전액 환불'], ['attend_to_absent', A.minus3, 50, '입금 마감 후 ~ 행사 3일 전 불참: 50% 환불'],
+      ['bus_to_car', null, 100, '버스→자차: 차액 5,000원 환불(당일 포함)']]
+      .map(([change_type, valid_until, refund_percent, description], i) => ({id:-i - 1, change_type, valid_until, refund_percent, description}));
+  },
+
+  // ---------- 초기설정 화면 섹션 (도총 setupSections() 가 워크샵일 때 이 목록을 씀) ----------
+  setupSections(){
+    LARGE.st();
+    if (!LARGE.loaded && !LARGE.loading) setTimeout(LARGE.load);
+    return [LARGE.secEvent, LARGE.secRoster, LARGE.secFee, LARGE.secRules, setupPersona, setupStrategy];
+  },
+  // 모임 종류에서 워크샵을 골랐을 때(도총 case 'tpl'): 화면은 그대로 두고 대모임 서버에서 다시 읽음
+  enter(){ LARGE.loaded = false; if (!LARGE.loading) setTimeout(LARGE.load); },
+  on(){ return LARGE.server === 'on' && !LARGE.needLogin && LARGE.ev; },
+  val(k, fallback){ const f = S.large.form; return f[k] !== undefined ? f[k] : fallback; },
+  local(iso){ return iso ? String(iso).slice(0, 16) : ''; }, // 서버 값은 KST(+09:00) ISO → datetime-local
+  status(){
+    if (LARGE.loading || !LARGE.loaded) return '<span class="tag">대모임 서버 확인 중…</span>';
+    if (LARGE.server !== 'on') return `<span class="tag y">정적 데모 — 공용 서버에서만 저장돼요</span><span class="small muted">명단 업로드·저장은 <code>large/scripts/start_live.sh</code> 로 켠 공용 서버에서</span>`;
+    if (LARGE.needLogin) return '<span class="tag r">총무 로그인 필요</span><a class="btn sm" href="/large/admin/login">총무 로그인</a>';
+    if (LARGE.error) return `<span class="tag r">${esc(LARGE.error)}</span>`;
+    const n = LARGE.teams.reduce((a, t) => a + t.headcount, 0);
+    const what = LARGE.meta.db_purpose === 'demo-seed' ? `<span class="tag o">시드 데이터(정산 시연용)</span>`
+      : n ? `<span class="tag g">명단 ${n}명·${LARGE.teams.length}개 부서</span>` : '<span class="tag">빈 행사(명단 없음)</span>';
+    return `${what}<span class="small muted">대모임 서버 · ${esc(LARGE.ev.name)} · 알림 ${LARGE.meta.notify_mode === 'slack' ? 'Slack DM 실제 발송' : 'Slack DM 모의(개발용 수신함)'}</span>`;
+  },
+  readonly(){ return LARGE.on() ? '' : 'disabled'; },
+  secEvent(n){ const e = LARGE.ev || LARGE.sample(), ro = LARGE.readonly(); return `
+      <div class="lg-status" role="status">${LARGE.status()}</div>
+      <section class="sec" data-pv="sched">
+        <div class="sec-h"><span class="n">${n}</span><div><h3>행사 정보</h3><p>참석 응답 마감까지 개인 DM 으로 인원조사, 납부 마감까지 부서 담당자가 회비를 모아 냅니다.</p></div></div>
+        <div class="grid2">
+          <div style="grid-column:1/-1"><label class="f">행사 이름</label><input class="inp" data-bind="large.form.name" value="${esc(LARGE.val('name', e.name))}" ${ro}></div>
+          <div><label class="f">행사 일시</label><input class="inp" type="datetime-local" data-bind="large.form.event_at" value="${esc(LARGE.val('event_at', LARGE.local(e.event_at)))}" ${ro}></div>
+          <div><label class="f">참석 응답 마감</label><input class="inp" type="datetime-local" data-bind="large.form.attend_deadline" value="${esc(LARGE.val('attend_deadline', LARGE.local(e.attend_deadline)))}" ${ro || (e.snapshot_taken_at ? 'disabled' : '')}></div>
+          <div><label class="f">회비 납부 마감</label><input class="inp" type="datetime-local" data-bind="large.form.payment_deadline" value="${esc(LARGE.val('payment_deadline', LARGE.local(e.payment_deadline)))}" ${ro}></div>
+          <div><label class="f">입금 안내(계좌)</label><input class="inp" data-bind="large.form.account_note" value="${esc(LARGE.val('account_note', e.account_note))}" ${ro}></div>
+        </div>
+        ${e.snapshot_taken_at ? '<p class="small muted lg-note">마감 기준 응답을 저장한 행사라 참석 마감·회비는 바꿀 수 없어요.</p>' : ''}
+      </section>`; },
+  secRoster(n){ const L = S.large, on = LARGE.on(), r = L.result, seed = on && LARGE.meta.db_purpose === 'demo-seed'; return `
+      <section class="sec" data-pv="sheet">
+        <div class="sec-h"><span class="n">${n}</span><div><h3>명단 CSV</h3><p>열: <b>ID, 이름, 전화번호, Slack ID, 소속 부서, 팀 담당자</b>. 소속 부서 하나가 팀 하나, 팀 담당자 칸으로 담당자가 정해져요. 한 행이라도 틀리면 아무것도 반영하지 않아요.</p></div></div>
+        <div class="row wrap">
+          ${on ? `<button class="btn primary" data-act="large:pick" ${LARGE.busy ? 'disabled' : ''}>📄 명단 CSV 올리기</button><input type="file" id="lgRoster" accept=".csv,text/csv" hidden>`
+            : '<span class="tag y">공용 서버에서만 저장돼요</span>'}
+          ${LARGE.busy ? '<span class="small muted">올리는 중…</span>' : ''}
+        </div>
+        ${seed ? '<div class="warn lg-note">⚠️ 지금은 시드 데이터(가짜 300명) DB 예요. 명단을 올리면 시드 데이터와 섞입니다. <code>large/scripts/start_live.sh</code> 로 빈 행사에서 올리세요.</div>' : ''}
+        ${r ? `<div class="lg-result"><b>${r.rows}명 → ${r.teams}개 부서, 담당자 ${r.managers_total ?? r.managers_assigned}명</b> <span class="small muted">(새로 ${r.inserted} · 수정 ${r.updated})</span></div>` : ''}
+        ${L.rowErrors.length ? `<div class="err lg-note"><b>반영하지 않은 이유 (전체 반려)</b><ul class="lg-errs">${L.rowErrors.map(x => `<li>${esc(x.line)}행: ${esc(x.error)}</li>`).join('')}</ul></div>` : ''}
+        ${r && r.warnings && r.warnings.length ? `<div class="warn lg-note">${r.warnings.map(w => `<div>${esc(w)}</div>`).join('')}</div>` : ''}
+        ${LARGE.teams.length ? `<div class="lg-depts">${LARGE.teams.map(t => LARGE.deptCard(t, L.open === t.id)).join('')}</div>` : ''}
+        ${on && LARGE.meta.demo_tools && LARGE.teams.length ? LARGE.demoBox() : ''}
+      </section>`; },
+  // 부서 색: 팀코드 숫자로 도총 멤버 색(PALETTE)에서 하나 — 같은 부서는 늘 같은 색
+  color(t){ return PALETTE[(parseInt(String(t.code).replace(/\D/g, ''), 10) || 0) % PALETTE.length]; },
+  // 도총 avatar() 와 같은 모양(.av, 한국 이름은 가운데 글자)
+  // 카드(.opt) 안에서는 도총 '.opt span'(회색 12px)이 덮어쓰므로 글자색·크기를 직접 지정
+  av(name, color, big){ const n = String(name || '?'); return `<span class="av" style="background:${color};color:#fff;${big ? 'width:40px;height:40px;font-size:18px;border-radius:12px' : 'font-size:11px'}">${esc(isKorName(n) ? n[1] : n[0].toUpperCase())}</span>`; },
+  CHIPS:8,
+  deptCard(t, open){
+    // 제목 = 부서명(크게), 그 아래 '9명 · T01'. 담당자는 멤버 칩 바로 위 한 줄 '담당자 **이름**'(칩 이름과 같은 크기), 칩 목록에서도 맨 앞·볼드
+    const c = LARGE.color(t), mgrId = t.manager ? t.manager.participant_id : null, mgr = t.manager ? t.manager.name : null;
+    const ps = LARGE.people.filter(p => p.team.id === t.id).sort((a, b) => (b.id === mgrId) - (a.id === mgrId));
+    const shown = open ? ps : ps.slice(0, LARGE.CHIPS), more = ps.length - shown.length;
+    return `
+          <div class="opt lg-dept" style="border-top:4px solid ${c}">
+            <div class="row"><span class="av" style="background:${c};color:#fff;width:40px;height:40px;font-size:18px;border-radius:12px">${esc(t.name[0] || '?')}</span>
+              <div style="min-width:0"><b class="lg-dname">${esc(t.name)}</b>
+                <span>${t.headcount}명 · ${esc(t.code)}</span></div></div>
+            <div class="lg-mgr">담당자 ${mgr ? `<b>${esc(mgr)}</b>` : '<b class="lg-nomgr">미지정</b>'}</div>
+            <div class="members">${shown.map(p => `<span class="mem${p.id === mgrId ? ' lg-me' : ''}">${LARGE.av(p.name, c)}<span class="lg-mname">${esc(p.name)}</span></span>`).join('')}</div>
+            ${more > 0 ? `<button class="btn sm ghost" data-act="large:openTeam" data-id="${t.id}">+${more}명 더보기</button>`
+              : open && ps.length > LARGE.CHIPS ? `<button class="btn sm ghost" data-act="large:openTeam" data-id="${t.id}">접기</button>` : ''}
+          </div>`;
+  },
+  // 시연용 데이터(APP_MODE=demo): 참석 응답·마감 후 변경 CSV 로 그 시각들을 재현
+  demoBox(){
+    const L = S.large, d = L.demo, c = d && d.counts;
+    return `
+        <details class="lg-demo" ${d || L.demoErrors.length ? 'open' : ''}>
+          <summary><b>시연용 데이터</b> <span class="small muted">참석 응답·마감 후 변경 CSV (시연 모드에서만)</span></summary>
+          <p class="small muted lg-note">① 응답 CSV(ID, 이름, 소속 부서, 응답, 응답일시) → 참석 마감 기준 응답 저장 → ② 변경 CSV(ID … 변경 전, 변경 후, 요청일시, 경로, 처리, 처리일시 …)를 시각 순서대로 → ③ 슬랙 대화 CSV(일시, 보낸 사람, 받는 사람, 부서, 관련 ID, 내용)를 정산 Agent 가 읽어 변경 제안·입금자 근거로. 넣을 때마다 지우고 다시 만들어 같은 파일은 같은 결과입니다.</p>
+          <div class="row wrap">
+            <button class="btn" data-act="large:pickDemo" data-kind="responses" ${LARGE.busy ? 'disabled' : ''}>📄 응답 CSV 올리기</button>
+            <button class="btn" data-act="large:pickDemo" data-kind="changes" ${LARGE.busy || !d ? 'disabled' : ''}>📄 변경 CSV 올리기</button>
+            <button class="btn" data-act="large:pickDemo" data-kind="slack" ${LARGE.busy || !d ? 'disabled' : ''}>💬 슬랙 대화 CSV 올리기</button>
+            <input type="file" id="lgDemoFile" accept=".csv,text/csv" hidden>
+          </div>
+          ${L.slack ? `<div class="lg-result">🤖 ${esc(L.slack.summary || '')}${L.slack.fallback ? ` <span class="small">(LLM 실패 → 규칙: ${esc(L.slack.fallback)})</span>` : ''}</div>` : ''}
+          ${c ? `<div class="lg-result">${esc(d.basis)}: 버스 ${c.bus} · 자차 ${c.car} · 불참 ${c.absent} · 미정 ${c.undecided} · 미응답 ${c.none} <span class="small">· 현재 참석 ${d.attending_now}명</span>
+            <br>변경 승인 ${d.changes.applied} · 대기 ${d.changes.pending}${d.changes.rejected ? ` · 반려 ${d.changes.rejected}` : ''}</div>` : ''}
+          ${L.demoErrors.length ? `<div class="err lg-note"><b>반영하지 않은 이유 (전체 반려)</b><ul class="lg-errs">${L.demoErrors.map(x => `<li>${esc(x.line)}행: ${esc(x.error)}</li>`).join('')}</ul></div>` : ''}
+        </details>`;
+  },
+  secFee(n){ const e = LARGE.ev || LARGE.sample(), lock = LARGE.readonly() || (e.snapshot_taken_at ? 'disabled' : ''); return `
+      <section class="sec" data-pv="msg">
+        <div class="sec-h"><span class="n">${n}</span><div><h3>회비</h3><p>사람마다 고른 참석 방식으로 회비가 정해지고, 부서 담당자가 부서 합계를 한 번에 입금해요.</p></div></div>
+        <div class="grid3">${[['bus', '참석+버스'], ['car', '참석+자차'], ['absent', '불참']].map(([k, lb]) => `
+          <div><label class="f">${lb} (원)</label><input class="inp" type="number" min="0" step="1000" data-bind="large.form.fee_${k}" value="${esc(LARGE.val('fee_' + k, e.fees[k]))}" ${lock}></div>`).join('')}</div>
+      </section>`; },
+  secRules(n){ const on = LARGE.on(), R = S.large.rule; return `
+      <section class="sec" data-pv="sched">
+        <div class="sec-h"><span class="n">${n}</span><div><h3>환불 규칙</h3><p>마감 뒤 감액 변경은 '이전 부담액 − 새 회비'에 환불률을 곱해요. 맞는 규칙이 없으면 환불 0원(총무 확인), 증액은 차액 전액 청구.</p></div></div>
+        <div class="sheet-wrap lg-rules"><table class="sheet"><thead><tr><th>항목</th><th>이 시각 전 요청</th><th>환불률</th><th>설명</th>${on ? '<th></th>' : ''}</tr></thead>
+        <tbody>${LARGE.rules.map(r => `<tr><td>${r.change_type === 'attend_to_absent' ? '참석→불참' : '버스→자차'}</td><td>${r.valid_until ? fmtDeadline(r.valid_until) : '기한 없음'}</td><td>${r.refund_percent}%</td><td>${esc(r.description)}</td>
+          ${on ? `<td><button class="btn sm ghost danger" data-act="large:delRule" data-id="${r.id}" aria-label="규칙 삭제">✕</button></td>` : ''}</tr>`).join('')}</tbody></table></div>
+        ${on ? `<div class="lg-rule">
+          <select class="inp" data-bind="large.rule.change_type" aria-label="변경 항목"><option value="attend_to_absent" ${R.change_type === 'attend_to_absent' ? 'selected' : ''}>참석→불참</option><option value="bus_to_car" ${R.change_type === 'bus_to_car' ? 'selected' : ''}>버스→자차</option></select>
+          <input class="inp" type="datetime-local" data-bind="large.rule.valid_until" value="${esc(R.valid_until)}" aria-label="이 시각 전 요청(비우면 기한 없음)">
+          <div class="time-in"><input class="inp num" type="number" min="0" max="100" data-bind="large.rule.refund_percent" value="${esc(R.refund_percent)}" aria-label="환불률">%</div>
+          <input class="inp" data-bind="large.rule.description" value="${esc(R.description)}" placeholder="설명" aria-label="설명">
+          <button class="btn sm" data-act="large:addRule">＋ 규칙 추가</button></div>` : '<p class="small muted lg-note">규칙 추가·삭제는 공용 서버에서만 저장돼요.</p>'}
+      </section>`; },
+
+  // ---------- 오른쪽 미리보기 (도총 renderPreview() 가 워크샵일 때 이걸 부름) ----------
+  preview(pv){
+    // 탭 이름만 대모임에 맞게(도총 HTML 은 그대로): 시트 → 부서 미리보기, 발송 일정 → 일정
+    const names = {sheet:'🏢 부서 미리보기', msg:'💬 메시지 미리보기', sched:'⏰ 일정'};
+    pv.closest('.preview')?.querySelectorAll('.tabs button[data-act="pvTab"]').forEach(b => { if (names[b.dataset.val]) b.textContent = names[b.dataset.val]; });
+    const e = LARGE.ev || LARGE.sample(), f = k => LARGE.val(k, k.startsWith('fee_') ? e.fees[k.slice(4)] : LARGE.local(e[k]));
+    if (UI.pvTab === 'msg'){
+      const t0 = LARGE.teams[0], mgr = (t0 && t0.manager && t0.manager.name) || '김부장', who = LARGE.people.find(p => !p.is_manager && (!S.large.open || p.team.id === S.large.open));
+      const name = (who && who.name) || '정서준', event = LARGE.val('name', e.name);
+      const sv = {name, event, ...dlCtx(f('attend_deadline'))};
+      // 금액 예시: 응답이 있으면 응답대로, 아직 없으면 부서 전원 버스 기준(실제 안내 금액은 납부 마감 청구표에서 서버가 계산)
+      const c = t0 ? t0.counts : null, answered = c && c.bus + c.car + c.absent;
+      const amount = won(answered ? c.bus * (+f('fee_bus') || 0) + c.car * (+f('fee_car') || 0) + c.absent * (+f('fee_absent') || 0) : (t0 ? t0.headcount : 12) * (+f('fee_bus') || 0));
+      const pay = {name:mgr, event, amount, account:LARGE.val('account_note', e.account_note), ...dlCtx(f('payment_deadline'))};
+      // 참석 독촉 단계: 소모임과 같은 전략 규칙(초지일관 = 같은 말투, 단계적 압박 = escK, 급발진 = 버럭 섞임)
+      const nag = S.strategy === 'consistent' ? ['soft', 'soft'] : S.strategy === 'escalate' ? escK(S.persona).slice(1) : ['firm', 'burst'];
+      const msgs = [
+        {label:`인원조사 DM · ${name}님에게`, k:'soft', m:lines(SURVEY_DM, S.persona, 'soft', sv)},
+        ...nag.map((k, i) => ({label:`참석 독촉 DM ${i + 1}차 · 미응답자에게`, k, m:lines(SURVEY_DM, S.persona, k, sv)})),
+        {label:`회비 안내 DM · ${t0 ? esc(t0.name) + ' ' : ''}담당자 ${mgr}님에게${answered ? '' : ' (금액 예: 전원 버스)'}`, k:'soft', m:lines(SETTLE_DM, S.persona, 'soft', pay)},
+      ];
+      pv.innerHTML = `
+        <div class="row" style="margin-bottom:12px"><b>${PERSONAS[S.persona].ic} ${PERSONAS[S.persona].label} × ${STRATEGIES[S.strategy].ic} ${STRATEGIES[S.strategy].label}</b></div>
+        <div class="slack">${msgs.map(x => `<div class="stage-lb">${x.label}</div>${bubble(x.m.text, MOOD[x.k], x.k === 'burst')}`).join('')}</div>
+        <p class="small muted" style="margin-top:14px">대모임은 단체 채널 없이 <b>개인 DM</b>으로 인원조사·독촉을 하고, 회비 안내는 <b>부서 담당자</b>에게만 갑니다. 금액·마감은 서버 코드가 계산한 값이 들어가요. (미리보기 예시 문구)</p>`;
+    } else if (UI.pvTab === 'sched'){
+      const items = [['참석 응답 마감', f('attend_deadline'), true], ['회비 납부 마감', f('payment_deadline')], ['행사', f('event_at')]];
+      pv.innerHTML = `
+        <div class="dday" style="margin-bottom:14px">${items.map(([lb, v, hot]) => `<div class="dd ${hot ? 'hot2' : ''}"><b>${dLabel(dayDiff(v))}</b><span>${lb}</span></div>`).join('')}</div>
+        <div class="log">${items.map(([lb, v], i) => `<div class="row"><span class="tag ${i ? '' : 'g'}">${i + 1}</span><span>${lb}</span><span class="grow"></span><b>${fmtDeadline(v)}</b></div>`).join('')}</div>
+        <p class="small muted" style="margin-top:12px">참석 마감 때 사람별 응답 기준표, 납부 마감 때 부서별 청구표를 저장해요. 그 뒤 변동은 행사 후 정산 보고서에 차액으로 정리됩니다. 개인 DM 은 21~8시에 보내지 않아요.</p>`;
+    } else {
+      const ts = LARGE.teams;
+      pv.innerHTML = ts.length ? `
+        <div class="row" style="margin-bottom:10px"><b>${esc(LARGE.val('name', e.name))} · 부서</b><span class="grow"></span><span class="tag">${ts.length}개 부서 · ${ts.reduce((a, t) => a + t.headcount, 0)}명</span></div>
+        <div class="sheet-wrap"><table class="sheet"><thead><tr><th>부서</th><th>인원</th><th>담당자</th><th>응답</th></tr></thead>
+        <tbody>${ts.map(t => { const c = t.counts, done = t.headcount - c.none - c.undecided; return `<tr><td>${esc(t.name)}</td><td>${t.headcount}</td><td>${t.manager ? esc(t.manager.name) : '<span class="tag r">미지정</span>'}</td><td><span class="tag ${done === t.headcount ? 'g' : done ? 'y' : ''}">${done}/${t.headcount}</span></td></tr>`; }).join('')}</tbody></table></div>
+        <p class="small muted">시작하면 부서 담당자가 정해진 이 명단으로 개인 인원조사 DM 을 보내요.</p>`
+        : `<div class="lg-empty"><b>아직 명단이 없어요</b><p class="small muted">왼쪽 ② 명단 CSV 를 올리면 부서별 인원·담당자·응답 현황이 여기에 나와요.</p></div>`;
+    }
+  },
+
+  // ---------- (예전) 규모 선택 뒤 진입 카드: 이전 저장 상태(S.size === 'large')에서만 보임 ----------
   render(el){
     const on = LARGE.server === 'on';
-    const web = location.protocol.startsWith('http'); // file:// 로 연 경우 정적 데모판도 열 수 없음(브라우저가 데이터 파일 읽기를 막음)
-    const status = {
-      unknown:'<span class="lg-pill">서버 확인 중…</span>',
-      on:'<span class="lg-pill lg-on">공용 서버 실행 중 — 실제 대모임 화면을 열 수 있어요</span>',
-      off: web ? '<span class="lg-pill lg-off">정적 데모 — 녹화한 가상 데이터로 대모임 화면을 볼 수 있어요(저장 안 됨)</span>'
-               : '<span class="lg-pill lg-off">파일로 열림 — 대모임 화면은 웹 주소(GitHub Pages·공용 서버)에서 열려요</span>'
-    }[LARGE.server] || '';
+    const web = location.protocol.startsWith('http');
     el.innerHTML = `
     <header class="top"><div class="top-in">
       <button class="btn ghost sm" data-act="${S.started ? 'goDash' : 'changeSize'}">← ${S.started ? '대시보드' : '모임 종류'}</button>
@@ -1180,22 +1413,15 @@ const LARGE = {
     <main class="page"><div class="card" style="max-width:880px;margin:24px auto 0">
       <section class="sec">
         <div class="sec-h"><span class="n">🏢</span><div><h3>대모임(워크숍·연수) 총무 Agent</h3>
-          <p>수백 명 규모 행사: 전체 명단 CSV → 부서별 묶기 → 개인 인원조사(Slack DM) → 부서 담당자가 회비 일괄 납부 → 마감 기준표 저장 → 행사 후 정산 Agent 가 <b>정산 보고서 한 장</b>(추가 납부·환불·확인 필요)으로 정리. 환불·추가 납부는 부서 담당자에게만 연락합니다.</p></div></div>
-        <p>${status}</p>
+          <p>대모임 설정은 이제 모임 종류에서 <b>워크샵</b>을 고르면 같은 초기설정 화면에서 합니다.</p></div></div>
         <div class="lg-row">
-          ${on || LARGE.server === 'unknown' || !web
-            ? `<button class="btn primary" data-act="large:open" ${on ? '' : 'disabled'}>대모임 관리 화면 열기 →</button>`
-            : `<button class="btn primary" data-act="large:openStatic">대모임 화면 열기(정적 데모) →</button>`}
-          <button class="btn ghost" data-act="large:recheck">서버 다시 확인</button>
+          <button class="btn primary" data-act="changeSize">워크샵 설정으로 →</button>
+          ${on ? '<button class="btn" data-act="large:open">대모임 대시보드 열기</button>' : web ? '<button class="btn" data-act="large:openStatic">정적 데모판 열기</button>' : ''}
         </div>
-        ${LARGE.server === 'off' ? `<p class="muted lg-note">저장·발송·실제 Agent 는 공용 서버에서: <code>.venv/bin/python -m hub</code> 실행 후 <code>http://127.0.0.1:8787</code> (README 참고)</p>` : ''}
-        <p class="muted lg-note">연락은 소모임과 같은 Slack 봇의 DM 입니다(대모임 서버 설정 <code>NOTIFY_MODE=slack</code> 일 때만 실제 발송, 기본은 모의 발송).</p>
       </section>
     </div></main>`;
     if (LARGE.server === 'unknown') LARGE.probe();
   },
-
-  // 같은 출처의 /api/large/meta 가 응답하면 공용 서버에서 열린 것
   probe(){
     if (!location.protocol.startsWith('http')) { LARGE.server = 'off'; return setTimeout(render); }
     fetch('/api/large/meta', {cache:'no-store'})
@@ -1205,30 +1431,96 @@ const LARGE = {
       .finally(() => { if (S.size === 'large' && S.screen === 'setup') render(); });
   },
 
-  // 대모임 화면으로 이동. 돌아오면 시작 화면이 보이도록(기존 '시작화면'·'모임 규모' 버튼과 같은 전환). 진행 중인 소모임이 있으면 규모는 그대로 둠
+  // 대모임 화면으로 이동. '← 시작 화면'으로 돌아오면 이 초기설정 화면(워크샵)이 보이게
   go(url){
-    S.screen = 'start';
-    if (!S.started) S.size = null;
+    S.screen = 'setup'; S.size = 'small';
     save();
     location.href = url;
     return false;
   },
+  fail(e){ LARGE.busy = false; toast(e.message); render(); },
 
   act: {
-    open(){ return LARGE.go('/large/'); },              // 공용 서버의 실제 화면
-    openStatic(){ return LARGE.go('large/#/admin'); },  // 이 페이지 옆 demo/large/ 정적 데모판(GitHub Pages 에서도 동작하는 상대 경로)
-    recheck(){ LARGE.server = 'unknown'; },
-    // 소모임 설정의 '워크샵' 카드: 공용 서버가 켜져 있으면 실제 대모임 화면, 없으면 정적 데모판, 파일로 열었으면 진입 카드
-    fromWorkshop(){
-      S.size = 'large'; S.screen = 'setup'; save();
-      if (!location.protocol.startsWith('http')) { LARGE.server = 'off'; return render(); }
-      fetch('/api/large/meta', {cache:'no-store'})
-        .then(r => r.ok ? r.json() : Promise.reject())
-        .then(j => { if (j.system === 'large') { LARGE.server = 'on'; LARGE.act.open(); } else return Promise.reject(); })
-        .catch(() => { LARGE.server = 'off'; LARGE.act.openStatic(); });
+    open(){ return LARGE.go('/large/admin'); },
+    openStatic(){ return LARGE.go(`large/#/admin?bot=${S.persona}.${S.strategy}`); },
+    // 명단 CSV: 시드 DB 면 올리기 전에 경고
+    pick(){
+      if (LARGE.meta && LARGE.meta.db_purpose === 'demo-seed' && !confirm('시드 데이터와 섞입니다. start_live.sh 로 빈 행사에서 올리세요.\n그래도 이 DB 에 올릴까요?')) return false;
+      $('#lgRoster').click(); return false;
+    },
+    openTeam(d){ const L = S.large, id = +d.id; L.open = L.open === id ? null : id; UI.pvTab = 'sheet'; },
+    pickDemo(d){ LARGE.demoKind = d.kind; $('#lgDemoFile').click(); return false; },
+    async addRule(){
+      const R = S.large.rule;
+      try {
+        await LARGE.api('POST', `${LARGE.base()}/refund-rules`, {change_type:R.change_type, valid_until:R.valid_until || null, refund_percent:+R.refund_percent || 0, description:R.description});
+        S.large.rule = LARGE.defaults().rule; await LARGE.reload(); toast('환불 규칙을 추가했어요');
+      } catch (e){ return LARGE.fail(e); }
+      render(); return false;
+    },
+    async delRule(d){
+      try { await LARGE.api('DELETE', `${LARGE.base()}/refund-rules/${d.id}`); await LARGE.reload(); toast('환불 규칙을 삭제했어요'); } catch (e){ return LARGE.fail(e); }
+      render(); return false;
+    },
+    // '확인하고 시작하기'(HITL 1): 바뀐 행사 정보·회비 저장 → 총무봇 성격·전략 저장 → 대모임 총무 대시보드
+    async start(){
+      if (LARGE.server !== 'on') return LARGE.act.openStatic(); // 정적 데모: 저장 없이 정적 데모판으로
+      if (LARGE.needLogin){ toast('총무 로그인이 필요해요'); return; }
+      if (!LARGE.ev || LARGE.busy) return;
+      const e = LARGE.ev, f = S.large.form, body = {};
+      const cur = {name:e.name, event_at:LARGE.local(e.event_at), attend_deadline:LARGE.local(e.attend_deadline), payment_deadline:LARGE.local(e.payment_deadline), account_note:e.account_note,
+        fee_bus:e.fees.bus, fee_car:e.fees.car, fee_absent:e.fees.absent};
+      for (const [k, v] of Object.entries(f)) if (k in cur && String(v) !== String(cur[k])) body[k] = k.startsWith('fee_') ? +v || 0 : v;
+      LARGE.busy = true;
+      try {
+        if (Object.keys(body).length) await LARGE.api('PUT', LARGE.base(), body);
+        await LARGE.api('POST', `${LARGE.base()}/bot`, {persona:S.persona, strategy:S.strategy});
+      } catch (err){ return LARGE.fail(err); }
+      LARGE.busy = false; S.large.form = {};
+      return LARGE.go('/large/admin');
     }
+  },
+
+  async uploadDemo(file, kind){
+    const L = S.large;
+    LARGE.busy = true; L.demoErrors = []; render();
+    const fd = new FormData(); fd.append('file', file);
+    try {
+      if (kind === 'slack'){
+        L.slack = await LARGE.api('POST', `${LARGE.base()}/demo/slack`, fd);
+        toast(`슬랙 ${L.slack.counts.messages}건을 정산 Agent 가 읽었어요`);
+      } else {
+        L.demo = await LARGE.api('POST', `${LARGE.base()}/demo/${kind === 'changes' ? 'changes' : 'responses'}`, fd);
+        if (kind === 'responses') L.slack = null;
+        toast(kind === 'changes' ? `변경 ${L.demo.changes.applied + L.demo.changes.pending}건을 시각 순서대로 넣었어요` : `응답을 넣고 참석 마감 기준 응답을 저장했어요`);
+      }
+      await LARGE.reload();
+    } catch (e){
+      if (Array.isArray(e.detail)) L.demoErrors = e.detail.filter(x => x && x.line !== undefined);
+      toast(e.message);
+    }
+    LARGE.busy = false; render();
+  },
+  async upload(file){
+    const L = S.large;
+    LARGE.busy = true; L.rowErrors = []; L.result = null; render();
+    const fd = new FormData(); fd.append('file', file);
+    try {
+      L.result = await LARGE.api('POST', `${LARGE.base()}/roster`, fd);
+      L.open = null; L.demo = null; L.slack = null; L.demoErrors = []; await LARGE.reload(); UI.pvTab = 'sheet';
+      toast(`명단 ${L.result.rows}명 → ${L.result.teams}개 부서로 묶었어요`);
+    } catch (e){
+      if (Array.isArray(e.detail)) L.rowErrors = e.detail.filter(x => x && x.line !== undefined);
+      toast(e.message);
+    }
+    LARGE.busy = false; render();
   }
 };
+document.addEventListener('change', e => {
+  const f = e.target.files && e.target.files[0]; if (!f) return;
+  if (e.target.id === 'lgRoster'){ LARGE.upload(f); e.target.value = ''; }
+  if (e.target.id === 'lgDemoFile'){ LARGE.uploadDemo(f, LARGE.demoKind); e.target.value = ''; }
+});
 /* ===================== 대모임 블록 끝 ===================== */
 
 /* =========================================================
@@ -2227,6 +2519,7 @@ setInterval(() => document.querySelectorAll('[data-due]').forEach(el => {
 
 // 모임 종류별 설정 섹션 순서 (번호는 순서대로 자동)
 function setupSections(){
+  if (S.template === 'ws') return LARGE.setupSections(); // 워크샵 = 대모임(채총) — 도총 확인
   if (voteOn()) return [setupSlack, dinnerPlan, n => setupSchema(n, '조사 항목', '일정·장소가 정해진 뒤 <b>참석 조사</b>에서 묻는 항목이에요. 이때 이 열로 시트가 만들어져요.'), dinnerFee, setupPersonaStrategy, setupFreq];
   return [setupSlack, n => setupSchema(n, '시트 열', '스프레드시트의 열(스키마)을 정합니다. 직접 고칠 수 있어요.'), setupDetail, setupPersona, setupStrategy, setupFreq];
 }
@@ -2330,6 +2623,7 @@ function freqNote(sec){
 }
 function renderPreview(){
   const pv = $('#pv'); if (!pv) return;
+  if (S.template === 'ws') return LARGE.preview(pv); // 워크샵 = 대모임(채총) — 도총 확인
   if (UI.pvTab === 'map' && voteOn()){ renderMap(pv); return; }
   if (UI.pvTab === 'sheet'){
     const ps = S.invited.slice(0, 6).map(id => (S.started && S.people[id]) || buildPerson(id));
@@ -3089,7 +3383,7 @@ document.addEventListener('click', e => {
     case 'dmStop': { const p = S.people[d.id]; if (p && p.dmPlan){ p.dmPlan.done = true; log('총무', `${MEM[p.id].name}님 개인 DM 반복 멈춤`); } break; }
     case 'inviteNone': S.invited = ['me']; break;
     case 'tpl':
-      if (d.val === 'ws') return LARGE.act.fromWorkshop(); // 워크샵 = 대모임(채총) 화면으로 — 채총 요청 변경
+      if (d.val === 'ws'){ S.template = 'ws'; UI.pvTab = 'sheet'; LARGE.enter(); break; } // 워크샵 = 대모임(채총) — 도총 확인
       if (S.template === d.val) return;
       S.template = d.val; S.schema = makeSchema(d.val); UI.pvTab = 'sheet';
       // 기본 예시 이름(가평 MT)이 그대로면 회식에 맞는 이름으로
@@ -3108,7 +3402,7 @@ document.addEventListener('click', e => {
     case 'pvTab': UI.pvTab = d.val; break;
     case 'reroll': S.chaosSeed++; renderPreview(); save(); return;
     case 'freqPreset': S.freq = {h:+d.h, m:+d.m, s:+d.s}; UI.pvTab = 'sched'; break;
-    case 'confirmStart': startConfirmModal(); return;
+    case 'confirmStart': if (S.template === 'ws') return LARGE.act.start(); startConfirmModal(); return; // 워크샵 = 대모임(채총) — 도총 확인
     case 'doStart':
       closeModal();
       if (SLACK.status === 'on' && !UI.slackDone){ slackStart(); return; }

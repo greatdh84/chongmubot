@@ -65,6 +65,12 @@ cd large/frontend && npm run typecheck && npm run build
 ## 발표 시연
 초기화·실행 명령, 5~7분 장면 순서, 장면별 사람/LLM/코드 역할, 실측 기록: **[docs/demo-script.md](docs/demo-script.md)**
 ```bash
+large/scripts/start_live.sh --reset   # 빈 행사 DB(var/live.db): 워크샵 초기설정에서 명단 CSV 업로드·초대/독촉 DM 시연
+large/scripts/start_seed.sh           # 시드 DB(var/chongmu.db): 정산 보고서·총무 Agent 시연 (--reset 이면 시드 다시 생성)
+```
+설정은 공용 초기설정 화면(시작하기 → 모임 종류 **워크샵**)에서 합니다: 행사 정보·명단 CSV·회비·환불 규칙 + 소모임과 같은 총무 성격·독촉 전략.
+'확인하고 시작하기'를 누르면 로그인 화면 없이 `/large/admin` 으로 갑니다(시연 모드는 시연 총무로 자동 로그인, 역할 전환은 `/large/roles`).
+```bash
 (cd large/backend && ../../.venv/bin/python -m app.seed --reset)   # 시연용 DB 만 초기화(표시 없는 DB·운영 모드는 거부)
 .venv/bin/python -m hub
 ```

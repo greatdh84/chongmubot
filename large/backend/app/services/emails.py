@@ -150,6 +150,39 @@ def enqueue_settlement_notices(db: Session, event: Event, kind: str, team_ids: l
     return {"created": created, "teams": teams, "teams_without_manager": no_manager, "teams_blocked": blocked}
 
 
+def preview_settlement_notices(db: Session, event: Event, kind: str) -> dict:
+    """보내기 전 미리보기: enqueue_settlement_notices 와 같은 대상·같은 금액으로, 실제로 보낼 문구까지 만든다(저장·발송 안 함).
+    같은 금액으로 이미 보낸 부서는 already_sent=True(보내기를 눌러도 다시 가지 않음)."""
+    from .settlement import compute_team
+
+    assert kind in ("refund_notice", "extra_notice")
+    targets, skipped, no_manager = [], [], []
+    for team in db.scalars(select(Team).where(Team.event_id == event.id).order_by(Team.code)):
+        calc = compute_team(db, event, team)
+        if (kind == "refund_notice" and calc["balance"] >= 0) or (kind == "extra_notice" and calc["balance"] <= 0):
+            continue
+        if calc["blockers"]:
+            skipped.append({"team": team.name, "amount": abs(calc["balance"]), "blockers": calc["blockers"]})
+            continue
+        mgr = active_manager(db, team.id)
+        if mgr is None:
+            no_manager.append(team.name)
+            continue
+        p = db.get(Participant, mgr.participant_id)
+        job = EmailJob(event_id=event.id, kind=kind, participant_id=p.id, team_id=team.id, to_email=p.slack_id)  # 세션에 넣지 않는 임시 작업(문구 렌더링용)
+        subject, body = _render(db, job, preview=True)
+        members = [
+            {"name": l["name"], "change": f"{LABELS.get(c['from'], '미응답')} → {LABELS.get(c['to'], c['to'])}", "amount": (-c["refund_amount"] if c["refund_amount"] else c["extra_charge"])}
+            for l in calc["lines"] for c in l["changes"] if c["status"] == "applied" and (c["refund_amount"] or c["extra_charge"])
+        ]
+        sent = db.scalar(select(EmailJob).where(EmailJob.dedupe_key == f"{kind}:{team.id}:{calc['balance']}"))
+        targets.append({
+            "team_id": team.id, "team": team.name, "manager": p.name, "slack_id_masked": p.slack_id[:3] + "…" if p.slack_id else "", "amount": abs(calc["balance"]),
+            "members": members, "subject": subject, "body": body, "already_sent": sent is not None and sent.status == "sent", "job_status": sent.status if sent else None,
+        })
+    return {"kind": kind, "targets": targets, "skipped_check": skipped, "no_manager": no_manager, "notify_mode": settings.email_mode}
+
+
 def send_manager_code(db: Session, participant: Participant, code_id: int, code: str) -> EmailJob:
     job, _ = _enqueue(db, dedupe_key=f"manager_code:{code_id}", event_id=participant.event_id, kind="manager_code", participant_id=participant.id, team_id=participant.team_id, to_email=participant.slack_id)
     _dispatch_one(db, job, clock.now(), code=code)
@@ -196,7 +229,7 @@ def _recheck(db: Session, job: EmailJob) -> str | None:
     return None
 
 
-def _render(db: Session, job: EmailJob, code: str | None = None) -> tuple[str, str]:
+def _render(db: Session, job: EmailJob, code: str | None = None, preview: bool = False) -> tuple[str, str]:
     event = db.get(Event, job.event_id)
     p = db.get(Participant, job.participant_id)
     deadline = clock.kst(event.attend_deadline).strftime("%m월 %d일 %H:%M")
@@ -243,7 +276,15 @@ def _render(db: Session, job: EmailJob, code: str | None = None) -> tuple[str, s
         detail = "\n".join(lines[:15]) or "  - (변동 없음: 청구액 대비 입금 차이)"
         if job.kind == "refund_notice":
             head = f"{team.name} 회비 정산 결과, 총무가 담당자님께 {abs(calc['balance']):,}원을 돌려드릴 예정입니다."
-            tail = "받으실 계좌가 팀 입금 계좌와 다르면 총무에게 알려 주세요. 팀원에게는 담당자님이 나눠 주시면 됩니다."
+            from . import refunds
+
+            # 환불 받을 계좌: 담당자 전용 개인 링크(7일). 미리보기에서는 토큰을 만들지 않는다.
+            url = "(보낼 때 담당자 전용 링크가 여기에 들어갑니다)" if preview else refunds.link_url(refunds.issue_link(db, team, p))
+            tail = (
+                f"환불 받을 계좌를 아래 개인 링크에서 입력해 주세요(담당자 전용 · 7일 유효).\n{url}\n"
+                "이 DM 에 '은행 계좌번호 예금주'로 답장하셔도 됩니다(총무 확인 후 저장). 팀원에게는 담당자님이 나눠 주시면 됩니다."
+                + (f"\n※ {refunds.DEMO_NOTE}" if settings.is_demo else "")
+            )
         else:
             head = f"{team.name} 회비 정산 결과, {calc['balance']:,}원을 추가로 걷어 입금해 주세요."
             tail = f"입금 안내: {event.account_note}"

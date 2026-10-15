@@ -180,4 +180,6 @@ def import_roster(db: Session, event: Event, data: bytes, filename: str, actor: 
     db.add(Upload(event_id=event.id, kind="roster", filename=filename[:200], sha256=hashlib.sha256(data).hexdigest(), row_count=len(rows), inserted=inserted, skipped=len(rows) - inserted - updated))
     audit(db, event.id, actor, "roster_uploaded", detail={"rows": len(rows), "inserted": inserted, "updated": updated, "departments": len(depts), "managers_assigned": assigned})
     db.flush()
-    return {"rows": len(rows), "inserted": inserted, "updated": updated, "teams": len(depts), "managers_assigned": assigned, "departments": depts, "warnings": warnings}
+    # 지금 담당자가 있는 부서 수(이번 업로드로 새로 지정한 수가 아님). 같은 명단을 다시 올려도 34 처럼 그대로 보인다.
+    managers_total = sum(1 for t in teams.values() if active_manager(db, t.id))
+    return {"rows": len(rows), "inserted": inserted, "updated": updated, "teams": len(depts), "managers_assigned": assigned, "managers_total": managers_total, "departments": depts, "warnings": warnings}

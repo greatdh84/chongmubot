@@ -1,10 +1,12 @@
-import { useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, CHOICE_LABEL, fmtTime, STATIC, won, type Change, type EventInfo } from "../../api";
-import { Chat, Msg, Page, StatusPill, useEventName } from "../../components/common";
+import { api, BOT_PERSONA, BOT_STRATEGY, fmtTime, STATIC, won, type Change, type EventInfo } from "../../api";
+import { Msg, Page, StatusPill, useEventName, useMeta } from "../../components/common";
 import { useAction, useLoad } from "../../hooks";
 import { PaymentsTab, RosterTab, TasksTab } from "./AdminMoney";
-import { ReportTab, STATUS, Timeline, triggerLabel, type Report } from "./Report";
+import { agentLine, type AgentReported } from "./AgentChat";
+import { ReportTab } from "./Report";
+import { Workbench } from "./Workbench";
 
 export interface Dashboard {
   event: EventInfo;
@@ -22,101 +24,67 @@ type Tab = (typeof TABS)[number];
 
 export default function AdminPage() {
   const nav = useNavigate();
-  const { data: events, error } = useLoad(() => api.get<EventInfo[]>("/api/large/admin/events"));
+  const meta = useMeta();
+  const { data: events, error, reload } = useLoad(() => api.get<EventInfo[]>("/api/large/admin/events"));
   const [tab, setTab] = useState<Tab>("대시보드");
+  const [checkSub, setCheckSub] = useState<CheckSub>("입금 대조");
+  const [focusTeam, setFocusTeam] = useState<number | null>(null);
+  const go = (t: string, sub?: string, teamId?: number) => {
+    if (sub && (CHECK_SUBS as readonly string[]).includes(sub)) setCheckSub(sub as CheckSub);
+    setFocusTeam(teamId ?? null);
+    setTab(t as Tab);
+    window.scrollTo({ top: 0 });
+  };
   useEventName(events?.[0]?.name);
+  // 시연 모드: 총무 세션이 없으면 로그인 화면 대신 시연 총무로 바로 들어간다(공용 초기설정 화면에서 넘어온 경우)
+  const autoLogin = useRef(false);
+  const needLogin = error?.status === 401;
+  useEffect(() => {
+    if (!needLogin || !meta?.demo_tools || autoLogin.current) return;
+    autoLogin.current = true;
+    api.post("/api/large/dev/switch", { role: "admin" }).then(reload).catch(() => undefined);
+  }, [needLogin, meta, reload]);
+  if (needLogin && (meta === null || meta.demo_tools) && !autoLogin.current) return <Page><p className="muted">총무 화면을 여는 중…</p></Page>;
   if (error) return <Page narrow><div className="card"><p className="error">{error.message}</p><button onClick={() => nav("/admin/login")}>로그인</button></div></Page>;
   if (!events) return <Page><p className="muted">불러오는 중…</p></Page>;
   if (events.length === 0) return <Page narrow><div className="card">관리하는 행사가 없습니다. 시드 데이터를 만들거나 행사를 등록하세요.</div></Page>;
   const ev = events[0];
   const base = `/api/large/admin/events/${ev.id}`;
   return (
-    <Page>
+    <Page wide={tab === "대시보드"}>
       <div className="topbar">
         <h1>총무 · {ev.name}</h1>
-        {!STATIC && <button onClick={() => api.post("/api/large/auth/admin/logout").then(() => nav("/"))}>로그아웃</button>}
+        <div className="row">
+          {ev.bot?.persona && <span className="pill ok" title="공용 초기설정 화면에서 고른 총무봇 말투 · 독촉 전략">총무봇: {BOT_PERSONA[ev.bot.persona] ?? ev.bot.persona}{ev.bot.strategy ? ` · ${BOT_STRATEGY[ev.bot.strategy] ?? ev.bot.strategy}` : ""}</span>}
+          {!STATIC && <button onClick={() => api.post("/api/large/auth/admin/logout").then(() => nav(meta?.demo_tools ? "/roles" : "/"))}>로그아웃</button>}
+        </div>
       </div>
       <nav className="tabs" aria-label="총무 메뉴">
-        {TABS.map((t) => <button key={t} className={t === tab ? "active" : ""} onClick={() => setTab(t)}>{t}</button>)}
+        {TABS.map((t, i) => (
+          <span key={t} className="row" style={{ gap: 6 }}>
+            {i === 1 && <span className="muted" title="시연은 대시보드에서 끝납니다. 아래는 같은 데이터의 원래 화면">원본 보기 ·</span>}
+            <button className={t === tab ? "active" : ""} onClick={() => setTab(t)}>{t}</button>
+          </span>
+        ))}
       </nav>
-      {tab === "대시보드" && <DashboardTab base={base} go={setTab} />}
+      {tab === "대시보드" && <Workbench base={base} go={go} />}
       {tab === "부서·명단" && <RosterTab base={base} />}
-      {tab === "입금·확인" && <CheckTab base={base} />}
-      {tab === "정산 보고서" && <ReportTab base={base} />}
+      {tab === "입금·확인" && <CheckTab base={base} sub={checkSub} setSub={setCheckSub} />}
+      {tab === "정산 보고서" && <ReportTab key={focusTeam ?? "all"} base={base} go={go} focusTeam={focusTeam} />}
       {tab === "기록" && <LogTab base={base} />}
     </Page>
   );
 }
 
-const AGENT_CHIPS = ["경영지원팀의 추가 회비 납부자를 알려줘", "환불할 부서 목록", "확인 필요한 부서", "당일 변동 있던 사람", "지난 보고서 이후 바뀐 것", "전체 요약"];
-
-/** 대시보드: 왼쪽은 총무 Agent(보고서에 묻기), 오른쪽은 단계·핵심 숫자·사람이 볼 것 */
-function DashboardTab({ base, go }: { base: string; go: (t: Tab) => void }) {
-  const { data: d, reload } = useLoad(() => api.get<Dashboard>(base), [base]);
-  const { data: rep, reload: reloadRep } = useLoad(() => api.get<Report>(`${base}/report`), [base]);
-  if (!d) return <p className="muted">불러오는 중…</p>;
-  const s = rep?.summary;
-  return (
-    <>
-      <div className="dash">
-        <Chat
-          base={`${base}/agent/chat`}
-          title="총무 Agent 에게 묻기"
-          subtitle={<>정산 보고서{rep ? ` v${rep.version}` : ""}를 조회해 답합니다. 숫자는 코드가 계산한 보고서에서만 가져오고, 담당자 안내 발송은 총무가 '네'라고 해야 실행됩니다.</>}
-          examples={AGENT_CHIPS.slice(0, 2)}
-          chips={AGENT_CHIPS}
-          onReply={() => { reloadRep(); reload(); }}
-          className="agent-chat"
-        />
-        <div>
-          <div className="card">
-            <div className="row" style={{ justifyContent: "space-between" }}>
-              <h2>지금 단계 · {d.stage_label}</h2>
-              <button className="small" onClick={() => go("정산 보고서")}>보고서 열기</button>
-            </div>
-            {rep && <Timeline rep={rep} />}
-            {s && (
-              <div className="grid" style={{ marginTop: 10, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
-                <Stat label="참석 / 전체" value={`${s.attending} / ${s.headcount}명`} />
-                <Stat label="확정 입금 / 최종 회비" value={`${Math.round((s.received_total / Math.max(1, s.final_total)) * 100)}%`} />
-                {(["extra", "refund", "check", "done"] as const).map((k) => (
-                  <button key={k} className={`stat clickable tone-${STATUS[k][1]}`} onClick={() => go("정산 보고서")}>
-                    <div className="label">{STATUS[k][0]}</div>
-                    <div className="value">{s.team_status[k]}개 부서</div>
-                    {k === "extra" && <div className="muted">{won(s.extra_total)}</div>}
-                    {k === "refund" && <div className="muted">{won(s.refund_total)}</div>}
-                  </button>
-                ))}
-              </div>
-            )}
-            {rep && <p className="muted" style={{ marginBottom: 0 }}>보고서 v{rep.version} · {fmtTime(rep.created_at)} · 계기: {triggerLabel(rep.trigger)}</p>}
-          </div>
-          <div className="card">
-            <h2>사람이 결정할 것 <span className="hitl" title="Human-in-the-loop: 사람이 확인해야 반영">HITL</span></h2>
-            <ul className="todo">
-              <li><span>마감 후·당일 변경 승인 대기 <b>{d.pending_changes}건</b></span><button className="small" onClick={() => go("입금·확인")}>보기</button></li>
-              <li><span>Agent 입금 배정 제안 <b>{d.transactions.proposed_allocations}건</b> · 미배정 거래 {d.transactions.unallocated}건</span><button className="small" onClick={() => go("입금·확인")}>보기</button></li>
-              <li><span>확인 과제 총무 <b>{d.open_tasks.admin ?? 0}</b> · 담당자 답변 대기 {d.open_tasks.manager ?? 0}</span><button className="small" onClick={() => go("입금·확인")}>보기</button></li>
-              <li><span>팀 담당자 미지정 <b>{d.teams_without_manager}개 부서</b></span><button className="small" onClick={() => go("부서·명단")}>보기</button></li>
-            </ul>
-          </div>
-        </div>
-      </div>
-      <details className="card">
-        <summary><b>행사 설정 · 회비 · 환불 규칙</b> <span className="muted">참석 마감 {fmtTime(d.event.attend_deadline)} · 납부 마감 {fmtTime(d.event.payment_deadline)} · 행사 {fmtTime(d.event.event_at)}</span></summary>
-        <div style={{ marginTop: 12 }}><SettingsTab base={base} /></div>
-      </details>
-    </>
-  );
-}
+const CHECK_SUBS = ["입금 대조", "변경 승인", "확인 과제"] as const;
+type CheckSub = (typeof CHECK_SUBS)[number];
 
 /** 입금·확인: 입금 대조 / 변경 승인 / 확인 과제를 한 탭에 */
-function CheckTab({ base }: { base: string }) {
-  const [sub, setSub] = useState<"입금 대조" | "변경 승인" | "확인 과제">("입금 대조");
+function CheckTab({ base, sub, setSub }: { base: string; sub: CheckSub; setSub: (s: CheckSub) => void }) {
   return (
     <>
       <div className="row seg" style={{ marginBottom: 12 }}>
-        {(["입금 대조", "변경 승인", "확인 과제"] as const).map((k) => <button key={k} className={sub === k ? "active" : ""} onClick={() => setSub(k)}>{k}</button>)}
+        {CHECK_SUBS.map((k) => <button key={k} className={sub === k ? "active" : ""} onClick={() => setSub(k)}>{k}</button>)}
       </div>
       {sub === "입금 대조" && <PaymentsTab base={base} />}
       {sub === "변경 승인" && <ChangesTab base={base} />}
@@ -142,79 +110,15 @@ export function Stat({ label, value }: { label: string; value: string }) {
   return <div className="stat"><div className="label">{label}</div><div className="value">{value}</div></div>;
 }
 
-interface Rule { id: number; change_type: string; valid_until: string | null; refund_percent: number; description: string }
-const toLocalInput = (iso: string | null) => (iso ? iso.slice(0, 16) : "");
-
-function SettingsTab({ base }: { base: string }) {
-  const { data: d, reload } = useLoad(() => api.get<Dashboard>(base), [base]);
-  const { data: rules, reload: reloadRules } = useLoad(() => api.get<Rule[]>(`${base}/refund-rules`), [base]);
-  const { busy, message, run } = useAction();
-  const [form, setForm] = useState<Record<string, string>>({});
-  const [rule, setRule] = useState({ change_type: "attend_to_absent", valid_until: "", refund_percent: "50", description: "" });
-  if (!d) return <p className="muted">불러오는 중…</p>;
-  const ev = d.event;
-  const val = (k: string, fallback: string) => form[k] ?? fallback;
-  const save = () => {
-    const body: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(form)) body[k] = k.startsWith("fee_") ? Number(v) : v;
-    run(() => api.put(base, body), "저장했습니다.").then(() => { setForm({}); reload(); });
-  };
-  const locked = !!ev.snapshot_taken_at;
-  return (
-    <div className="two">
-      <div className="card">
-        <h2>행사·회비</h2>
-        <div style={{ display: "grid", gap: 8 }}>
-          <label className="field">행사명<input value={val("name", ev.name)} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
-          <label className="field">행사 일시<input type="datetime-local" value={val("event_at", toLocalInput(ev.event_at))} onChange={(e) => setForm({ ...form, event_at: e.target.value })} /></label>
-          <label className="field">참석 응답 마감<input type="datetime-local" disabled={locked} value={val("attend_deadline", toLocalInput(ev.attend_deadline))} onChange={(e) => setForm({ ...form, attend_deadline: e.target.value })} /></label>
-          <label className="field">팀 입금 마감<input type="datetime-local" value={val("payment_deadline", toLocalInput(ev.payment_deadline))} onChange={(e) => setForm({ ...form, payment_deadline: e.target.value })} /></label>
-          <div className="row">
-            {(["bus", "car", "absent"] as const).map((k) => (
-              <label key={k} className="field">{CHOICE_LABEL[k]}<input type="number" min={0} step={1000} disabled={locked} value={val(`fee_${k}`, String(ev.fees[k]))} onChange={(e) => setForm({ ...form, [`fee_${k}`]: e.target.value })} style={{ width: 110 }} /></label>
-            ))}
-          </div>
-          <label className="field">입금 안내<input value={val("account_note", ev.account_note)} onChange={(e) => setForm({ ...form, account_note: e.target.value })} /></label>
-          {locked && <p className="muted">마감 기준 응답 저장 후에는 회비와 참석 마감을 바꿀 수 없습니다.</p>}
-          <div className="row">
-            <button className="primary" disabled={busy || Object.keys(form).length === 0} onClick={save}>저장</button>
-            <button disabled={busy || locked || !ev.after_attend_deadline} onClick={() => run(() => api.post(`${base}/snapshot`), "마감 기준 응답을 저장했습니다.").then(reload)}>마감 기준 응답 저장</button>
-          </div>
-        </div>
-        <Msg m={message} />
-      </div>
-      <div className="card">
-        <h2>환불 규칙 (변경 시점·항목별)</h2>
-        <p className="muted">감액 변경은 '이전 부담액 − 새 회비'에 환불률을 곱합니다. 맞는 규칙이 없으면 환불 0원(총무 확인). 증액 변경은 차액을 전액 청구합니다.</p>
-        <div className="table-wrap"><table>
-          <thead><tr><th>항목</th><th>이 시각 전 요청</th><th className="num">환불률</th><th>설명</th><th /></tr></thead>
-          <tbody>{rules?.map((r) => (
-            <tr key={r.id}><td>{r.change_type === "attend_to_absent" ? "참석→불참" : "버스→자차"}</td><td>{r.valid_until ? fmtTime(r.valid_until) : "기한 없음"}</td><td className="num">{r.refund_percent}%</td><td>{r.description}</td>
-              <td><button className="small danger" onClick={() => run(() => api.del(`${base}/refund-rules/${r.id}`), "삭제했습니다.").then(reloadRules)}>삭제</button></td></tr>
-          ))}</tbody>
-        </table></div>
-        <h3>규칙 추가</h3>
-        <div className="row">
-          <select value={rule.change_type} onChange={(e) => setRule({ ...rule, change_type: e.target.value })} aria-label="변경 항목"><option value="attend_to_absent">참석→불참</option><option value="bus_to_car">버스→자차</option></select>
-          <input type="datetime-local" value={rule.valid_until} onChange={(e) => setRule({ ...rule, valid_until: e.target.value })} aria-label="적용 기한" />
-          <input type="number" min={0} max={100} value={rule.refund_percent} onChange={(e) => setRule({ ...rule, refund_percent: e.target.value })} style={{ width: 70 }} aria-label="환불률" />%
-          <input value={rule.description} onChange={(e) => setRule({ ...rule, description: e.target.value })} placeholder="설명" aria-label="설명" />
-          <button disabled={busy} onClick={() => run(() => api.post(`${base}/refund-rules`, { ...rule, valid_until: rule.valid_until || null, refund_percent: Number(rule.refund_percent) }), "추가했습니다.").then(reloadRules)}>추가</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function ChangesTab({ base }: { base: string }) {
   const [status, setStatus] = useState("pending_approval");
   const { data, reload } = useLoad(() => api.get<Change[]>(`${base}/changes${status ? `?status=${status}` : ""}`), [base, status]);
   const { busy, message, run } = useAction();
   const [manual, setManual] = useState<Record<number, { amount: string; note: string }>>({});
   const decide = (c: Change, ok: boolean) => {
-    const m = manual[c.id];
+    const m = manual[c.id] ?? (c.suggested_refund != null ? { amount: String(c.suggested_refund), note: c.suggested_note ?? "" } : undefined);
     const body = ok && c.rule_missing ? { note: m?.note ?? "", refund_amount: m?.amount === undefined || m.amount === "" ? null : Number(m.amount) } : { note: "" };
-    return run(() => api.post(`${base}/changes/${c.id}/${ok ? "approve" : "reject"}`, body), ok ? "승인했습니다." : "반려했습니다.").then(reload);
+    return run(() => api.post<AgentReported>(`${base}/changes/${c.id}/${ok ? "approve" : "reject"}`, body), (r) => agentLine(r, ok ? "승인했습니다." : "반려했습니다.")).then(reload);
   };
   return (
     <div className="card">
@@ -222,13 +126,15 @@ function ChangesTab({ base }: { base: string }) {
         <h2>응답 변경</h2>
         <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="상태"><option value="pending_approval">승인 대기</option><option value="">전체</option><option value="applied">반영</option><option value="rejected">반려</option></select>
       </div>
-      <p className="muted">마감 후 변경은 여기서 승인해야 반영됩니다. 금액은 요청 시각의 환불 규칙으로 코드가 계산한 값입니다. 맞는 규칙이 없는 건(환불액 미정)은 규칙을 추가하거나 환불액과 사유를 직접 정해야 승인됩니다.</p>
+      <p className="muted">마감 후 변경은 여기서 승인해야 반영됩니다. 정산 Agent 가 슬랙 대화에서 찾은 변경도 '제안'으로만 들어오고(자동 확정 없음), 근거 메시지가 함께 보입니다. 금액은 요청 시각의 환불 규칙으로 코드가 계산한 값입니다. 맞는 규칙이 없는 건(환불액 미정)은 규칙을 추가하거나 환불액과 사유를 직접 정해야 승인됩니다.</p>
       <Msg m={message} />
       <div className="table-wrap"><table>
         <thead><tr><th>#</th><th>참가자</th><th>변경</th><th>요청</th><th>경로</th><th className="num">부담액</th><th className="num">환불/추가</th><th>규칙</th><th>상태</th><th /></tr></thead>
         <tbody>{data?.map((c) => (
           <tr key={c.id}>
-            <td>{c.id}</td><td>{c.participant_name}</td><td>{c.from_label} → {c.to_label}</td><td>{fmtTime(c.requested_at)}</td><td>{c.source}</td>
+            <td>{c.id}</td><td>{c.participant_name}</td>
+            <td>{c.from_label} → {c.to_label}{c.evidence?.map((m) => <div key={m.id} className="muted" style={{ maxWidth: 260 }}>슬랙 {m.sender} {fmtTime(m.sent_at)}: “{m.text}”{m.analysis?.confidence ? ` · 확신도 ${m.analysis.confidence}` : ""}</div>)}</td>
+            <td>{fmtTime(c.requested_at)}</td><td>{c.source === "slack" ? <span className="pill ai">정산 Agent 제안(슬랙)</span> : c.source}</td>
             <td className="num">{c.after_deadline ? `${won(c.liability_before)} → ${won(c.liability_after)}` : "마감 전"}</td>
             <td className="num">{c.rule_missing && !c.admin_refund_decided ? <span className="pill warn">환불액 미정</span> : c.refund_amount ? `-${won(c.refund_amount)}` : c.extra_charge ? `+${won(c.extra_charge)}` : "-"}</td>
             <td className="muted">{c.rule_text}</td><td><StatusPill status={c.status} /></td>
@@ -236,8 +142,9 @@ function ChangesTab({ base }: { base: string }) {
               <div style={{ display: "grid", gap: 4 }}>
                 {c.rule_missing && (
                   <div className="row">
-                    <input type="number" min={0} placeholder="환불액(원)" aria-label="환불액" style={{ width: 100 }} value={manual[c.id]?.amount ?? ""} onChange={(e) => setManual({ ...manual, [c.id]: { note: manual[c.id]?.note ?? "", amount: e.target.value } })} />
-                    <input placeholder="사유(필수)" aria-label="사유" value={manual[c.id]?.note ?? ""} onChange={(e) => setManual({ ...manual, [c.id]: { amount: manual[c.id]?.amount ?? "", note: e.target.value } })} />
+                    <input type="number" min={0} placeholder="환불액(원)" aria-label="환불액" style={{ width: 100 }} value={manual[c.id]?.amount ?? (c.suggested_refund != null ? String(c.suggested_refund) : "")} onChange={(e) => setManual({ ...manual, [c.id]: { note: manual[c.id]?.note ?? c.suggested_note ?? "", amount: e.target.value } })} />
+                    <input placeholder="사유(필수)" aria-label="사유" value={manual[c.id]?.note ?? c.suggested_note ?? ""} onChange={(e) => setManual({ ...manual, [c.id]: { amount: manual[c.id]?.amount ?? (c.suggested_refund != null ? String(c.suggested_refund) : ""), note: e.target.value } })} />
+                    {c.suggested_refund != null && <span className="pill warn" title={c.suggested_note}>슬랙 총무 결정 {won(c.suggested_refund)}</span>}
                   </div>
                 )}
                 <div className="row"><button className="small primary" disabled={busy} onClick={() => decide(c, true)}>승인</button><button className="small" disabled={busy} onClick={() => decide(c, false)}>반려</button></div>

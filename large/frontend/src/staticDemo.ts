@@ -10,6 +10,12 @@ interface Fixtures {
   chat: { questions: string[]; answers: Record<string, Recorded>; confirms: Record<string, { ask: Recorded; yes: Recorded; no: Recorded }> };
 }
 
+// 공용 초기설정 화면(워크샵)에서 고른 성격·전략: 저장할 서버가 없으므로 주소(#/admin?bot=oldie.escalate)로 받아 행사 정보에만 덧붙인다
+const BOT = (() => {
+  const [persona, strategy] = (new URLSearchParams(location.hash.split("?")[1] ?? "").get("bot") ?? "").split(".");
+  return persona ? { persona, strategy: strategy || null } : null;
+})();
+
 const READ_ONLY = "정적 데모라 저장되지 않아요. 실제로 바꾸려면 공용 서버(python -m hub)에서 열어 주세요.";
 const YES = /^(네|넵|예|응|그래|좋아|보내)/;
 const NO = /^(아니|아뇨|취소|안\s?보내|하지\s?마)/;
@@ -103,7 +109,10 @@ export async function staticRequest<T>(method: string, path: string, body?: unkn
   }
   if (method !== "GET") throw new ApiError(409, "STATIC_DEMO", READ_ONLY);
   if (p === `${fx.event_base}/participants`) return participants(fx, path) as T;
-  const key = fixtureKey(path);
+  // 보고서 비교 기준(since)은 녹화하지 않았다 → 바로 앞 버전과 비교한 녹화본을 보여 준다
+  const key = fixtureKey(path.replace(/([?&])since=\d+&?/, "$1").replace(/[?&]$/, ""));
   if (!(key in fx.get)) throw new ApiError(404, "NOT_RECORDED", "정적 데모에 녹화되지 않은 화면이에요. 공용 서버에서 열어 주세요.");
-  return structuredClone(fx.get[key]) as T;
+  const out = structuredClone(fx.get[key]);
+  if (BOT && key === "/api/large/admin/events") (out as { bot?: unknown }[]).forEach((e) => (e.bot = BOT));
+  return out as T;
 }

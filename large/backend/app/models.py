@@ -46,6 +46,9 @@ class Event(Base):
     # 총무봇 공용 서버에서 SMALL/LARGE 를 구분. 이 DB 는 LARGE 전용이며 만든 뒤에는 바꾸지 않는다.
     mode: Mapped[str] = mapped_column(String(10), default="large", server_default="large")
     snapshot_taken_at: Mapped[Optional[datetime]] = mapped_column(default=None)
+    # 총무봇 말투: 초기설정 화면(도총 성격 카드·독촉 전략)에서 고른 값. 소모임과 같은 키(active·shy·oldie·strict / consistent·escalate·chaos)
+    bot_persona: Mapped[str] = mapped_column(String(20), default="", server_default="")
+    bot_strategy: Mapped[str] = mapped_column(String(20), default="", server_default="")
     created_at: Mapped[datetime] = mapped_column(default=_now)
 
 
@@ -479,4 +482,61 @@ class AdminChatMessage(Base):
     sender: Mapped[str] = mapped_column(String(20))  # user | agent
     text: Mapped[str] = mapped_column(Text)
     meta: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+
+
+class EvidenceMessage(Base):
+    """근거 메시지(슬랙 대화). 시연용 슬랙 대화 CSV 한 행 = source 'demo_slack'.
+    정산 Agent 가 읽어 analysis 에 해석(무엇을 감지했고 무엇을 했는지)을 남기고, 관련 변경 기록이면 change_id 로 잇는다.
+    실제로 보낸 DM(EmailJob/DevMail)은 여기에 저장하지 않고 조회할 때 source 'dm_job' 으로 합친다."""
+
+    __tablename__ = "evidence_messages"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), index=True)
+    source: Mapped[str] = mapped_column(String(20), default="demo_slack")  # demo_slack(CSV 재생) | slack_event(Events API 실시간)
+    external_id: Mapped[str] = mapped_column(String(100), default="", server_default="")  # Slack event_id(재전송 중복 방지)
+    line: Mapped[int] = mapped_column(default=0)  # CSV 줄 번호
+    sent_at: Mapped[datetime]
+    sender: Mapped[str] = mapped_column(String(50))
+    recipient: Mapped[str] = mapped_column(String(50), default="")
+    sender_participant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("participants.id"))
+    team_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teams.id"), index=True)
+    participant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("participants.id"), index=True)  # 관련 ID(비어도 됨)
+    text: Mapped[str] = mapped_column(Text)
+    analysis: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # 정산 Agent 해석: kind·to·confidence·by·outcome…
+    change_id: Mapped[Optional[int]] = mapped_column(ForeignKey("change_logs.id"))
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+
+
+class RefundAccount(Base):
+    """환불 받을 계좌(팀 담당자). 회비는 팀 단위라 부서마다 하나만 '입력됨'(saved), 슬랙 답장에서 읽은 것은 '후보'(candidate).
+    화면·보고서·CSV·로그에는 뒤 4자리만 쓰고, 전체 번호는 총무의 [전체 보기]·송금 명세 CSV 에서만 꺼낸다. 정산이 끝나면 총무가 지운다."""
+
+    __tablename__ = "refund_accounts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), index=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), index=True)
+    bank: Mapped[str] = mapped_column(String(30))
+    account_no: Mapped[str] = mapped_column(String(40))
+    holder: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(20), default="saved")  # candidate(슬랙 후보, 총무 확인 전) | saved
+    source: Mapped[str] = mapped_column(String(20), default="manager")  # manager(담당자 화면) | link(개인 링크) | slack(답장)
+    submitted_by: Mapped[Optional[int]] = mapped_column(ForeignKey("participants.id"))
+    message_id: Mapped[Optional[int]] = mapped_column(Integer)  # 슬랙 후보의 근거 메시지(evidence_messages.id)
+    submitted_at: Mapped[datetime] = mapped_column(default=_now)
+    confirmed_by: Mapped[Optional[int]] = mapped_column(ForeignKey("admins.id"))
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(default=None)
+
+
+class RefundLink(Base):
+    """환불 안내 DM 에 넣는 '환불 받을 계좌 입력' 개인 링크(담당자 전용, 7일). 토큰 원문은 DM 에만, 여기에는 해시만."""
+
+    __tablename__ = "refund_links"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), index=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), index=True)
+    participant_id: Mapped[int] = mapped_column(ForeignKey("participants.id"))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime]
+    used_at: Mapped[Optional[datetime]] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=_now)
