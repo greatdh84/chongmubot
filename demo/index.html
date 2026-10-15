@@ -3086,7 +3086,9 @@ document.addEventListener('click', e => {
   if (a.startsWith('large:')){ const f = LARGE.act[a.slice(6)]; if (f && f(d, el) === false) return; render(); return; }
   switch (a){
     case 'goStart': S.screen = 'start'; closeDrawer(); break;
-    case 'goSetup': S.screen = 'setup'; closeDrawer(); window.scrollTo(0, 0); break;
+    // 시작하기·전체 설정은 항상 모임 종류 선택(소모임 설정)으로. 워크샵 카드로 대모임에 다녀오면 size 가 'large' 로 남아
+    // (진행 중인 소모임이 있으면 LARGE.go 가 되돌리지 않음) 시작하기가 대모임 진입 카드로 가던 문제 방지
+    case 'goSetup': S.screen = 'setup'; if (S.size === 'large') S.size = 'small'; closeDrawer(); window.scrollTo(0, 0); break;
     case 'pickSize': S.size = d.val; window.scrollTo(0, 0); break;
     case 'changeSize': if (S.size === 'large') S.size = 'small'; else S.screen = 'start'; window.scrollTo(0, 0); break; // 대모임 → 모임 종류, 소모임 → 시작화면
     case 'goDash':
